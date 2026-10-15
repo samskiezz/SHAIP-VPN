@@ -19,3 +19,21 @@ pub mod obf;
 pub mod routing;
 pub mod transport;
 pub mod wire;
+
+// Supporting library primitives for the §19 integration backlog. Self-contained
+// and unit-tested; wired into the daemons as those features land.
+pub mod delayed_ack;
+pub mod dns_cache;
+pub mod dns_neg;
+pub mod dns_qmin;
+pub mod dns_tcp;
+pub mod entropy;
+pub mod hex_util;
+pub mod identity_check;
+pub mod mix_cover;
+pub mod mix_delay;
+pub mod mix_reputation;
+pub mod perm_check;
+pub mod reconnect;
+pub mod secure_write;
+pub mod stream;
