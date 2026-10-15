@@ -1,0 +1,27 @@
+# PQ-ANON client config (§12.2). Copy to ~/.pqanon/client.toml.
+[identity]
+identity_id = "a1b2c3d4e5f60718"
+ml_dsa_pub  = "hex..."
+ml_dsa_priv = "file:///home/user/.pqanon/id_ml_dsa"
+ed_pub      = "hex..."
+ed_priv     = "file:///home/user/.pqanon/id_ed"
+
+[server]
+address           = "vpn.example.com:443"
+server_ml_dsa_pub = "hex..."
+server_ed_pub     = "hex..."
+
+[transport]
+mtu_probe   = true
+stream_mode = true
+congestion  = "bbr-custom"
+
+[route]
+default      = "fast"
+anon_domains = ["*.journalist.org", "*.leak.net"]
+fast_domains = ["*.cdn.example.com"]
+
+[mix]
+enabled     = true
+path_length = 5
+cover_rate  = 1.0

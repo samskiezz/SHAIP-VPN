@@ -1,0 +1,29 @@
+# Rust
+target/
+**/*.rs.bk
+
+# Go
+/control-plane/bin
+
+# Node / Next.js
+node_modules
+/web-ui/.next
+/web-ui/out
+npm-debug.log*
+
+# Keys / secrets (never commit)
+*.key
+*.pem
+/etc/pqanon
+
+# Env
+.env
+.env.local
+
+# OS / editor
+.DS_Store
+*.swp
+
+# misc build caches
+*.tsbuildinfo
+/control-plane/control-plane

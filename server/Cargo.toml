@@ -1,0 +1,24 @@
+[package]
+name = "pqanon-server"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "PQ-ANON server daemons: pqanond (tunnel) and pqanon-mixd (mix node)"
+
+[[bin]]
+name = "pqanond"
+path = "src/bin/pqanond.rs"
+
+[[bin]]
+name = "pqanon-mixd"
+path = "src/bin/pqanon-mixd.rs"
+
+[dependencies]
+pqanon             = { path = "../client", package = "pqanon-client" }
+tokio              = { version = "1", features = ["full"] }
+x25519-dalek       = { version = "2", features = ["static_secrets"] }
+rand               = "0.8"
+anyhow             = "1"
+clap               = { version = "4", features = ["derive"] }
+tracing            = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

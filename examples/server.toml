@@ -1,0 +1,31 @@
+# PQ-ANON server config (§11.2). Copy to /etc/pqanon/server.toml.
+[node]
+name           = "tokyo-01"
+listen_tunnel  = "0.0.0.0:443"
+listen_mix     = "0.0.0.0:8443"
+tun_device     = "pqanon0"
+tun_address    = "10.77.0.1/24"
+
+[crypto]
+server_ml_dsa_pub  = "hex..."
+server_ml_dsa_priv = "file:///etc/pqanon/ml_dsa.key"
+server_ed_pub      = "hex..."
+server_ed_priv     = "file:///etc/pqanon/ed.key"
+
+[obfuscation]
+morph_rotation_secs = 60
+cover_rate_idle     = 2.0      # packets per second when idle
+cover_rate_active   = 0.1      # fraction of data rate when busy
+jitter_enabled      = true
+
+[auth]
+authorized_identities = [
+  "a1b2c3d4e5f60718",
+  "9f8e7d6c5b4a3210",
+]
+crl_url = "http://localhost:8080/api/crl"
+
+[mix]
+delay_mean_ms = 50
+bloom_bits    = 1048576
+bloom_hashes  = 3
