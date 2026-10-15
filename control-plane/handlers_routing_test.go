@@ -144,6 +144,46 @@ func TestRoutingRuleUserIsolation(t *testing.T) {
 	}
 }
 
+func TestSettingsPersist(t *testing.T) {
+	srv, h, store := newTestServer(t)
+	_, tok := authedUser(t, srv, store)
+
+	// Unset → defaults.
+	rec := do(t, h, "GET", "/api/settings", tok, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("get defaults: %d", rec.Code)
+	}
+	var def map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &def)
+	if def["default_route"] != "fast" {
+		t.Fatalf("default route = %v, want fast", def["default_route"])
+	}
+
+	// Save.
+	rec = do(t, h, "PUT", "/api/settings", tok,
+		map[string]any{"default_route": "anon", "mix_hops": 7})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("put: %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	// Read back the saved value (persistence, not a stub).
+	rec = do(t, h, "GET", "/api/settings", tok, nil)
+	var saved map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &saved)
+	if saved["default_route"] != "anon" {
+		t.Fatalf("saved default_route = %v, want anon", saved["default_route"])
+	}
+	if saved["mix_hops"].(float64) != 7 {
+		t.Fatalf("saved mix_hops = %v, want 7", saved["mix_hops"])
+	}
+
+	// Invalid route is rejected.
+	if rec := do(t, h, "PUT", "/api/settings", tok,
+		map[string]any{"default_route": "bogus"}); rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for bad default_route, got %d", rec.Code)
+	}
+}
+
 func TestMeAndStats(t *testing.T) {
 	srv, h, store := newTestServer(t)
 	uid, tok := authedUser(t, srv, store)

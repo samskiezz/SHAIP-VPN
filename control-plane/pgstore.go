@@ -114,6 +114,30 @@ func (s *PgStore) DeleteRoutingRule(ctx context.Context, id, userID string) erro
 	return nil
 }
 
+func (s *PgStore) GetSettings(ctx context.Context, userID string) ([]byte, error) {
+	var raw []byte
+	err := s.pool.QueryRow(ctx,
+		`SELECT settings FROM user_settings WHERE user_id = $1`, userID).Scan(&raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
+func (s *PgStore) SetSettings(ctx context.Context, userID string, raw []byte) error {
+	// Pass as text so Postgres parses it into the JSONB column.
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO user_settings (user_id, settings, updated_at)
+		 VALUES ($1, $2, NOW())
+		 ON CONFLICT (user_id) DO UPDATE
+		 SET settings = EXCLUDED.settings, updated_at = NOW()`,
+		userID, string(raw))
+	return err
+}
+
 func (s *PgStore) ListNodes(ctx context.Context) ([]Node, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, name, address, public_key, status, stake_sats, delay_mean_ms, created_at

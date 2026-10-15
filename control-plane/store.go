@@ -88,6 +88,10 @@ type Store interface {
 	CreateRoutingRule(ctx context.Context, r *RoutingRule) error
 	DeleteRoutingRule(ctx context.Context, id, userID string) error
 
+	// GetSettings returns a user's stored settings JSON, or ErrNotFound.
+	GetSettings(ctx context.Context, userID string) ([]byte, error)
+	SetSettings(ctx context.Context, userID string, raw []byte) error
+
 	ListRevoked(ctx context.Context) ([]RevokedIdentity, error)
 
 	Close()
@@ -101,18 +105,20 @@ type MemStore struct {
 	mu      sync.RWMutex
 	users   map[string]*User // keyed by email
 	nodes   map[string]*Node // keyed by id
-	conns   map[string]*Connection
-	rules   map[string]*RoutingRule // keyed by rule id
-	revoked map[string]*RevokedIdentity
+	conns    map[string]*Connection
+	rules    map[string]*RoutingRule // keyed by rule id
+	settings map[string][]byte       // keyed by user id
+	revoked  map[string]*RevokedIdentity
 }
 
 func NewMemStore() *MemStore {
 	return &MemStore{
-		users:   make(map[string]*User),
-		nodes:   make(map[string]*Node),
-		conns:   make(map[string]*Connection),
-		rules:   make(map[string]*RoutingRule),
-		revoked: make(map[string]*RevokedIdentity),
+		users:    make(map[string]*User),
+		nodes:    make(map[string]*Node),
+		conns:    make(map[string]*Connection),
+		rules:    make(map[string]*RoutingRule),
+		settings: make(map[string][]byte),
+		revoked:  make(map[string]*RevokedIdentity),
 	}
 }
 
@@ -200,6 +206,27 @@ func (m *MemStore) DeleteRoutingRule(_ context.Context, id, userID string) error
 		return ErrNotFound
 	}
 	delete(m.rules, id)
+	return nil
+}
+
+func (m *MemStore) GetSettings(_ context.Context, userID string) ([]byte, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	raw, ok := m.settings[userID]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	cp := make([]byte, len(raw))
+	copy(cp, raw)
+	return cp, nil
+}
+
+func (m *MemStore) SetSettings(_ context.Context, userID string, raw []byte) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp := make([]byte, len(raw))
+	copy(cp, raw)
+	m.settings[userID] = cp
 	return nil
 }
 

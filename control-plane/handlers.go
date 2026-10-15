@@ -220,34 +220,109 @@ func (s *Server) handleDisconnect(w http.ResponseWriter, r *http.Request) {
 // --- dashboard / mixnet / settings ---
 
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
-	active, err := s.store.CountActiveConnections(r.Context())
+	ctx := r.Context()
+	conns, err := s.store.ListActiveConnections(ctx)
 	if err != nil {
 		errJSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	var totalBytes int64
+	for _, c := range conns {
+		totalBytes += c.BytesIn + c.BytesOut
+	}
+	online, meanDelay := s.mixnetHealth(ctx)
+	status := "degraded"
+	if online > 0 {
+		status = "ok"
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"active_connections": active,
-		"bandwidth_mb":       0,
-		"latency_ms":         190,
-		"mixnet_status":      "ok",
+		"active_connections": len(conns),
+		"bandwidth_mb":       float64(totalBytes) / 1e6,
+		"latency_ms":         meanDelay,
+		"mixnet_status":      status,
+		"nodes_online":       online,
 	})
 }
 
 func (s *Server) handleMixnetStatus(w http.ResponseWriter, r *http.Request) {
-	active, _ := s.store.CountActiveConnections(r.Context())
+	ctx := r.Context()
+	active, _ := s.store.CountActiveConnections(ctx)
+	online, meanDelay := s.mixnetHealth(ctx)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"active_paths":    active,
-		"cover_rate_pps":  1.0,
-		"mean_latency_ms": 190,
+		"online_nodes":    online,
+		"cover_rate_pps":  1.0, // configured target cover rate (§10.4)
+		"mean_latency_ms": meanDelay,
 	})
 }
 
-func (s *Server) handleGetSettings(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"default_route": "fast"})
+// mixnetHealth returns the number of online nodes and a representative anon-path
+// latency (mean per-hop delay across a 5-hop path), computed from real node
+// data. Returns (0, 0) when no nodes are online.
+func (s *Server) mixnetHealth(ctx context.Context) (online int, meanLatencyMs int) {
+	nodes, err := s.store.ListNodes(ctx)
+	if err != nil {
+		return 0, 0
+	}
+	delaySum := 0
+	for _, n := range nodes {
+		if n.Status == "online" {
+			online++
+			delaySum += n.DelayMeanMs
+		}
+	}
+	if online == 0 {
+		return 0, 0
+	}
+	return online, (delaySum / online) * 5 // 5-hop anon path
 }
 
-func (s *Server) handleUpdateSettings(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+// defaultSettings is returned until a user saves their own.
+func defaultSettings() map[string]any {
+	return map[string]any{
+		"default_route":   "fast",
+		"kill_switch":     true,
+		"auto_connect":    false,
+		"mix_hops":        5,
+		"cover_rate_idle": 2.0,
+	}
+}
+
+func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
+	raw, err := s.store.GetSettings(r.Context(), userID(r))
+	if errors.Is(err, ErrNotFound) {
+		writeJSON(w, http.StatusOK, defaultSettings())
+		return
+	}
+	if err != nil {
+		errJSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(raw)
+}
+
+func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
+	var body map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		errJSON(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	if dr, ok := body["default_route"].(string); ok && dr != "fast" && dr != "anon" {
+		errJSON(w, http.StatusBadRequest, "default_route must be 'fast' or 'anon'")
+		return
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		errJSON(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	if err := s.store.SetSettings(r.Context(), userID(r), raw); err != nil {
+		errJSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
 }
 
 // --- CRL (§7) ---

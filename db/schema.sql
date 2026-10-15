@@ -44,6 +44,12 @@ CREATE TABLE IF NOT EXISTS routing_rules (
     priority       INT DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS user_settings (
+    user_id    UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    settings   JSONB NOT NULL DEFAULT '{}'::jsonb,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS revoked_identities (
     identity_id    TEXT PRIMARY KEY,
     reason         TEXT,

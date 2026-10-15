@@ -9,6 +9,8 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/base64"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -24,7 +26,7 @@ func main() {
 	store, label := openStore()
 	defer store.Close()
 
-	tokens, err := NewTokenSigner(24 * time.Hour)
+	tokens, err := openTokenSigner(24 * time.Hour)
 	if err != nil {
 		log.Fatalf("token signer: %v", err)
 	}
@@ -83,6 +85,22 @@ func routes(srv *Server, label string) http.Handler {
 		})
 	})
 	return r
+}
+
+// openTokenSigner loads a stable token signing key from TOKEN_SIGNING_KEY
+// (base64 of a 32-byte Ed25519 seed) so tokens survive restarts and are shared
+// across replicas. Without it, an ephemeral key is generated and a warning is
+// logged — fine for dev, not for production.
+func openTokenSigner(ttl time.Duration) (*TokenSigner, error) {
+	if v := os.Getenv("TOKEN_SIGNING_KEY"); v != "" {
+		seed, err := base64.StdEncoding.DecodeString(v)
+		if err != nil {
+			return nil, fmt.Errorf("TOKEN_SIGNING_KEY must be base64: %w", err)
+		}
+		return NewTokenSignerWithSeed(ttl, seed)
+	}
+	log.Printf("WARNING: TOKEN_SIGNING_KEY not set — using an ephemeral key; tokens will not survive a restart. Generate one with: openssl rand -base64 32")
+	return NewTokenSigner(ttl)
 }
 
 func openStore() (Store, string) {

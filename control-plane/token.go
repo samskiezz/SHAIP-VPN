@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -27,13 +28,28 @@ type TokenSigner struct {
 	ttl  time.Duration
 }
 
-// NewTokenSigner generates a fresh signing key (rotated on each boot unless a
-// key is provided out of band).
+// NewTokenSigner generates a fresh signing key. The key is ephemeral: every
+// process restart rotates it, which invalidates all outstanding tokens. Use
+// this only for tests and ephemeral dev; production must pin a key via
+// NewTokenSignerWithSeed so sessions survive restarts and horizontal scaling.
 func NewTokenSigner(ttl time.Duration) (*TokenSigner, error) {
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return nil, err
 	}
+	return &TokenSigner{priv: priv, pub: pub, ttl: ttl}, nil
+}
+
+// NewTokenSignerWithSeed derives a stable signing key from a 32-byte Ed25519
+// seed, so the same seed always yields the same key. Tokens issued before a
+// restart keep verifying, and multiple replicas sharing the seed accept each
+// other's tokens.
+func NewTokenSignerWithSeed(ttl time.Duration, seed []byte) (*TokenSigner, error) {
+	if len(seed) != ed25519.SeedSize {
+		return nil, fmt.Errorf("token signing seed must be %d bytes, got %d", ed25519.SeedSize, len(seed))
+	}
+	priv := ed25519.NewKeyFromSeed(seed)
+	pub := priv.Public().(ed25519.PublicKey)
 	return &TokenSigner{priv: priv, pub: pub, ttl: ttl}, nil
 }
 
