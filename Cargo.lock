@@ -669,6 +669,7 @@ dependencies = [
  "hkdf",
  "hmac",
  "ipnet",
+ "libc",
  "ml-dsa",
  "ml-kem",
  "rand",

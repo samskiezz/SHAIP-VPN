@@ -10,9 +10,12 @@
 //!
 //! All cryptography is built on standard-library / RustCrypto primitives
 //! (ML-KEM-768, ML-DSA-65, X25519, Ed25519, ChaCha20-Poly1305, HKDF-SHA256,
-//! HMAC-SHA256). No hand-rolled primitives.
+//! HMAC-SHA256). No hand-rolled primitives. The cryptographic core is safe
+//! Rust; the only FFI is the Linux TUN binding in [`tun`], which is isolated
+//! and necessarily uses libc.
 
 pub mod bloom;
+pub mod dataplane;
 pub mod dnssec;
 pub mod handshake;
 pub mod i18n;
@@ -20,10 +23,15 @@ pub mod ipparse;
 pub mod kdf;
 pub mod mix;
 pub mod obf;
+pub mod router;
 pub mod routing;
 pub mod tls_decoy;
 pub mod transport;
 pub mod wire;
+
+/// Linux TUN device binding for the data plane (§19). Linux only.
+#[cfg(target_os = "linux")]
+pub mod tun;
 
 // Supporting library primitives for the §19 integration backlog. Self-contained
 // and unit-tested; wired into the daemons as those features land.
