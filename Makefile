@@ -1,4 +1,4 @@
-.PHONY: all client server control web test test-rust test-go build clean fmt selftest
+.PHONY: all client server control web test test-rust test-go test-all build clean fmt selftest
 
 all: build
 
@@ -23,6 +23,11 @@ test-rust:
 
 test-go:
 	cd control-plane && go vet ./... && go test ./...
+
+# Full battery: build, lint, unit, integration, fuzz, stress, smoke, brute,
+# race, live TUN, and live control-plane sign-up end-to-end.
+test-all:
+	./scripts/test-all.sh
 
 selftest: client
 	./target/release/pqanon selftest

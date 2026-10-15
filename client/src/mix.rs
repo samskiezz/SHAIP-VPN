@@ -270,4 +270,24 @@ mod tests {
         let hops: Vec<MixHop> = (0..3).map(|_| hop().1).collect();
         assert!(MixPath::new(hops).is_err());
     }
+
+    #[test]
+    fn peel_never_panics_on_garbage() {
+        use rand::RngCore;
+        let sk = StaticSecret::random_from_rng(OsRng);
+        let mut cell = [0u8; CELL_SIZE];
+        // Random cells must never crash the peel — only error.
+        for _ in 0..20_000 {
+            OsRng.fill_bytes(&mut cell);
+            let _ = peel(&sk, &cell);
+        }
+        // Framed-but-garbage: a valid length prefix over random body, including
+        // the boundary lengths that exercise the unframe bounds checks.
+        for len in [0usize, 1, 2, 16, 44, 100, CELL_SIZE - 2, CELL_SIZE - 1] {
+            cell = [0u8; CELL_SIZE];
+            cell[0..2].copy_from_slice(&(len as u16).to_be_bytes());
+            OsRng.fill_bytes(&mut cell[2..]);
+            let _ = peel(&sk, &cell);
+        }
+    }
 }
