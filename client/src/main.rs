@@ -1,12 +1,12 @@
 //! `pqanon` — PQ-ANON client daemon / CLI.
 //!
 //! Subcommands:
-//! - `keygen`              — generate a long-term identity and print its id + keys.
-//! - `selftest`           — run a full in-process handshake + a DATA packet
-//!                           through obfuscation, proving the PQANON/1 stack.
-//! - `run --config FILE`  — load a client config and start the tunnel (the TUN
-//!                           read/write loop is the integration point described
-//!                           in §19; this wires up transport + obfuscation).
+//! - `keygen` — generate a long-term identity and print its id + keys.
+//! - `selftest` — run a full in-process handshake + a DATA packet through
+//!   obfuscation, proving the PQANON/1 stack.
+//! - `run --config FILE` — load a client config and start the tunnel (the TUN
+//!   read/write loop is the integration point described in §19; this wires up
+//!   transport + obfuscation).
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};

@@ -40,10 +40,10 @@ pub struct MixHop {
 
 /// The outcome of peeling one layer at a hop.
 pub enum Peeled {
-    /// Forward `cell` to `next`.
+    /// Forward `cell` to `next`. Boxed to keep the enum small (cells are 2 KiB).
     Relay {
         next: SocketAddr,
-        cell: [u8; CELL_SIZE],
+        cell: Box<[u8; CELL_SIZE]>,
     },
     /// This is the exit: deliver `payload`.
     Deliver { payload: Vec<u8> },
@@ -116,7 +116,7 @@ pub fn peel(hop_sk: &StaticSecret, cell: &[u8; CELL_SIZE]) -> anyhow::Result<Pee
                 anyhow::bail!("inner layer larger than a cell");
             }
             // Re-frame the next hop's raw layer into a fresh 2048-byte cell.
-            let cell = frame(inner_layer);
+            let cell = Box::new(frame(inner_layer));
             Ok(Peeled::Relay { next, cell })
         }
         other => anyhow::bail!("unknown layer flag {other}"),
@@ -245,7 +245,7 @@ mod tests {
                     // The relayed address is the *following* hop.
                     assert_eq!(next, hops[i + 1].1.addr);
                     let _ = hopinfo;
-                    cell = next_cell;
+                    cell = *next_cell;
                 }
                 Peeled::Deliver { payload: got } => {
                     assert_eq!(i, 4, "only the exit delivers");

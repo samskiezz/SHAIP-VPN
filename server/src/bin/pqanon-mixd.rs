@@ -55,7 +55,7 @@ async fn main() -> Result<()> {
         match peel(&secret, &cell) {
             Ok(Peeled::Relay { next, cell }) => {
                 tracing::info!(%src, %next, "relaying cell");
-                if let Err(e) = socket.send_to(&cell, next).await {
+                if let Err(e) = socket.send_to(&cell[..], next).await {
                     tracing::warn!(%next, error = %e, "forward failed");
                 }
             }
