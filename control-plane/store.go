@@ -21,7 +21,30 @@ type User struct {
 	IdentityID   string    `json:"identity_id"`
 	MlDsaPub     []byte    `json:"-"`
 	EdPub        []byte    `json:"-"`
+	Role         string    `json:"role"`
 	CreatedAt    time.Time `json:"created_at"`
+}
+
+// APIKey is a personal access token for the REST API. Only the hash is stored;
+// the full secret is shown once at creation.
+type APIKey struct {
+	ID         string     `json:"id"`
+	UserID     string     `json:"-"`
+	Name       string     `json:"name"`
+	Prefix     string     `json:"prefix"`
+	KeyHash    string     `json:"-"`
+	CreatedAt  time.Time  `json:"created_at"`
+	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
+}
+
+// AuditEntry is one row of the security audit log.
+type AuditEntry struct {
+	ID     int64     `json:"id"`
+	UserID string    `json:"user_id,omitempty"`
+	Action string    `json:"action"`
+	Detail string    `json:"detail,omitempty"`
+	IP     string    `json:"ip,omitempty"`
+	At     time.Time `json:"at"`
 }
 
 // Node is a tunnel/mix server participating in the network.
@@ -77,12 +100,21 @@ type Store interface {
 	CountUsers(ctx context.Context) (int, error)
 
 	ListNodes(ctx context.Context) ([]Node, error)
+	GetNode(ctx context.Context, id string) (*Node, error)
 	CreateNode(ctx context.Context, n *Node) error
 	DeleteNode(ctx context.Context, id string) error
 
 	ListActiveConnections(ctx context.Context) ([]Connection, error)
+	GetConnection(ctx context.Context, id string) (*Connection, error)
 	CountActiveConnections(ctx context.Context) (int, error)
 	EndConnection(ctx context.Context, id string) error
+
+	CreateAPIKey(ctx context.Context, k *APIKey) error
+	ListAPIKeys(ctx context.Context, userID string) ([]APIKey, error)
+	DeleteAPIKey(ctx context.Context, id, userID string) error
+
+	AppendAudit(ctx context.Context, e *AuditEntry) error
+	ListAudit(ctx context.Context, userID string, limit int) ([]AuditEntry, error)
 
 	ListRoutingRules(ctx context.Context, userID string) ([]RoutingRule, error)
 	CreateRoutingRule(ctx context.Context, r *RoutingRule) error
@@ -109,6 +141,9 @@ type MemStore struct {
 	rules    map[string]*RoutingRule // keyed by rule id
 	settings map[string][]byte       // keyed by user id
 	revoked  map[string]*RevokedIdentity
+	apiKeys  map[string]*APIKey // keyed by key id
+	audit    []AuditEntry
+	auditSeq int64
 }
 
 func NewMemStore() *MemStore {
@@ -119,6 +154,7 @@ func NewMemStore() *MemStore {
 		rules:    make(map[string]*RoutingRule),
 		settings: make(map[string][]byte),
 		revoked:  make(map[string]*RevokedIdentity),
+		apiKeys:  make(map[string]*APIKey),
 	}
 }
 
@@ -132,6 +168,9 @@ func (m *MemStore) CreateUser(_ context.Context, u *User) error {
 	}
 	if u.ID == "" {
 		u.ID = uuid.NewString()
+	}
+	if u.Role == "" {
+		u.Role = "user"
 	}
 	u.CreatedAt = time.Now().UTC()
 	cp := *u
@@ -299,6 +338,92 @@ func (m *MemStore) EndConnection(_ context.Context, id string) error {
 	now := time.Now().UTC()
 	c.EndedAt = &now
 	return nil
+}
+
+func (m *MemStore) GetNode(_ context.Context, id string) (*Node, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	n, ok := m.nodes[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	cp := *n
+	return &cp, nil
+}
+
+func (m *MemStore) GetConnection(_ context.Context, id string) (*Connection, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	c, ok := m.conns[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	cp := *c
+	return &cp, nil
+}
+
+func (m *MemStore) CreateAPIKey(_ context.Context, k *APIKey) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if k.ID == "" {
+		k.ID = uuid.NewString()
+	}
+	k.CreatedAt = time.Now().UTC()
+	cp := *k
+	m.apiKeys[k.ID] = &cp
+	return nil
+}
+
+func (m *MemStore) ListAPIKeys(_ context.Context, userID string) ([]APIKey, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]APIKey, 0)
+	for _, k := range m.apiKeys {
+		if k.UserID == userID {
+			out = append(out, *k)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
+	return out, nil
+}
+
+func (m *MemStore) DeleteAPIKey(_ context.Context, id, userID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	k, ok := m.apiKeys[id]
+	if !ok || k.UserID != userID {
+		return ErrNotFound
+	}
+	delete(m.apiKeys, id)
+	return nil
+}
+
+func (m *MemStore) AppendAudit(_ context.Context, e *AuditEntry) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.auditSeq++
+	e.ID = m.auditSeq
+	if e.At.IsZero() {
+		e.At = time.Now().UTC()
+	}
+	m.audit = append(m.audit, *e)
+	return nil
+}
+
+func (m *MemStore) ListAudit(_ context.Context, userID string, limit int) ([]AuditEntry, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if limit <= 0 || limit > 1000 {
+		limit = 100
+	}
+	out := make([]AuditEntry, 0, limit)
+	// Newest first.
+	for i := len(m.audit) - 1; i >= 0 && len(out) < limit; i-- {
+		if userID == "" || m.audit[i].UserID == userID {
+			out = append(out, m.audit[i])
+		}
+	}
+	return out, nil
 }
 
 func (m *MemStore) ListRevoked(_ context.Context) ([]RevokedIdentity, error) {

@@ -7,6 +7,8 @@
 //! - `run --config FILE` — load a client config and start the tunnel (the TUN
 //!   read/write loop is the integration point described in §19; this wires up
 //!   transport + obfuscation).
+//! - `resolve NAME` — resolve a name through the DNSSEC-validating resolver and
+//!   print the security verdict; a bogus (signed-but-invalid) answer is withheld.
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -42,6 +44,26 @@ enum Cmd {
         #[arg(short, long, default_value = "fast")]
         route: String,
     },
+    /// Resolve a name through the DNSSEC-validating resolver and print the
+    /// security verdict (Secure / Insecure / Bogus). A bogus answer is withheld.
+    Resolve {
+        /// The hostname to resolve.
+        name: String,
+        /// Upstream DNS server (host:port).
+        #[arg(short, long, default_value = "1.1.1.1:53")]
+        server: String,
+        /// Record type: a or aaaa.
+        #[arg(short = 't', long, default_value = "a")]
+        rtype: String,
+        /// Pin a zone DNSKEY (hex Ed25519 public key, DNSSEC alg 15) as the
+        /// validation anchor. Without one, signed answers can't be proven and
+        /// are reported Insecure (or refused with --require-signed).
+        #[arg(long)]
+        trust_key: Option<String>,
+        /// Refuse an unsigned answer instead of returning it Insecure.
+        #[arg(long)]
+        require_signed: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -62,7 +84,65 @@ fn main() -> Result<()> {
         Cmd::Selftest => selftest(),
         Cmd::TunTest => tun_test(),
         Cmd::Run { config, route } => run(&config, &route),
+        Cmd::Resolve {
+            name,
+            server,
+            rtype,
+            trust_key,
+            require_signed,
+        } => resolve_cmd(&name, &server, &rtype, trust_key.as_deref(), require_signed),
     }
+}
+
+/// Resolve `name` through the DNSSEC-validating resolver over UDP.
+fn resolve_cmd(
+    name: &str,
+    server: &str,
+    rtype: &str,
+    trust_key: Option<&str>,
+    require_signed: bool,
+) -> Result<()> {
+    use pqanon::dns_resolver::{UdpDnsTransport, ValidatingResolver, TYPE_A, TYPE_AAAA};
+    use pqanon::dnssec::{Dnskey, DNSKEY_FLAG_ZONE};
+
+    let rr_type = match rtype.to_ascii_lowercase().as_str() {
+        "a" => TYPE_A,
+        "aaaa" => TYPE_AAAA,
+        other => anyhow::bail!("unsupported record type {other:?} (use a or aaaa)"),
+    };
+    let server_sa: std::net::SocketAddr = server
+        .parse()
+        .map_err(|e| anyhow::anyhow!("invalid --server {server:?}: {e}"))?;
+
+    // Pin a validation anchor if supplied.
+    let mut keys = Vec::new();
+    if let Some(hexkey) = trust_key {
+        let raw = hex::decode(hexkey.trim())
+            .map_err(|e| anyhow::anyhow!("--trust-key must be hex: {e}"))?;
+        keys.push(Dnskey {
+            flags: DNSKEY_FLAG_ZONE,
+            algorithm: 15,
+            public_key: raw,
+        });
+    }
+
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(async move {
+        let mut resolver = ValidatingResolver::new(UdpDnsTransport::new(server_sa), keys);
+        resolver.require_signed = require_signed;
+        let ans = resolver.resolve(name, rr_type).await?;
+        println!("name:     {name}");
+        println!("security: {:?}", ans.security);
+        if ans.addrs.is_empty() {
+            println!("addresses: (none — withheld if Bogus)");
+        } else {
+            for a in &ans.addrs {
+                println!("address:  {a}");
+            }
+        }
+        Ok::<_, anyhow::Error>(())
+    })?;
+    Ok(())
 }
 
 /// Live proof of the TUN data plane: open a real kernel TUN device, configure

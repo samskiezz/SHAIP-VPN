@@ -61,6 +61,19 @@ cp_e2e() {
   chk "$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "$B/api/routing/$RID" -H "Authorization: Bearer $TOK")" 200 "routing delete"
   curl -s -X PUT "$B/api/settings" -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' -d '{"default_route":"anon"}' >/dev/null
   chk "$(curl -s -H "Authorization: Bearer $TOK" "$B/api/settings" | python3 -c "import sys,json;print(json.load(sys.stdin)['default_route'])" 2>/dev/null)" "anon" "settings persist"
+
+  # Public status needs no auth.
+  chk "$(curl -s "$B/api/public/status" | python3 -c "import sys,json;print(json.load(sys.stdin)['protocol'])" 2>/dev/null)" "PQANON/1" "public status (unauth)"
+  # API key lifecycle: create (secret shown once) → list (hidden) → delete.
+  local AKEY AKID
+  AKEY=$(curl -s -X POST "$B/api/apikeys" -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' -d '{"name":"e2e"}')
+  AKID=$(echo "$AKEY" | python3 -c "import sys,json;print(json.load(sys.stdin)['id'])" 2>/dev/null)
+  case "$(echo "$AKEY" | python3 -c "import sys,json;print(json.load(sys.stdin)['key'][:4])" 2>/dev/null)" in
+    pqa_) ok=$((ok+1));; *) echo "  ✗ apikey secret not returned"; bad=$((bad+1));; esac
+  chk "$(curl -s -H "Authorization: Bearer $TOK" "$B/api/apikeys" | python3 -c "import sys,json;d=json.load(sys.stdin);print('leak' if any('key' in k for k in d) else 'ok')" 2>/dev/null)" "ok" "apikey list hides secret"
+  chk "$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "$B/api/apikeys/$AKID" -H "Authorization: Bearer $TOK")" 200 "apikey delete"
+  # Admin-only endpoint is forbidden for a normal user.
+  chk "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOK" "$B/api/admin/stats")" 403 "admin stats gated"
   kill $PID 2>/dev/null; wait $PID 2>/dev/null
 
   # Restart with the same key: the old token must still verify.

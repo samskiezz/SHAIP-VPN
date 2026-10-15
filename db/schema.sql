@@ -1,4 +1,9 @@
 -- PQANON-CP/1 schema (§15). Target: PostgreSQL 16.
+--
+-- docker-compose mounts this into the database's init directory. The control
+-- plane also embeds a byte-for-byte copy (control-plane/schema.sql) and applies
+-- it idempotently at startup, so the schema exists regardless of how Postgres is
+-- provisioned. schema_embed_test.go fails if the two diverge.
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
@@ -9,6 +14,7 @@ CREATE TABLE IF NOT EXISTS users (
     identity_id    TEXT UNIQUE,
     ml_dsa_pub     BYTEA,
     ed_pub         BYTEA,
+    role           TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user','admin','support')),
     created_at     TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -64,6 +70,27 @@ CREATE TABLE IF NOT EXISTS cover_traffic_log (
     recorded       TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS api_keys (
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id        UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name           TEXT NOT NULL,
+    key_prefix     TEXT NOT NULL,                -- first 8 chars, shown in the UI
+    key_hash       TEXT NOT NULL,                -- SHA-256 of the full key
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_used_at   TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS audit_log (
+    id             BIGSERIAL PRIMARY KEY,
+    user_id        UUID REFERENCES users(id) ON DELETE SET NULL,
+    action         TEXT NOT NULL,
+    detail         TEXT,
+    ip             TEXT,
+    at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE INDEX IF NOT EXISTS idx_connections_active ON connections(ended_at) WHERE ended_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_conn_user          ON connections(user_id);
 CREATE INDEX IF NOT EXISTS idx_nodes_status       ON nodes(status);
+CREATE INDEX IF NOT EXISTS idx_apikeys_user       ON api_keys(user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_user         ON audit_log(user_id, at DESC);

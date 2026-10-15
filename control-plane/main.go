@@ -64,24 +64,32 @@ func routes(srv *Server, label string) http.Handler {
 	r.Route("/api", func(r chi.Router) {
 		r.Post("/auth/register", srv.handleRegister)
 		r.Post("/auth/login", srv.handleLogin)
-		r.Get("/crl", srv.handleCRL) // tunnel servers fetch this unauthenticated
+		r.Get("/crl", srv.handleCRL)                   // tunnel servers fetch this unauthenticated
+		r.Get("/public/status", srv.handlePublicStatus) // status pages / uptime monitors
 
 		r.Group(func(r chi.Router) {
 			r.Use(srv.authMiddleware)
 			r.Get("/nodes", srv.handleListNodes)
 			r.Post("/nodes", srv.handleCreateNode)
+			r.Get("/nodes/{id}", srv.handleGetNode)
 			r.Delete("/nodes/{id}", srv.handleDeleteNode)
 			r.Get("/connections", srv.handleListConnections)
+			r.Get("/connections/{id}", srv.handleGetConnection)
 			r.Delete("/connections/{id}", srv.handleDisconnect)
 			r.Get("/mixnet", srv.handleMixnetStatus)
 			r.Get("/dashboard", srv.handleDashboard)
 			r.Get("/stats", srv.handleStats)
+			r.Get("/admin/stats", srv.handleAdminStats)
 			r.Get("/me", srv.handleMe)
 			r.Get("/routing", srv.handleListRouting)
 			r.Post("/routing", srv.handleCreateRouting)
 			r.Delete("/routing/{id}", srv.handleDeleteRouting)
 			r.Get("/settings", srv.handleGetSettings)
 			r.Put("/settings", srv.handleUpdateSettings)
+			r.Get("/apikeys", srv.handleListAPIKeys)
+			r.Post("/apikeys", srv.handleCreateAPIKey)
+			r.Delete("/apikeys/{id}", srv.handleDeleteAPIKey)
+			r.Get("/audit", srv.handleListAudit)
 		})
 	})
 	return r
