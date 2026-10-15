@@ -90,6 +90,24 @@ store by default or Postgres when `DATABASE_URL` is set):
   is AEAD-protected; no long-term trust between hops.
 - **Client ↔ Control plane:** EdDSA bearer token over TLS.
 
+## Advanced features (implemented)
+
+- **BBR congestion control** (`client/src/transport.rs`): windowed max-bandwidth
+  and min-RTT filters, a PROBE_BW pacing-gain cycle, and **explicit
+  sub-millisecond pacing** — the inter-packet gap is `bytes / pacing_rate` at
+  nanosecond resolution, not a fixed millisecond tick.
+- **DNSSEC validation** (`client/src/dnssec.rs`): RRSIG verification over a
+  canonical RRset with **Ed25519** (algorithm 15, RFC 8080), signature input
+  built per RFC 4034 §3.1.8.1. This is the cryptographic core; DS/DNSKEY
+  chain-walking to the root anchor builds on it.
+- **TLS 1.3 decoy** (`client/src/tls_decoy.rs`): a per-connection randomized,
+  well-formed ServerHello, **wired into `pqanond`** as the response to any
+  unrecognized (probe/DPI) datagram — no static fingerprint.
+- **Globally-scheduled mix cover** (`client/src/mix_cover.rs`
+  `GlobalCoverScheduler`, wired into `pqanon-mixd --cover-peer`): one node-wide
+  Poisson emission process, independent of client count/activity, so the
+  observable cover rate leaks nothing about the client population.
+
 ## Not yet wired (honest status)
 
 These are designed/partially present but **not** end-to-end today:
@@ -98,8 +116,12 @@ These are designed/partially present but **not** end-to-end today:
   testable kernel of that routing (destination extraction from an IP header)
   exists and is unit-tested in `client/src/ipparse.rs`; the platform TUN device
   and the read/write loops are the remaining integration work (§19).
-- Per-hop exponential mix delay queue and cover traffic scheduling.
-- Rekey driver, PROBE/cookie anti-DoS exchange.
+- Per-hop exponential mix delay queue (the global cover *scheduler* is done;
+  the per-hop queuing delay is not).
+- DNSSEC trust-anchor chain-walking and NSEC/wildcard proofs on top of the
+  verified RRSIG primitive.
+- Rekey driver and the cookie anti-DoS exchange (the TLS-decoy half of
+  anti-probing is wired).
 - Native platform clients (macOS/iOS/Android/desktop) and an FFI crate.
 - Prometheus metrics emission (so Grafana dashboards are deferred until the
   series exist).

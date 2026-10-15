@@ -13,6 +13,7 @@
 //! HMAC-SHA256). No hand-rolled primitives.
 
 pub mod bloom;
+pub mod dnssec;
 pub mod handshake;
 pub mod i18n;
 pub mod ipparse;
@@ -20,6 +21,7 @@ pub mod kdf;
 pub mod mix;
 pub mod obf;
 pub mod routing;
+pub mod tls_decoy;
 pub mod transport;
 pub mod wire;
 

@@ -87,8 +87,19 @@ async fn handle(
         return Ok(());
     }
 
-    // Otherwise a plain-framed handshake message.
-    let env = Envelope::from_plain(pkt)?;
+    // Otherwise this should be a plain-framed handshake message. If it does not
+    // parse as one, it is not our protocol — a scanner or DPI probe. Answer with
+    // a freshly randomized TLS 1.3 decoy so the port looks like an ordinary
+    // HTTPS server (anti-probing, §10.2) instead of revealing itself by silence.
+    let env = match Envelope::from_plain(pkt) {
+        Ok(env) => env,
+        Err(_) => {
+            let decoy = pqanon::tls_decoy::probe_response();
+            socket.send_to(&decoy, src).await?;
+            tracing::debug!(%src, "unrecognized packet; sent TLS decoy");
+            return Ok(());
+        }
+    };
     match env.msg_type {
         MsgType::ClientHello => {
             let mut hs = ServerHandshake::new_open(identity.clone(), env.conn_id);

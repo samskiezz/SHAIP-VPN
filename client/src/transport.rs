@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
 
@@ -108,7 +108,23 @@ impl RttEstimator {
     }
 }
 
-/// Custom BBR-inspired congestion controller (§8.3).
+/// BBR pacing-gain cycle (PROBE_BW): one phase per RTT. The 1.25 phase probes
+/// for more bandwidth, the 0.75 phase drains any queue it built, and the six
+/// 1.0 phases cruise — the modern BBR steady-state behavior.
+const PACING_GAIN_CYCLE: [f64; 8] = [1.25, 0.75, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0];
+/// cwnd is held at twice the bandwidth-delay product.
+const CWND_GAIN: f64 = 2.0;
+/// Delivery-rate samples kept for the windowed-max bandwidth filter (~10 RTTs).
+const BW_WINDOW: usize = 10;
+/// The min-RTT estimate is re-based if no lower sample arrives within this
+/// window (BBR ProbeRTT), so the controller tracks path changes instead of
+/// latching onto one early minimum forever.
+const MIN_RTT_WINDOW: Duration = Duration::from_secs(10);
+
+/// Custom BBR-inspired congestion controller (§8.3): a windowed max-bandwidth
+/// filter, a windowed min-RTT filter, a pacing-gain cycle, and explicit
+/// sub-millisecond pacing (the inter-packet gap is derived continuously from
+/// the pacing rate, not a fixed millisecond tick).
 #[derive(Debug, Clone)]
 pub struct CongestionControl {
     pub cwnd: f64,
@@ -118,6 +134,10 @@ pub struct CongestionControl {
     pub in_loss_recovery: bool,
     pub stable_rtts: u32,
     mtu: f64,
+    rtt_min_stamp: Instant,
+    bw_window: [f64; BW_WINDOW],
+    bw_idx: usize,
+    gain_phase: usize,
 }
 
 impl CongestionControl {
@@ -131,28 +151,60 @@ impl CongestionControl {
             in_loss_recovery: false,
             stable_rtts: 0,
             mtu,
+            rtt_min_stamp: Instant::now(),
+            bw_window: [0.0; BW_WINDOW],
+            bw_idx: 0,
+            gain_phase: 0,
         }
     }
 
+    /// Process an ACK: update the min-RTT and bandwidth filters, advance the
+    /// pacing-gain cycle, and recompute cwnd and the pacing rate.
     pub fn on_ack(&mut self, rtt: Duration, delivered_bytes: usize, interval: Duration) {
-        if rtt < self.rtt_min {
+        let now = Instant::now();
+
+        // Windowed min-RTT: take any lower sample; re-base a stale minimum.
+        if rtt < self.rtt_min || now.duration_since(self.rtt_min_stamp) > MIN_RTT_WINDOW {
             self.rtt_min = rtt;
+            self.rtt_min_stamp = now;
         }
+
+        // Delivery-rate sample into the windowed-max bandwidth filter, so a
+        // single slow ACK can't collapse the bottleneck estimate.
         let interval_s = interval.as_secs_f64().max(1e-6);
         let sample_bw = delivered_bytes as f64 / interval_s;
-        if sample_bw > self.bw_est {
-            self.bw_est = sample_bw;
+        self.bw_window[self.bw_idx] = sample_bw;
+        self.bw_idx = (self.bw_idx + 1) % BW_WINDOW;
+        let windowed_max = self
+            .bw_window
+            .iter()
+            .copied()
+            .fold(0.0_f64, f64::max)
+            .max(sample_bw);
+        if windowed_max > self.bw_est {
             self.stable_rtts = 0;
         } else {
             self.stable_rtts = self.stable_rtts.saturating_add(1);
         }
+        self.bw_est = windowed_max;
 
-        let two_bdp = self.bw_est * self.rtt_min.as_secs_f64() * 2.0;
-        if !self.in_loss_recovery && self.cwnd < two_bdp {
-            self.cwnd *= 1.25;
+        // Advance the gain cycle (≈ one phase per RTT in steady state).
+        self.gain_phase = (self.gain_phase + 1) % PACING_GAIN_CYCLE.len();
+        let gain = if self.in_loss_recovery {
+            1.0
+        } else {
+            PACING_GAIN_CYCLE[self.gain_phase]
+        };
+
+        // cwnd targets 2·BDP; grow toward it (loss handles the cuts).
+        let bdp = self.bw_est * self.rtt_min.as_secs_f64();
+        let target_cwnd = (CWND_GAIN * bdp).max(4.0 * self.mtu);
+        if !self.in_loss_recovery && self.cwnd < target_cwnd {
+            self.cwnd = (self.cwnd * 1.25).min(target_cwnd);
         }
-        self.pacing_rate =
-            (self.cwnd / self.rtt_min.as_secs_f64().max(1e-3)).min(self.bw_est * 1.25);
+
+        // Pace at gain · bottleneck bandwidth (bytes/sec), at least one packet/s.
+        self.pacing_rate = (gain * self.bw_est).max(self.mtu);
     }
 
     pub fn on_loss(&mut self) {
@@ -163,6 +215,21 @@ impl CongestionControl {
 
     pub fn exit_recovery(&mut self) {
         self.in_loss_recovery = false;
+    }
+
+    /// Time to wait before sending `bytes`, at the current pacing rate. The gap
+    /// is exactly `bytes / pacing_rate` at nanosecond resolution — so at line
+    /// rate it is well under a millisecond, not a coarse fixed tick.
+    pub fn next_send_interval(&self, bytes: usize) -> Duration {
+        let rate = self.pacing_rate.max(1.0);
+        Duration::from_secs_f64(bytes as f64 / rate)
+    }
+
+    #[cfg(test)]
+    fn mark_min_rtt_stale(&mut self) {
+        self.rtt_min_stamp = Instant::now()
+            .checked_sub(MIN_RTT_WINDOW + Duration::from_secs(1))
+            .unwrap_or_else(Instant::now);
     }
 }
 
@@ -322,6 +389,56 @@ mod tests {
         assert!(cc.cwnd < before_loss);
         assert!(cc.cwnd >= 2.0 * 1400.0);
         assert!(cc.in_loss_recovery);
+    }
+
+    #[test]
+    fn pacing_interval_is_sub_millisecond_at_line_rate() {
+        let mut cc = CongestionControl::new(1400);
+        // Drive the bottleneck-bandwidth estimate up to ~30 MB/s.
+        for _ in 0..12 {
+            cc.on_ack(
+                Duration::from_millis(20),
+                300_000,
+                Duration::from_millis(10),
+            );
+        }
+        // A 1400-byte packet now paces in tens of microseconds — sub-ms, which
+        // is the whole point: pacing granularity follows the rate, not a tick.
+        let gap = cc.next_send_interval(1400);
+        assert!(
+            gap < Duration::from_millis(1),
+            "pacing gap {gap:?} must be sub-millisecond at line rate"
+        );
+        assert!(gap > Duration::ZERO);
+    }
+
+    #[test]
+    fn min_rtt_filter_rebaselines_when_stale() {
+        let mut cc = CongestionControl::new(1400);
+        cc.on_ack(Duration::from_millis(10), 10_000, Duration::from_millis(10));
+        assert_eq!(cc.rtt_min, Duration::from_millis(10));
+        // A larger RTT does not raise the min within the window.
+        cc.on_ack(Duration::from_millis(40), 10_000, Duration::from_millis(10));
+        assert_eq!(cc.rtt_min, Duration::from_millis(10));
+        // Once the min is stale, the next sample re-bases it even though larger.
+        cc.mark_min_rtt_stale();
+        cc.on_ack(Duration::from_millis(40), 10_000, Duration::from_millis(10));
+        assert_eq!(cc.rtt_min, Duration::from_millis(40));
+    }
+
+    #[test]
+    fn bandwidth_filter_retains_windowed_max() {
+        let mut cc = CongestionControl::new(1400);
+        cc.on_ack(Duration::from_millis(20), 200_000, Duration::from_millis(10)); // 20 MB/s
+        let high = cc.bw_est;
+        assert!(high >= 20_000_000.0 - 1.0);
+        // A single slow ACK must not collapse the bottleneck estimate.
+        cc.on_ack(Duration::from_millis(20), 1_000, Duration::from_millis(10)); // 0.1 MB/s
+        assert!(
+            cc.bw_est >= high - 1.0,
+            "windowed max should retain the high sample, got {}",
+            cc.bw_est
+        );
     }
 
     #[test]
