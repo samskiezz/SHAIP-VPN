@@ -35,6 +35,18 @@ func main() {
 
 	srv := &Server{store: store, tokens: tokens, crlPub: crlPub, crlPriv: crlPriv}
 
+	log.Printf("PQANON-CP/1 control plane listening on %s (store: %s)", addr, label)
+	srvHTTP := &http.Server{
+		Addr:              addr,
+		Handler:           routes(srv, label),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	log.Fatal(srvHTTP.ListenAndServe())
+}
+
+// routes builds the HTTP handler. Extracted from main so tests can exercise
+// the real router, middleware stack, and auth group.
+func routes(srv *Server, label string) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
@@ -61,18 +73,16 @@ func main() {
 			r.Delete("/connections/{id}", srv.handleDisconnect)
 			r.Get("/mixnet", srv.handleMixnetStatus)
 			r.Get("/dashboard", srv.handleDashboard)
+			r.Get("/stats", srv.handleStats)
+			r.Get("/me", srv.handleMe)
+			r.Get("/routing", srv.handleListRouting)
+			r.Post("/routing", srv.handleCreateRouting)
+			r.Delete("/routing/{id}", srv.handleDeleteRouting)
 			r.Get("/settings", srv.handleGetSettings)
 			r.Put("/settings", srv.handleUpdateSettings)
 		})
 	})
-
-	log.Printf("PQANON-CP/1 control plane listening on %s (store: %s)", addr, label)
-	srvHTTP := &http.Server{
-		Addr:              addr,
-		Handler:           r,
-		ReadHeaderTimeout: 5 * time.Second,
-	}
-	log.Fatal(srvHTTP.ListenAndServe())
+	return r
 }
 
 func openStore() (Store, string) {

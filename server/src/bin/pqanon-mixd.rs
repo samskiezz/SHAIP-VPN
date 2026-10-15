@@ -5,12 +5,14 @@
 //! to the next hop or, as the exit, delivers the payload. Holds no capabilities
 //! and keeps no per-client tunnel state — it only routes cells.
 //!
-//! Not yet wired here (see §10): the per-hop exponential delay queue, the Bloom
-//! replay filter over `layer_tag`, and loop protection. The cryptographic peel
-//! is real and complete.
+//! Replay protection is wired here: a Bloom filter over each received cell
+//! drops exact replays (a sealed cell cannot be mutated in flight, so a replay
+//! is byte-identical). Not yet wired (see §10): the per-hop exponential delay
+//! queue and loop protection. The cryptographic peel is real and complete.
 
 use anyhow::Result;
 use clap::Parser;
+use pqanon::bloom::BloomFilter;
 use pqanon::mix::{peel, Peeled, CELL_SIZE};
 use rand::rngs::OsRng;
 use tokio::net::UdpSocket;
@@ -42,6 +44,10 @@ async fn main() -> Result<()> {
     let socket = UdpSocket::bind(&cli.listen).await?;
     tracing::info!(listen = %socket.local_addr()?, "pqanon-mixd listening");
 
+    // Replay filter over received cells (~2^20 bits, 3 hashes). A sealed cell
+    // is immutable in flight, so an exact byte-for-byte repeat is a replay.
+    let mut replay = BloomFilter::new(1 << 20, 3);
+
     let mut buf = vec![0u8; 65536];
     loop {
         let (n, src) = socket.recv_from(&mut buf).await?;
@@ -51,6 +57,11 @@ async fn main() -> Result<()> {
         }
         let mut cell = [0u8; CELL_SIZE];
         cell.copy_from_slice(&buf[..CELL_SIZE]);
+
+        if replay.check_and_insert(&cell) {
+            tracing::debug!(%src, "dropping replayed cell");
+            continue;
+        }
 
         match peel(&secret, &cell) {
             Ok(Peeled::Relay { next, cell }) => {

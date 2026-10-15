@@ -53,6 +53,67 @@ func (s *PgStore) GetUserByEmail(ctx context.Context, email string) (*User, erro
 	return &u, nil
 }
 
+func (s *PgStore) GetUserByID(ctx context.Context, id string) (*User, error) {
+	var u User
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, email, password_hash, identity_id, ml_dsa_pub, ed_pub, created_at
+		 FROM users WHERE id = $1`, id).
+		Scan(&u.ID, &u.Email, &u.PasswordHash, &u.IdentityID, &u.MlDsaPub, &u.EdPub, &u.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
+func (s *PgStore) CountUsers(ctx context.Context) (int, error) {
+	var n int
+	err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM users`).Scan(&n)
+	return n, err
+}
+
+func (s *PgStore) ListRoutingRules(ctx context.Context, userID string) ([]RoutingRule, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, user_id, domain, route, priority
+		 FROM routing_rules WHERE user_id = $1
+		 ORDER BY priority DESC, domain`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]RoutingRule, 0)
+	for rows.Next() {
+		var r RoutingRule
+		if err := rows.Scan(&r.ID, &r.UserID, &r.Domain, &r.Route, &r.Priority); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (s *PgStore) CreateRoutingRule(ctx context.Context, r *RoutingRule) error {
+	return s.pool.QueryRow(ctx,
+		`INSERT INTO routing_rules (user_id, domain, route, priority)
+		 VALUES ($1, $2, $3, $4) RETURNING id`,
+		r.UserID, r.Domain, r.Route, r.Priority).Scan(&r.ID)
+}
+
+func (s *PgStore) DeleteRoutingRule(ctx context.Context, id, userID string) error {
+	tag, err := s.pool.Exec(ctx,
+		`DELETE FROM routing_rules WHERE id = $1 AND user_id = $2`, id, userID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *PgStore) ListNodes(ctx context.Context) ([]Node, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, name, address, public_key, status, stake_sats, delay_mean_ms, created_at

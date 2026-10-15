@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"sort"
 	"sync"
 	"time"
 
@@ -56,12 +57,24 @@ type RevokedIdentity struct {
 	Signature  []byte    `json:"-"`
 }
 
+// RoutingRule is a per-user fast/anon policy for a destination domain (§13).
+// Higher priority wins when multiple rules match.
+type RoutingRule struct {
+	ID       string `json:"id"`
+	UserID   string `json:"-"`
+	Domain   string `json:"domain"`
+	Route    string `json:"route"`
+	Priority int    `json:"priority"`
+}
+
 // Store is the persistence interface. Two implementations exist: an in-memory
 // store (default, so the control plane boots with no database) and a Postgres
 // store (used when DATABASE_URL is set).
 type Store interface {
 	CreateUser(ctx context.Context, u *User) error
 	GetUserByEmail(ctx context.Context, email string) (*User, error)
+	GetUserByID(ctx context.Context, id string) (*User, error)
+	CountUsers(ctx context.Context) (int, error)
 
 	ListNodes(ctx context.Context) ([]Node, error)
 	CreateNode(ctx context.Context, n *Node) error
@@ -70,6 +83,10 @@ type Store interface {
 	ListActiveConnections(ctx context.Context) ([]Connection, error)
 	CountActiveConnections(ctx context.Context) (int, error)
 	EndConnection(ctx context.Context, id string) error
+
+	ListRoutingRules(ctx context.Context, userID string) ([]RoutingRule, error)
+	CreateRoutingRule(ctx context.Context, r *RoutingRule) error
+	DeleteRoutingRule(ctx context.Context, id, userID string) error
 
 	ListRevoked(ctx context.Context) ([]RevokedIdentity, error)
 
@@ -85,6 +102,7 @@ type MemStore struct {
 	users   map[string]*User // keyed by email
 	nodes   map[string]*Node // keyed by id
 	conns   map[string]*Connection
+	rules   map[string]*RoutingRule // keyed by rule id
 	revoked map[string]*RevokedIdentity
 }
 
@@ -93,6 +111,7 @@ func NewMemStore() *MemStore {
 		users:   make(map[string]*User),
 		nodes:   make(map[string]*Node),
 		conns:   make(map[string]*Connection),
+		rules:   make(map[string]*RoutingRule),
 		revoked: make(map[string]*RevokedIdentity),
 	}
 }
@@ -123,6 +142,65 @@ func (m *MemStore) GetUserByEmail(_ context.Context, email string) (*User, error
 	}
 	cp := *u
 	return &cp, nil
+}
+
+func (m *MemStore) GetUserByID(_ context.Context, id string) (*User, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, u := range m.users {
+		if u.ID == id {
+			cp := *u
+			return &cp, nil
+		}
+	}
+	return nil, ErrNotFound
+}
+
+func (m *MemStore) CountUsers(_ context.Context) (int, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.users), nil
+}
+
+func (m *MemStore) ListRoutingRules(_ context.Context, userID string) ([]RoutingRule, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]RoutingRule, 0)
+	for _, r := range m.rules {
+		if r.UserID == userID {
+			out = append(out, *r)
+		}
+	}
+	// Highest priority first, then domain, for a stable order.
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Priority != out[j].Priority {
+			return out[i].Priority > out[j].Priority
+		}
+		return out[i].Domain < out[j].Domain
+	})
+	return out, nil
+}
+
+func (m *MemStore) CreateRoutingRule(_ context.Context, r *RoutingRule) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if r.ID == "" {
+		r.ID = uuid.NewString()
+	}
+	cp := *r
+	m.rules[r.ID] = &cp
+	return nil
+}
+
+func (m *MemStore) DeleteRoutingRule(_ context.Context, id, userID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.rules[id]
+	if !ok || r.UserID != userID {
+		return ErrNotFound
+	}
+	delete(m.rules, id)
+	return nil
 }
 
 func (m *MemStore) ListNodes(_ context.Context) ([]Node, error) {

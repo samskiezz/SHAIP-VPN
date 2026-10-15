@@ -12,7 +12,10 @@
 //! (ML-KEM-768, ML-DSA-65, X25519, Ed25519, ChaCha20-Poly1305, HKDF-SHA256,
 //! HMAC-SHA256). No hand-rolled primitives.
 
+pub mod bloom;
 pub mod handshake;
+pub mod i18n;
+pub mod ipparse;
 pub mod kdf;
 pub mod mix;
 pub mod obf;

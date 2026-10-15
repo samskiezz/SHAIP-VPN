@@ -48,6 +48,11 @@ fn main() -> Result<()> {
         )
         .init();
 
+    // Load the localization catalog (i18n/*.toml) if present. Absent or
+    // partial catalogs fall back to English and then to the message key, so
+    // this never fails.
+    pqanon::i18n::init();
+
     let cli = Cli::parse();
     match cli.cmd {
         Cmd::Keygen => keygen(),
@@ -152,6 +157,7 @@ fn run(config: &str, route: &str) -> Result<()> {
     rt.block_on(async {
         let transport = Transport::bind("0.0.0.0:0").await?;
         tracing::info!(local = ?transport.local_addr()?, "transport bound");
+        tracing::info!("{}", pqanon::i18n::t("tunnel_up"));
         tracing::warn!("tunnel loop not yet wired — run `pqanon selftest` to exercise the stack");
         Ok::<_, anyhow::Error>(())
     })?;
