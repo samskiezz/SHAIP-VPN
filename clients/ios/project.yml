@@ -1,0 +1,25 @@
+# XcodeGen spec — run `xcodegen generate` on a Mac to produce SHAIP.xcodeproj,
+# then open in Xcode 26 and build to an iOS 26 simulator or device.
+name: SHAIP
+options:
+  bundleIdPrefix: com.shaip
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.10"
+    TARGETED_DEVICE_FAMILY: "1"       # iPhone only
+    ENABLE_PREVIEWS: "YES"
+    DEVELOPMENT_TEAM: ""              # set your team to run on a device
+targets:
+  SHAIP:
+    type: application
+    platform: iOS
+    sources:
+      - path: SHAIP
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.shaip.vpn
+        INFOPLIST_FILE: SHAIP/Info.plist
+        GENERATE_INFOPLIST_FILE: "NO"
