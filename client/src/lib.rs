@@ -37,3 +37,27 @@ pub mod perm_check;
 pub mod reconnect;
 pub mod secure_write;
 pub mod stream;
+
+// Further backlog primitives (quotas/QoS, transport drivers, client UX).
+pub mod allowlist;
+pub mod app_routing;
+pub mod autostart;
+pub mod battery;
+pub mod blacklist;
+pub mod bulk;
+pub mod bw_limit;
+pub mod conn_rate;
+pub mod fingerprint;
+pub mod idle;
+pub mod loss_burst;
+pub mod notify;
+pub mod pacing_budget;
+pub mod path_cache;
+pub mod progress;
+pub mod qos;
+pub mod quota;
+pub mod retx_queue;
+pub mod send_window;
+pub mod stream_sched;
+pub mod timeout;
+pub mod wifi;
