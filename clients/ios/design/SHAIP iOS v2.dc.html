@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<style>body{margin:0;background:#020306;-webkit-font-smoothing:antialiased}a{color:#5CF2FF}a:hover{color:#8A9BB8}</style>
+</helmet>
+<section id="2a" style="min-height:100vh;padding:80px 88px 140px;box-sizing:border-box;font-family:-apple-system,'SF Pro Display',system-ui,sans-serif;color:#F5F7FC;background:radial-gradient(60% 40% at 20% 0%,rgba(92,242,255,0.07),rgba(0,0,0,0) 70%),radial-gradient(50% 40% at 90% 10%,rgba(138,155,184,0.07),rgba(0,0,0,0) 70%),linear-gradient(rgba(255,255,255,0.025) 1px,transparent 1px) 0 0/32px 32px,linear-gradient(90deg,rgba(255,255,255,0.025) 1px,transparent 1px) 0 0/32px 32px,#020306">
+  <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:32px;margin-bottom:72px;flex-wrap:wrap">
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:center;gap:12px"><span style="font:600 12px ui-monospace,'SF Mono',Menlo,monospace;padding:5px 10px;border-radius:8px;background:#5CF2FF;color:#020306">2a</span><span style="font:500 12px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.16em;color:rgba(220,228,255,0.5)">SHAIP//MESH · iOS 26 LIQUID GLASS · BUILD 2a</span></div>
+      <div style="font-size:56px;font-weight:600;letter-spacing:-.045em;line-height:1;background:linear-gradient(180deg,#FFFFFF,#9AA6C8);-webkit-background-clip:text;background-clip:text;color:transparent">Zero-trust mesh, 10 screens</div>
+    </div>
+    <div style="font-size:15px;line-height:1.5;color:rgba(220,228,255,0.56);max-width:440px;text-wrap:pretty">Rendered at 3× device density. Tap the orb to drop the tunnel, pick a node, change protocol or arm the kill switch. Every screen reads from the same live state.</div>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,390px);gap:96px 72px">
+
+    <div style="display:flex;flex-direction:column;gap:20px">
+      <div style="display:flex;justify-content:space-between;font:500 11px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:rgba(220,228,255,0.45)"><span>01 — ONBOARDING</span><span>SSO · PASSKEY</span></div>
+      <div data-screen-label="01 Onboarding" style="width:390px;height:844px;border-radius:58px;position:relative;overflow:hidden;background:radial-gradient(120% 70% at 50% 0%,#0B1020 0%,#04050A 55%,#020306 100%);box-shadow:0 0 0 1px #3A3D45,0 0 0 11px #0B0C0F,0 0 0 12px #2A2C33,0 80px 120px -30px rgba(0,0,0,0.9),0 0 120px -20px rgba(92,242,255,0.12)">
+        <div style="position:absolute;top:0;left:0;right:0;height:54px;display:flex;align-items:center;justify-content:space-between;padding:4px 30px 0 48px;box-sizing:border-box;z-index:20;font:600 16px -apple-system,'SF Pro Text',system-ui"><span>9:41</span><svg width="72" height="12" viewBox="0 0 72 12" fill="#F5F7FC"><rect x="0" y="8" width="3" height="4" rx="1"></rect><rect x="5" y="5.5" width="3" height="6.5" rx="1"></rect><rect x="10" y="3" width="3" height="9" rx="1"></rect><rect x="15" y="0.5" width="3" height="11.5" rx="1"></rect><path d="M31 3.2a9 9 0 0112 0l-1.3 1.4a7 7 0 00-9.4 0zM33.6 6a5.3 5.3 0 016.8 0L37 9.6z"></path><rect x="47.5" y="0.5" width="22" height="11" rx="3.5" fill="none" stroke="#F5F7FC" stroke-opacity="0.4"></rect><rect x="49.5" y="2.5" width="16" height="7" rx="2"></rect></svg></div>
+        <div style="position:absolute;top:11px;left:132px;width:126px;height:37px;border-radius:20px;background:#000;z-index:21"></div>
+        <canvas data-gfx="net" data-cy="0.5" data-r="0.4" style="position:absolute;left:0;top:30px;width:390px;height:540px;display:block"></canvas>
+        <div style="position:absolute;top:66px;left:24px;right:24px;display:flex;justify-content:space-between;font:500 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.18em;color:rgba(220,228,255,0.42);z-index:5"><span>SHAIP/OS 4.2</span><span>MESH · 0x3F9A</span></div>
+        <div style="position:absolute;left:0;right:0;top:400px;height:240px;background:linear-gradient(180deg,rgba(2,3,6,0),#03040A 80%);z-index:4"></div>
+        <div style="position:absolute;left:24px;right:24px;bottom:40px;display:flex;flex-direction:column;gap:20px;z-index:6">
+          <div style="display:flex;align-items:center;gap:8px;font:500 10px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.16em;color:#5CF2FF"><span style="width:6px;height:6px;border-radius:3px;background:#5CF2FF;box-shadow:0 0 10px #5CF2FF"></span>42 EDGE NODES ONLINE</div>
+          <div style="font-size:40px;line-height:1.02;font-weight:600;letter-spacing:-.045em;text-wrap:pretty;background:linear-gradient(180deg,#FFFFFF 30%,#A9B4D6);-webkit-background-clip:text;background-clip:text;color:transparent">Zero-trust access for every device on your team.</div>
+          <div style="font-size:15px;line-height:1.45;color:rgba(220,228,255,0.56);text-wrap:pretty">Encrypted tunnels, identity-aware routing and posture checks, managed from one workspace.</div>
+          <div style="display:flex;flex-direction:column;gap:10px;margin-top:4px">
+            <div style="height:56px;border-radius:28px;background:linear-gradient(180deg,#FFFFFF,#DCE3F2);color:#05060A;display:flex;align-items:center;justify-content:center;gap:10px;font-size:17px;font-weight:600;letter-spacing:-.01em;cursor:pointer;box-shadow:inset 0 -1px 0 rgba(0,0,0,0.15),0 1px 0 rgba(255,255,255,0.4),0 14px 34px -8px rgba(92,242,255,0.45)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 7a4 4 0 11-3.4 6.1L4 20.5V17h3v-3h3l1.1-1.1A4 4 0 0115 7z"></path></svg>Continue with SSO</div>
+            <div style="height:56px;border-radius:28px;display:flex;align-items:center;justify-content:center;gap:10px;font-size:17px;font-weight:500;cursor:pointer;background:linear-gradient(180deg,rgba(255,255,255,0.09),rgba(255,255,255,0.03));backdrop-filter:blur(40px) saturate(180%);-webkit-backdrop-filter:blur(40px) saturate(180%);border:0.5px solid rgba(255,255,255,0.16);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.3),0 16px 32px -14px rgba(0,0,0,0.8)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 11v4M7.5 7.8A6 6 0 0118 12v1M6 12c0-.7.1-1.3.3-1.9M9 21a10 10 0 01-2-6v-3a5 5 0 0110 0v3c0 1.2-.2 2.3-.5 3.4M12 21c-1-1.7-1.5-3.6-1.5-6"></path></svg>Sign in with passkey</div>
+          </div>
+          <div style="display:flex;justify-content:center;gap:14px;font:500 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.16em;color:rgba(220,228,255,0.38)"><span>SOC 2 TYPE II</span><span>ISO 27001</span><span>FIPS 140-3</span></div>
+        </div>
+        <div style="position:absolute;bottom:8px;left:128px;width:134px;height:5px;border-radius:3px;background:#F5F7FC;z-index:20"></div>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:20px">
+      <div style="display:flex;justify-content:space-between;font:500 11px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:rgba(220,228,255,0.45)"><span>02 — CONNECT</span><span>TAP ORB</span></div>
+      <div data-screen-label="02 Connect" style="width:390px;height:844px;border-radius:58px;position:relative;overflow:hidden;background:radial-gradient(120% 70% at 50% 0%,#0B1020 0%,#04050A 55%,#020306 100%);box-shadow:0 0 0 1px #3A3D45,0 0 0 11px #0B0C0F,0 0 0 12px #2A2C33,0 80px 120px -30px rgba(0,0,0,0.9),0 0 120px -20px rgba(92,242,255,0.12)">
+        <div style="position:absolute;top:0;left:0;right:0;height:54px;display:flex;align-items:center;justify-content:space-between;padding:4px 30px 0 48px;box-sizing:border-box;z-index:20;font:600 16px -apple-system,'SF Pro Text',system-ui"><span>9:41</span><svg width="72" height="12" viewBox="0 0 72 12" fill="#F5F7FC"><rect x="0" y="8" width="3" height="4" rx="1"></rect><rect x="5" y="5.5" width="3" height="6.5" rx="1"></rect><rect x="10" y="3" width="3" height="9" rx="1"></rect><rect x="15" y="0.5" width="3" height="11.5" rx="1"></rect><path d="M31 3.2a9 9 0 0112 0l-1.3 1.4a7 7 0 00-9.4 0zM33.6 6a5.3 5.3 0 016.8 0L37 9.6z"></path><rect x="47.5" y="0.5" width="22" height="11" rx="3.5" fill="none" stroke="#F5F7FC" stroke-opacity="0.4"></rect><rect x="49.5" y="2.5" width="16" height="7" rx="2"></rect></svg></div>
+        <div style="position:absolute;top:11px;left:132px;width:126px;height:37px;border-radius:20px;background:#000;z-index:21"></div>
+        <div style="position:absolute;top:58px;left:16px;right:16px;display:flex;align-items:center;justify-content:space-between;z-index:8">
+          <div style="display:flex;align-items:center;gap:10px;height:44px;padding:0 16px 0 6px;border-radius:22px;background:linear-gradient(180deg,rgba(255,255,255,0.09),rgba(255,255,255,0.03));backdrop-filter:blur(40px) saturate(180%);-webkit-backdrop-filter:blur(40px) saturate(180%);border:0.5px solid rgba(255,255,255,0.16);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.3),0 12px 28px -12px rgba(0,0,0,0.8)">
+            <div style="width:32px;height:32px;border-radius:16px;background:linear-gradient(135deg,#5CF2FF,#8A9BB8);color:#04050A;display:flex;align-items:center;justify-content:center;font:700 13px -apple-system,'SF Pro Text',system-ui">A</div>
+            <span style="font-size:15px;font-weight:600;letter-spacing:-.01em">Acme Corp</span>
+            <span style="font:500 10px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.1em;padding:3px 6px;border-radius:6px;background:rgba(255,255,255,0.08);color:rgba(220,228,255,0.7)">PROD</span>
+          </div>
+          <div style="position:relative;width:44px;height:44px;border-radius:22px;display:flex;align-items:center;justify-content:center;background:linear-gradient(180deg,rgba(255,255,255,0.09),rgba(255,255,255,0.03));backdrop-filter:blur(40px);-webkit-backdrop-filter:blur(40px);border:0.5px solid rgba(255,255,255,0.16);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.3)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M6 8a6 6 0 1112 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.9 1.9 0 003.4 0"></path></svg><span style="position:absolute;top:10px;right:11px;width:8px;height:8px;border-radius:4px;background:#FF5C7A;box-shadow:0 0 0 2px #0A0D18"></span></div>
+        </div>
+        <canvas data-gfx="net" data-cy="0.5" data-r="0.36" style="position:absolute;left:0;top:92px;width:390px;height:380px;display:block"></canvas>
+        <div style="position:absolute;top:92px;left:0;width:390px;height:380px;z-index:6;display:flex;align-items:center;justify-content:center;pointer-events:none">
+          <svg width="244" height="244" viewBox="0 0 244 244" style="position:absolute"><circle cx="122" cy="122" r="118" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="6" stroke-dasharray="0.7 5.48"></circle><circle cx="122" cy="122" r="100" fill="none" stroke="{{ c.orbRing }}" stroke-width="1"></circle><circle cx="122" cy="122" r="100" fill="none" stroke="{{ c.orbColor }}" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="{{ c.arc }}" transform="rotate(-90 122 122)"></circle></svg>
+          <div onClick="{{ toggleConnect }}" style="pointer-events:auto;width:156px;height:156px;border-radius:78px;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;background:radial-gradient(80% 80% at 30% 18%,rgba(255,255,255,0.24),rgba(255,255,255,0.04) 60%),rgba(10,14,26,0.4);backdrop-filter:blur(14px) saturate(180%);-webkit-backdrop-filter:blur(14px) saturate(180%);border:0.5px solid rgba(255,255,255,0.32);box-shadow:inset 0 1px 0 rgba(255,255,255,0.5),inset 0 -14px 28px rgba(0,0,0,0.4),0 30px 60px -10px rgba(0,0,0,0.85),0 0 70px {{ c.orbGlow }}">
+            <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="{{ c.orbColor }}" stroke-width="2" stroke-linecap="round"><path d="M12 3v8M6.3 6.8a8 8 0 1011.4 0"></path></svg>
+            <span style="font:600 11px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.18em;color:{{ c.orbColor }}">{{ c.orbLabel }}</span>
+            <span style="font-size:11px;color:rgba(220,228,255,0.5)">{{ c.orbSub }}</span>
+          </div>
+        </div>
+        <div style="position:absolute;top:478px;left:16px;right:16px;padding:16px 18px;border-radius:30px;z-index:8;display:flex;flex-direction:column;gap:14px;background:linear-gradient(180deg,rgba(255,255,255,0.085),rgba(255,255,255,0.025));backdrop-filter:blur(40px) saturate(180%);-webkit-backdrop-filter:blur(40px) saturate(180%);border:0.5px solid rgba(255,255,255,0.15);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.32),0 1px 1px rgba(0,0,0,0.6),0 24px 48px -18px rgba(0,0,0,0.9)">
+          <div style="display:flex;align-items:center;justify-content:space-between">
+            <div style="display:flex;align-items:center;gap:7px;height:24px;padding:0 10px;border-radius:12px;background:{{ c.pillBg }}"><span style="width:6px;height:6px;border-radius:3px;background:{{ c.statusColor }};box-shadow:0 0 8px {{ c.statusColor }}"></span><span style="font:600 10px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:{{ c.statusColor }}">{{ c.status }}</span></div>
+            <span style="font:500 15px ui-monospace,'SF Mono',Menlo,monospace;font-variant-numeric:tabular-nums;letter-spacing:.02em">{{ c.timer }}</span>
+          </div>
+          <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px">
+            <div style="display:flex;flex-direction:column;gap:5px"><span style="font-size:26px;font-weight:600;letter-spacing:-.035em;line-height:1">{{ c.city }}</span><span style="font:400 11px ui-monospace,'SF Mono',Menlo,monospace;color:rgba(220,228,255,0.5)">{{ c.node }} · {{ c.dc }} · {{ c.proto }}</span></div>
+            <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px"><span style="font:500 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:rgba(220,228,255,0.4)">EXIT IP</span><span style="font:500 13px ui-monospace,'SF Mono',Menlo,monospace">{{ c.ip }}</span></div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-top:0.5px solid rgba(255,255,255,0.1);padding-top:12px">
+            <sc-for list="{{ metrics }}" as="m" hint-placeholder-count="4">
+              <div style="display:flex;flex-direction:column;gap:3px;padding-left:{{ m.pl }};border-left:{{ m.bl }}">
+                <span style="font:500 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:rgba(220,228,255,0.42)">{{ m.label }}</span>
+                <div style="display:flex;align-items:baseline;gap:3px"><span style="font-size:19px;font-weight:600;letter-spacing:-.03em;font-variant-numeric:tabular-nums">{{ m.value }}</span><span style="font:400 10px ui-monospace,'SF Mono',Menlo,monospace;color:rgba(220,228,255,0.45)">{{ m.unit }}</span></div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="position:absolute;top:676px;left:16px;right:16px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;z-index:8">
+          <sc-for list="{{ quick }}" as="q" hint-placeholder-count="3">
+            <div onClick="{{ q.onClick }}" style="height:62px;padding:0 12px;border-radius:22px;display:flex;flex-direction:column;justify-content:center;gap:5px;cursor:pointer;background:linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.02));backdrop-filter:blur(40px) saturate(180%);-webkit-backdrop-filter:blur(40px) saturate(180%);border:0.5px solid {{ q.border }};box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.28),0 16px 30px -16px rgba(0,0,0,0.9)">
+              <div style="display:flex;align-items:center;gap:6px"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="{{ q.color }}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="{{ q.d }}"></path></svg><span style="font-size:13px;font-weight:600;letter-spacing:-.01em">{{ q.label }}</span></div>
+              <span style="font:600 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:{{ q.color }}">{{ q.state }}</span>
+            </div>
+          </sc-for>
+        </div>
+        <div style="position:absolute;left:0;right:0;bottom:0;height:130px;background:linear-gradient(180deg,rgba(2,3,6,0),rgba(2,3,6,0.92));z-index:14;pointer-events:none"></div>
+        <div style="position:absolute;left:16px;right:16px;bottom:22px;height:64px;border-radius:32px;display:flex;align-items:center;padding:0 6px;z-index:15;background:linear-gradient(180deg,rgba(44,48,64,0.62),rgba(16,18,26,0.62));backdrop-filter:blur(40px) saturate(200%);-webkit-backdrop-filter:blur(40px) saturate(200%);border:0.5px solid rgba(255,255,255,0.16);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.36),0 20px 40px -10px rgba(0,0,0,0.9)">
+          <sc-for list="{{ tabsC }}" as="it" hint-placeholder-count="5"><div style="flex:1;height:52px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;border-radius:26px;background:{{ it.bg }};color:{{ it.color }}"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="{{ it.d }}"></path></svg><span style="font:500 10px -apple-system,'SF Pro Text',system-ui">{{ it.label }}</span></div></sc-for>
+        </div>
+        <div style="position:absolute;bottom:8px;left:128px;width:134px;height:5px;border-radius:3px;background:#F5F7FC;z-index:20"></div>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:20px">
+      <div style="display:flex;justify-content:space-between;font:500 11px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:rgba(220,228,255,0.45)"><span>03 — NETWORK</span><span>LIVE GLOBE</span></div>
+      <div data-screen-label="03 Network" style="width:390px;height:844px;border-radius:58px;position:relative;overflow:hidden;background:radial-gradient(120% 70% at 50% 0%,#0B1020 0%,#04050A 55%,#020306 100%);box-shadow:0 0 0 1px #3A3D45,0 0 0 11px #0B0C0F,0 0 0 12px #2A2C33,0 80px 120px -30px rgba(0,0,0,0.9),0 0 120px -20px rgba(92,242,255,0.12)">
+        <div style="position:absolute;top:0;left:0;right:0;height:54px;display:flex;align-items:center;justify-content:space-between;padding:4px 30px 0 48px;box-sizing:border-box;z-index:20;font:600 16px -apple-system,'SF Pro Text',system-ui"><span>9:41</span><svg width="72" height="12" viewBox="0 0 72 12" fill="#F5F7FC"><rect x="0" y="8" width="3" height="4" rx="1"></rect><rect x="5" y="5.5" width="3" height="6.5" rx="1"></rect><rect x="10" y="3" width="3" height="9" rx="1"></rect><rect x="15" y="0.5" width="3" height="11.5" rx="1"></rect><path d="M31 3.2a9 9 0 0112 0l-1.3 1.4a7 7 0 00-9.4 0zM33.6 6a5.3 5.3 0 016.8 0L37 9.6z"></path><rect x="47.5" y="0.5" width="22" height="11" rx="3.5" fill="none" stroke="#F5F7FC" stroke-opacity="0.4"></rect><rect x="49.5" y="2.5" width="16" height="7" rx="2"></rect></svg></div>
+        <div style="position:absolute;top:11px;left:132px;width:126px;height:37px;border-radius:20px;background:#000;z-index:21"></div>
+        <div style="position:absolute;top:62px;left:24px;right:16px;display:flex;align-items:flex-start;justify-content:space-between;z-index:8">
+          <div style="display:flex;flex-direction:column;gap:6px"><span style="font-size:34px;font-weight:700;letter-spacing:-.04em;line-height:1">Network</span><span style="font:500 10px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:rgba(220,228,255,0.45)">42 NODES · 18 REGIONS · 12 ROUTES</span></div>
+          <div style="width:44px;height:44px;border-radius:22px;display:flex;align-items:center;justify-content:center;background:linear-gradient(180deg,rgba(255,255,255,0.09),rgba(255,255,255,0.03));backdrop-filter:blur(40px);-webkit-backdrop-filter:blur(40px);border:0.5px solid rgba(255,255,255,0.16);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.3)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 3l9 5-9 5-9-5 9-5zM3 13l9 5 9-5"></path></svg></div>
+        </div>
+        <canvas data-gfx="globe" data-r="0.4" style="position:absolute;left:0;top:118px;width:390px;height:420px;display:block"></canvas>
+        <div style="position:absolute;top:136px;left:16px;display:flex;align-items:center;gap:8px;height:30px;padding:0 12px;border-radius:15px;z-index:8;background:linear-gradient(180deg,rgba(255,255,255,0.09),rgba(255,255,255,0.03));backdrop-filter:blur(30px);-webkit-backdrop-filter:blur(30px);border:0.5px solid rgba(255,255,255,0.16)"><span style="width:6px;height:6px;border-radius:3px;background:{{ c.statusColor }};box-shadow:0 0 8px {{ c.statusColor }}"></span><span style="font:500 10px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.1em">{{ c.node }} · {{ c.rtt }}</span></div>
+        <div style="position:absolute;top:548px;left:16px;right:16px;padding:18px;border-radius:30px;z-index:8;display:flex;flex-direction:column;gap:18px;background:linear-gradient(180deg,rgba(255,255,255,0.085),rgba(255,255,255,0.025));backdrop-filter:blur(40px) saturate(180%);-webkit-backdrop-filter:blur(40px) saturate(180%);border:0.5px solid rgba(255,255,255,0.15);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.32),0 1px 1px rgba(0,0,0,0.6),0 24px 48px -18px rgba(0,0,0,0.9)">
+          <div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:17px;font-weight:600;letter-spacing:-.02em">Active route</span><span style="font:600 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:#5CF2FF;padding:4px 8px;border-radius:8px;background:rgba(92,242,255,0.1)">{{ routeTag }}</span></div>
+          <div style="position:relative;display:grid;grid-template-columns:repeat(4,minmax(0,1fr))">
+            <div style="position:absolute;left:12%;right:12%;top:6px;height:1px;background:linear-gradient(90deg,#5CF2FF,#8A9BB8);opacity:0.6"></div>
+            <sc-for list="{{ route }}" as="r" hint-placeholder-count="4">
+              <div style="position:relative;display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center">
+                <span style="width:13px;height:13px;border-radius:7px;box-sizing:border-box;border:2px solid {{ r.ring }};background:{{ r.fill }};box-shadow:0 0 12px {{ r.glow }}"></span>
+                <span style="font-size:12px;font-weight:600;letter-spacing:-.01em">{{ r.name }}</span>
+                <span style="font:400 10px ui-monospace,'SF Mono',Menlo,monospace;color:rgba(220,228,255,0.5)">{{ r.meta }}</span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-top:0.5px solid rgba(255,255,255,0.1);padding-top:12px">
+            <sc-for list="{{ netStats }}" as="m" hint-placeholder-count="3">
+              <div style="display:flex;flex-direction:column;gap:3px"><span style="font:500 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:rgba(220,228,255,0.42)">{{ m.label }}</span><span style="font:500 13px ui-monospace,'SF Mono',Menlo,monospace">{{ m.value }}</span></div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="position:absolute;left:0;right:0;bottom:0;height:130px;background:linear-gradient(180deg,rgba(2,3,6,0),rgba(2,3,6,0.92));z-index:14;pointer-events:none"></div>
+        <div style="position:absolute;left:16px;right:16px;bottom:22px;height:64px;border-radius:32px;display:flex;align-items:center;padding:0 6px;z-index:15;background:linear-gradient(180deg,rgba(44,48,64,0.62),rgba(16,18,26,0.62));backdrop-filter:blur(40px) saturate(200%);-webkit-backdrop-filter:blur(40px) saturate(200%);border:0.5px solid rgba(255,255,255,0.16);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.36),0 20px 40px -10px rgba(0,0,0,0.9)">
+          <sc-for list="{{ tabsN }}" as="it" hint-placeholder-count="5"><div style="flex:1;height:52px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;border-radius:26px;background:{{ it.bg }};color:{{ it.color }}"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="{{ it.d }}"></path></svg><span style="font:500 10px -apple-system,'SF Pro Text',system-ui">{{ it.label }}</span></div></sc-for>
+        </div>
+        <div style="position:absolute;bottom:8px;left:128px;width:134px;height:5px;border-radius:3px;background:#F5F7FC;z-index:20"></div>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:20px">
+      <div style="display:flex;justify-content:space-between;font:500 11px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:rgba(220,228,255,0.45)"><span>04 — NODES</span><span>TAP TO ROUTE</span></div>
+      <div data-screen-label="04 Nodes" style="width:390px;height:844px;border-radius:58px;position:relative;overflow:hidden;background:radial-gradient(120% 70% at 50% 0%,#0B1020 0%,#04050A 55%,#020306 100%);box-shadow:0 0 0 1px #3A3D45,0 0 0 11px #0B0C0F,0 0 0 12px #2A2C33,0 80px 120px -30px rgba(0,0,0,0.9),0 0 120px -20px rgba(92,242,255,0.12)">
+        <div style="position:absolute;width:420px;height:420px;right:-200px;top:-120px;border-radius:50%;background:#5CF2FF;opacity:0.12;filter:blur(110px)"></div>
+        <div style="position:absolute;top:0;left:0;right:0;height:54px;display:flex;align-items:center;justify-content:space-between;padding:4px 30px 0 48px;box-sizing:border-box;z-index:20;font:600 16px -apple-system,'SF Pro Text',system-ui"><span>9:41</span><svg width="72" height="12" viewBox="0 0 72 12" fill="#F5F7FC"><rect x="0" y="8" width="3" height="4" rx="1"></rect><rect x="5" y="5.5" width="3" height="6.5" rx="1"></rect><rect x="10" y="3" width="3" height="9" rx="1"></rect><rect x="15" y="0.5" width="3" height="11.5" rx="1"></rect><path d="M31 3.2a9 9 0 0112 0l-1.3 1.4a7 7 0 00-9.4 0zM33.6 6a5.3 5.3 0 016.8 0L37 9.6z"></path><rect x="47.5" y="0.5" width="22" height="11" rx="3.5" fill="none" stroke="#F5F7FC" stroke-opacity="0.4"></rect><rect x="49.5" y="2.5" width="16" height="7" rx="2"></rect></svg></div>
+        <div style="position:absolute;top:11px;left:132px;width:126px;height:37px;border-radius:20px;background:#000;z-index:21"></div>
+        <div style="position:absolute;top:62px;left:16px;right:16px;display:flex;flex-direction:column;gap:12px;z-index:8">
+          <div style="display:flex;align-items:baseline;justify-content:space-between;padding:0 8px"><span style="font-size:34px;font-weight:700;letter-spacing:-.03em;line-height:1">Nodes</span><span style="font:500 10px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:rgba(220,228,255,0.45)">SORT · RTT ASC</span></div>
+          <div style="height:44px;border-radius:22px;padding:0 16px;display:flex;align-items:center;gap:10px;color:rgba(220,228,255,0.45);font-size:15px;background:linear-gradient(180deg,rgba(255,255,255,0.07),rgba(255,255,255,0.025));backdrop-filter:blur(40px);-webkit-backdrop-filter:blur(40px);border:0.5px solid rgba(255,255,255,0.14);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.25)"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 4a7 7 0 100 14 7 7 0 000-14zM20 20l-4-4"></path></svg><span style="flex:1">Region, city or node ID</span><span style="font:500 10px ui-monospace,'SF Mono',Menlo,monospace;padding:3px 6px;border-radius:6px;border:0.5px solid rgba(255,255,255,0.18)">42</span></div>
+          <div style="display:flex;padding:3px;border-radius:20px;background:rgba(255,255,255,0.05);border:0.5px solid rgba(255,255,255,0.1)">
+            <sc-for list="{{ segs }}" as="g" hint-placeholder-count="3"><div onClick="{{ g.onClick }}" style="flex:1;height:32px;border-radius:16px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;cursor:pointer;background:{{ g.bg }};color:{{ g.color }};box-shadow:{{ g.shadow }}">{{ g.label }}</div></sc-for>
+          </div>
+          <div style="border-radius:30px;overflow:hidden;background:linear-gradient(180deg,rgba(255,255,255,0.075),rgba(255,255,255,0.02));backdrop-filter:blur(40px) saturate(180%);-webkit-backdrop-filter:blur(40px) saturate(180%);border:0.5px solid rgba(255,255,255,0.15);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.3),0 24px 48px -18px rgba(0,0,0,0.9)">
+            <sc-for list="{{ servers }}" as="s" hint-placeholder-count="7">
+              <div onClick="{{ s.onClick }}" style="display:grid;grid-template-columns:42px minmax(0,1fr) auto;align-items:center;gap:12px;padding:11px 14px;border-top:{{ s.bt }};background:{{ s.bg }};cursor:pointer">
+                <div style="width:42px;height:42px;border-radius:13px;display:flex;align-items:center;justify-content:center;font:600 11px ui-monospace,'SF Mono',Menlo,monospace;background:{{ s.badgeBg }};color:{{ s.badgeInk }};box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.3)">{{ s.code }}</div>
+                <div style="display:flex;flex-direction:column;gap:5px;min-width:0">
+                  <div style="display:flex;align-items:center;gap:6px"><span style="font-size:15px;font-weight:600;letter-spacing:-.01em">{{ s.city }}</span><sc-if value="{{ s.tagShow }}" hint-placeholder-val="{{ false }}"><span style="font:600 8px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.12em;padding:2px 5px;border-radius:5px;background:rgba(138,155,184,0.18);color:#B4C2DA">{{ s.tag }}</span></sc-if></div>
+                  <div style="display:flex;align-items:center;gap:8px"><span style="font:400 10px ui-monospace,'SF Mono',Menlo,monospace;color:rgba(220,228,255,0.45);white-space:nowrap">{{ s.id }} · {{ s.region }}</span><div style="width:34px;height:3px;border-radius:2px;background:rgba(255,255,255,0.1);overflow:hidden"><div style="height:3px;width:{{ s.loadPct }};background:#5CF2FF"></div></div></div>
+                </div>
+                <div style="display:flex;align-items:center;gap:10px">
+                  <div style="display:flex;align-items:flex-end;gap:1.5px;height:16px"><sc-for list="{{ s.bars }}" as="b" hint-placeholder-count="16"><span style="width:2px;height:{{ b.h }};border-radius:1px;background:{{ b.c }}"></span></sc-for></div>
+                  <div style="display:flex;flex-direction:column;align-items:flex-end;width:34px"><span style="font:600 14px ui-monospace,'SF Mono',Menlo,monospace;color:{{ s.msColor }}">{{ s.msTxt }}</span><span style="font:400 9px ui-monospace,'SF Mono',Menlo,monospace;color:rgba(220,228,255,0.4)">ms</span></div>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="position:absolute;left:0;right:0;bottom:0;height:130px;background:linear-gradient(180deg,rgba(2,3,6,0),rgba(2,3,6,0.92));z-index:14;pointer-events:none"></div>
+        <div style="position:absolute;left:16px;right:16px;bottom:22px;height:64px;border-radius:32px;display:flex;align-items:center;padding:0 6px;z-index:15;background:linear-gradient(180deg,rgba(44,48,64,0.62),rgba(16,18,26,0.62));backdrop-filter:blur(40px) saturate(200%);-webkit-backdrop-filter:blur(40px) saturate(200%);border:0.5px solid rgba(255,255,255,0.16);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.36),0 20px 40px -10px rgba(0,0,0,0.9)">
+          <sc-for list="{{ tabsN }}" as="it" hint-placeholder-count="5"><div style="flex:1;height:52px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;border-radius:26px;background:{{ it.bg }};color:{{ it.color }}"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="{{ it.d }}"></path></svg><span style="font:500 10px -apple-system,'SF Pro Text',system-ui">{{ it.label }}</span></div></sc-for>
+        </div>
+        <div style="position:absolute;bottom:8px;left:128px;width:134px;height:5px;border-radius:3px;background:#F5F7FC;z-index:20"></div>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:20px">
+      <div style="display:flex;justify-content:space-between;font:500 11px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:rgba(220,228,255,0.45)"><span>05 — TRAFFIC</span><span>1 Hz TELEMETRY</span></div>
+      <div data-screen-label="05 Traffic" style="width:390px;height:844px;border-radius:58px;position:relative;overflow:hidden;background:radial-gradient(120% 70% at 50% 0%,#0B1020 0%,#04050A 55%,#020306 100%);box-shadow:0 0 0 1px #3A3D45,0 0 0 11px #0B0C0F,0 0 0 12px #2A2C33,0 80px 120px -30px rgba(0,0,0,0.9),0 0 120px -20px rgba(92,242,255,0.12)">
+        <div style="position:absolute;width:440px;height:440px;left:-200px;top:40px;border-radius:50%;background:#5CF2FF;opacity:0.14;filter:blur(110px)"></div>
+        <div style="position:absolute;top:0;left:0;right:0;height:54px;display:flex;align-items:center;justify-content:space-between;padding:4px 30px 0 48px;box-sizing:border-box;z-index:20;font:600 16px -apple-system,'SF Pro Text',system-ui"><span>9:41</span><svg width="72" height="12" viewBox="0 0 72 12" fill="#F5F7FC"><rect x="0" y="8" width="3" height="4" rx="1"></rect><rect x="5" y="5.5" width="3" height="6.5" rx="1"></rect><rect x="10" y="3" width="3" height="9" rx="1"></rect><rect x="15" y="0.5" width="3" height="11.5" rx="1"></rect><path d="M31 3.2a9 9 0 0112 0l-1.3 1.4a7 7 0 00-9.4 0zM33.6 6a5.3 5.3 0 016.8 0L37 9.6z"></path><rect x="47.5" y="0.5" width="22" height="11" rx="3.5" fill="none" stroke="#F5F7FC" stroke-opacity="0.4"></rect><rect x="49.5" y="2.5" width="16" height="7" rx="2"></rect></svg></div>
+        <div style="position:absolute;top:11px;left:132px;width:126px;height:37px;border-radius:20px;background:#000;z-index:21"></div>
+        <div style="position:absolute;top:62px;left:16px;right:16px;display:flex;flex-direction:column;gap:10px;z-index:8">
+          <div style="display:flex;align-items:baseline;justify-content:space-between;padding:0 8px 4px"><span style="font-size:34px;font-weight:700;letter-spacing:-.03em;line-height:1">Traffic</span><span style="display:flex;align-items:center;gap:6px;font:500 10px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:{{ c.statusColor }}"><span style="width:6px;height:6px;border-radius:3px;background:{{ c.statusColor }};box-shadow:0 0 8px {{ c.statusColor }}"></span>LIVE · {{ c.node }}</span></div>
+          <div style="position:relative;padding:18px 18px 14px;border-radius:30px;display:flex;flex-direction:column;gap:8px;background:linear-gradient(180deg,rgba(255,255,255,0.085),rgba(255,255,255,0.025));backdrop-filter:blur(40px) saturate(180%);-webkit-backdrop-filter:blur(40px) saturate(180%);border:0.5px solid rgba(255,255,255,0.15);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.32),0 1px 1px rgba(0,0,0,0.6),0 24px 48px -18px rgba(0,0,0,0.9)">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start">
+              <div style="display:flex;flex-direction:column;gap:4px"><span style="font:500 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.16em;color:rgba(220,228,255,0.45)">THROUGHPUT ↓</span><div style="display:flex;align-items:baseline;gap:6px"><span style="font-size:52px;font-weight:600;letter-spacing:-.045em;line-height:1;font-variant-numeric:tabular-nums">{{ traffic.down }}</span><span style="font:500 13px ui-monospace,'SF Mono',Menlo,monospace;color:rgba(220,228,255,0.5)">Mbps</span></div></div>
+              <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;padding-top:2px"><span style="font:500 11px ui-monospace,'SF Mono',Menlo,monospace;color:#B4C2DA">↑ {{ traffic.up }}</span><span style="font:500 11px ui-monospace,'SF Mono',Menlo,monospace;color:rgba(220,228,255,0.45)">PK {{ traffic.peak }}</span></div>
+            </div>
+            <svg width="326" height="150" viewBox="0 -5 326 150" style="display:block;overflow:visible">
+              <defs><linearGradient id="tgA" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5CF2FF" stop-opacity="0.34"></stop><stop offset="1" stop-color="#5CF2FF" stop-opacity="0"></stop></linearGradient><linearGradient id="tgL" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#5CF2FF" stop-opacity="0.15"></stop><stop offset="0.7" stop-color="#5CF2FF"></stop><stop offset="1" stop-color="#FFFFFF"></stop></linearGradient><filter id="tgG" x="-10%" y="-40%" width="120%" height="180%"><feGaussianBlur stdDeviation="3"></feGaussianBlur></filter></defs>
+              <path d="M0 35H326M0 70H326M0 105H326" stroke="rgba(255,255,255,0.07)" stroke-width="0.5" stroke-dasharray="2 3"></path>
+              <path d="M54 0V140M109 0V140M163 0V140M217 0V140M272 0V140" stroke="rgba(255,255,255,0.04)" stroke-width="0.5"></path>
+              <path d="{{ traffic.darea }}" fill="url(#tgA)"></path>
+              <path d="{{ traffic.dline }}" fill="none" stroke="#5CF2FF" stroke-width="3" opacity="0.5" filter="url(#tgG)"></path>
+              <path d="{{ traffic.dline }}" fill="none" stroke="url(#tgL)" stroke-width="1.6" stroke-linejoin="round"></path>
+              <path d="{{ traffic.uline }}" fill="none" stroke="#8A9BB8" stroke-width="1.2" stroke-dasharray="2 3"></path>
+            </svg>
+            <div style="display:flex;justify-content:space-between;font:400 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.1em;color:rgba(220,228,255,0.38)"><span>T-48s</span><span>T-24s</span><span>NOW</span></div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px">
+            <sc-for list="{{ tiles }}" as="s" hint-placeholder-count="3">
+              <div style="padding:12px 14px;border-radius:22px;display:flex;flex-direction:column;gap:4px;background:linear-gradient(180deg,rgba(255,255,255,0.07),rgba(255,255,255,0.02));backdrop-filter:blur(40px);-webkit-backdrop-filter:blur(40px);border:0.5px solid rgba(255,255,255,0.13);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.25)">
+                <span style="font:500 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:rgba(220,228,255,0.42)">{{ s.label }}</span>
+                <div style="display:flex;align-items:baseline;gap:3px"><span style="font-size:20px;font-weight:600;letter-spacing:-.03em;font-variant-numeric:tabular-nums">{{ s.value }}</span><span style="font:400 10px ui-monospace,'SF Mono',Menlo,monospace;color:rgba(220,228,255,0.45)">{{ s.unit }}</span></div>
+              </div>
+            </sc-for>
+          </div>
+          <div style="padding:4px 16px;border-radius:26px;background:linear-gradient(180deg,rgba(255,255,255,0.07),rgba(255,255,255,0.02));backdrop-filter:blur(40px);-webkit-backdrop-filter:blur(40px);border:0.5px solid rgba(255,255,255,0.13);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.25)">
+            <sc-for list="{{ apps }}" as="a" hint-placeholder-count="4">
+              <div style="display:flex;flex-direction:column;gap:7px;padding:11px 0;border-top:{{ a.bt }}">
+                <div style="display:flex;justify-content:space-between;align-items:baseline"><div style="display:flex;align-items:baseline;gap:8px"><span style="font-size:14px;font-weight:600">{{ a.name }}</span><span style="font:400 10px ui-monospace,'SF Mono',Menlo,monospace;color:rgba(220,228,255,0.4)">{{ a.host }}</span></div><span style="font:500 12px ui-monospace,'SF Mono',Menlo,monospace">{{ a.val }}</span></div>
+                <div style="height:3px;border-radius:2px;background:rgba(255,255,255,0.07)"><div style="height:3px;border-radius:2px;width:{{ a.w }};background:{{ a.color }};box-shadow:0 0 8px {{ a.color }}"></div></div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="position:absolute;left:0;right:0;bottom:0;height:130px;background:linear-gradient(180deg,rgba(2,3,6,0),rgba(2,3,6,0.92));z-index:14;pointer-events:none"></div>
+        <div style="position:absolute;left:16px;right:16px;bottom:22px;height:64px;border-radius:32px;display:flex;align-items:center;padding:0 6px;z-index:15;background:linear-gradient(180deg,rgba(44,48,64,0.62),rgba(16,18,26,0.62));backdrop-filter:blur(40px) saturate(200%);-webkit-backdrop-filter:blur(40px) saturate(200%);border:0.5px solid rgba(255,255,255,0.16);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.36),0 20px 40px -10px rgba(0,0,0,0.9)">
+          <sc-for list="{{ tabsC }}" as="it" hint-placeholder-count="5"><div style="flex:1;height:52px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;border-radius:26px;background:{{ it.bg }};color:{{ it.color }}"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="{{ it.d }}"></path></svg><span style="font:500 10px -apple-system,'SF Pro Text',system-ui">{{ it.label }}</span></div></sc-for>
+        </div>
+        <div style="position:absolute;bottom:8px;left:128px;width:134px;height:5px;border-radius:3px;background:#F5F7FC;z-index:20"></div>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:20px">
+      <div style="display:flex;justify-content:space-between;font:500 11px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:rgba(220,228,255,0.45)"><span>06 — ZERO-TRUST ACCESS</span><span>PER-APP POLICY</span></div>
+      <div data-screen-label="06 Access" style="width:390px;height:844px;border-radius:58px;position:relative;overflow:hidden;background:radial-gradient(120% 70% at 50% 0%,#0B1020 0%,#04050A 55%,#020306 100%);box-shadow:0 0 0 1px #3A3D45,0 0 0 11px #0B0C0F,0 0 0 12px #2A2C33,0 80px 120px -30px rgba(0,0,0,0.9),0 0 120px -20px rgba(92,242,255,0.12)">
+        <div style="position:absolute;width:420px;height:420px;left:-60px;top:-200px;border-radius:50%;background:#62F5A8;opacity:0.1;filter:blur(110px)"></div>
+        <div style="position:absolute;top:0;left:0;right:0;height:54px;display:flex;align-items:center;justify-content:space-between;padding:4px 30px 0 48px;box-sizing:border-box;z-index:20;font:600 16px -apple-system,'SF Pro Text',system-ui"><span>9:41</span><svg width="72" height="12" viewBox="0 0 72 12" fill="#F5F7FC"><rect x="0" y="8" width="3" height="4" rx="1"></rect><rect x="5" y="5.5" width="3" height="6.5" rx="1"></rect><rect x="10" y="3" width="3" height="9" rx="1"></rect><rect x="15" y="0.5" width="3" height="11.5" rx="1"></rect><path d="M31 3.2a9 9 0 0112 0l-1.3 1.4a7 7 0 00-9.4 0zM33.6 6a5.3 5.3 0 016.8 0L37 9.6z"></path><rect x="47.5" y="0.5" width="22" height="11" rx="3.5" fill="none" stroke="#F5F7FC" stroke-opacity="0.4"></rect><rect x="49.5" y="2.5" width="16" height="7" rx="2"></rect></svg></div>
+        <div style="position:absolute;top:11px;left:132px;width:126px;height:37px;border-radius:20px;background:#000;z-index:21"></div>
+        <div style="position:absolute;top:62px;left:16px;right:16px;display:flex;flex-direction:column;gap:12px;z-index:8">
+          <div style="display:flex;align-items:baseline;justify-content:space-between;padding:0 8px"><span style="font-size:34px;font-weight:700;letter-spacing:-.03em;line-height:1">Access</span><span style="font:500 10px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:rgba(220,228,255,0.45)">POLICY · ACME-STRICT</span></div>
+          <div style="padding:16px 18px;border-radius:30px;display:grid;grid-template-columns:84px minmax(0,1fr);gap:16px;align-items:center;background:linear-gradient(180deg,rgba(255,255,255,0.085),rgba(255,255,255,0.025));backdrop-filter:blur(40px) saturate(180%);-webkit-backdrop-filter:blur(40px) saturate(180%);border:0.5px solid rgba(255,255,255,0.15);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.32),0 1px 1px rgba(0,0,0,0.6),0 24px 48px -18px rgba(0,0,0,0.9)">
+            <div style="position:relative;width:84px;height:84px;display:flex;align-items:center;justify-content:center">
+              <svg width="84" height="84" viewBox="0 0 84 84" style="position:absolute;inset:0"><circle cx="42" cy="42" r="38" fill="none" stroke="rgba(255,255,255,0.18)" stroke-width="3" stroke-dasharray="0.6 3.38"></circle><circle cx="42" cy="42" r="31" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="5"></circle><circle cx="42" cy="42" r="31" fill="none" stroke="#62F5A8" stroke-width="5" stroke-linecap="round" stroke-dasharray="183 195" transform="rotate(-90 42 42)" style="filter:drop-shadow(0 0 6px rgba(98,245,168,0.6))"></circle></svg>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:0"><span style="font-size:24px;font-weight:700;letter-spacing:-.03em;line-height:1">94</span><span style="font:500 8px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:rgba(220,228,255,0.5)">TRUST</span></div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:9px;min-width:0">
+              <div style="display:flex;flex-direction:column;gap:2px"><span style="font-size:16px;font-weight:600;letter-spacing:-.01em">Device posture: compliant</span><span style="font:400 10px ui-monospace,'SF Mono',Menlo,monospace;color:rgba(220,228,255,0.45)">LAST CHECK 00:42 AGO · CROWDSTRIKE</span></div>
+              <div style="display:flex;flex-wrap:wrap;gap:5px">
+                <sc-for list="{{ posture }}" as="p" hint-placeholder-count="5"><span style="display:flex;align-items:center;gap:4px;font:500 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.06em;padding:4px 7px;border-radius:8px;background:rgba(255,255,255,0.05);border:0.5px solid rgba(255,255,255,0.1)"><span style="width:4px;height:4px;border-radius:2px;background:{{ p.color }}"></span>{{ p.label }}</span></sc-for>
+              </div>
+            </div>
+          </div>
+          <div style="display:flex;padding:3px;border-radius:20px;background:rgba(255,255,255,0.05);border:0.5px solid rgba(255,255,255,0.1)">
+            <sc-for list="{{ asegs }}" as="g" hint-placeholder-count="3"><div onClick="{{ g.onClick }}" style="flex:1;height:32px;border-radius:16px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;cursor:pointer;background:{{ g.bg }};color:{{ g.color }};box-shadow:{{ g.shadow }}">{{ g.label }}</div></sc-for>
+          </div>
+          <div style="border-radius:30px;overflow:hidden;background:linear-gradient(180deg,rgba(255,255,255,0.075),rgba(255,255,255,0.02));backdrop-filter:blur(40px) saturate(180%);-webkit-backdrop-filter:blur(40px) saturate(180%);border:0.5px solid rgba(255,255,255,0.15);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.3),0 24px 48px -18px rgba(0,0,0,0.9)">
+            <sc-for list="{{ resources }}" as="r" hint-placeholder-count="5">
+              <div style="display:grid;grid-template-columns:40px minmax(0,1fr) auto;gap:12px;align-items:center;padding:12px 14px;border-top:{{ r.bt }}">
+                <div style="width:40px;height:40px;border-radius:12px;display:flex;align-items:center;justify-content:center;font:600 11px ui-monospace,'SF Mono',Menlo,monospace;background:rgba(255,255,255,0.06);border:0.5px solid rgba(255,255,255,0.12);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.25)">{{ r.ab }}</div>
+                <div style="display:flex;flex-direction:column;gap:3px;min-width:0"><span style="font:500 14px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:-.01em">{{ r.name }}</span><span style="font-size:12px;color:rgba(220,228,255,0.5)">{{ r.meta }}</span></div>
+                <span style="font:600 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.12em;padding:5px 8px;border-radius:8px;background:{{ r.pillBg }};color:{{ r.color }}">{{ r.state }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="position:absolute;left:0;right:0;bottom:0;height:130px;background:linear-gradient(180deg,rgba(2,3,6,0),rgba(2,3,6,0.92));z-index:14;pointer-events:none"></div>
+        <div style="position:absolute;left:16px;right:16px;bottom:22px;height:64px;border-radius:32px;display:flex;align-items:center;padding:0 6px;z-index:15;background:linear-gradient(180deg,rgba(44,48,64,0.62),rgba(16,18,26,0.62));backdrop-filter:blur(40px) saturate(200%);-webkit-backdrop-filter:blur(40px) saturate(200%);border:0.5px solid rgba(255,255,255,0.16);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.36),0 20px 40px -10px rgba(0,0,0,0.9)">
+          <sc-for list="{{ tabsA }}" as="it" hint-placeholder-count="5"><div style="flex:1;height:52px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;border-radius:26px;background:{{ it.bg }};color:{{ it.color }}"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="{{ it.d }}"></path></svg><span style="font:500 10px -apple-system,'SF Pro Text',system-ui">{{ it.label }}</span></div></sc-for>
+        </div>
+        <div style="position:absolute;bottom:8px;left:128px;width:134px;height:5px;border-radius:3px;background:#F5F7FC;z-index:20"></div>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:20px">
+      <div style="display:flex;justify-content:space-between;font:500 11px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:rgba(220,228,255,0.45)"><span>07 — SECURITY</span><span>THREAT SWEEP · KILL SWITCH</span></div>
+      <div data-screen-label="07 Security" style="width:390px;height:844px;border-radius:58px;position:relative;overflow:hidden;background:radial-gradient(120% 70% at 50% 0%,#0B1020 0%,#04050A 55%,#020306 100%);box-shadow:0 0 0 1px #3A3D45,0 0 0 11px #0B0C0F,0 0 0 12px #2A2C33,0 80px 120px -30px rgba(0,0,0,0.9),0 0 120px -20px rgba(92,242,255,0.12)">
+        <div style="position:absolute;top:0;left:0;right:0;height:54px;display:flex;align-items:center;justify-content:space-between;padding:4px 30px 0 48px;box-sizing:border-box;z-index:20;font:600 16px -apple-system,'SF Pro Text',system-ui"><span>9:41</span><svg width="72" height="12" viewBox="0 0 72 12" fill="#F5F7FC"><rect x="0" y="8" width="3" height="4" rx="1"></rect><rect x="5" y="5.5" width="3" height="6.5" rx="1"></rect><rect x="10" y="3" width="3" height="9" rx="1"></rect><rect x="15" y="0.5" width="3" height="11.5" rx="1"></rect><path d="M31 3.2a9 9 0 0112 0l-1.3 1.4a7 7 0 00-9.4 0zM33.6 6a5.3 5.3 0 016.8 0L37 9.6z"></path><rect x="47.5" y="0.5" width="22" height="11" rx="3.5" fill="none" stroke="#F5F7FC" stroke-opacity="0.4"></rect><rect x="49.5" y="2.5" width="16" height="7" rx="2"></rect></svg></div>
+        <div style="position:absolute;top:11px;left:132px;width:126px;height:37px;border-radius:20px;background:#000;z-index:21"></div>
+        <div style="position:absolute;top:62px;left:24px;right:24px;display:flex;align-items:baseline;justify-content:space-between;z-index:8"><span style="font-size:34px;font-weight:700;letter-spacing:-.03em;line-height:1">Security</span><span style="font:500 10px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:#FF5C7A">● 3 ACTIVE</span></div>
+        <canvas data-gfx="radar" data-r="0.4" style="position:absolute;left:35px;top:104px;width:320px;height:280px;display:block"></canvas>
+        <div style="position:absolute;top:110px;left:16px;display:flex;flex-direction:column;gap:2px;font:500 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.12em;color:rgba(220,228,255,0.4);z-index:8"><span>SWEEP 1.1 rad/s</span><span>RANGE 24H</span></div>
+        <div style="position:absolute;top:110px;right:16px;display:flex;flex-direction:column;align-items:flex-end;gap:2px;font:500 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.12em;color:rgba(220,228,255,0.4);z-index:8"><span>DNS · IP · TLS</span><span>22 SIGNALS</span></div>
+        <div style="position:absolute;top:388px;left:16px;right:16px;display:flex;flex-direction:column;gap:10px;z-index:8">
+          <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px">
+            <sc-for list="{{ counters }}" as="k" hint-placeholder-count="3">
+              <div style="padding:11px 13px;border-radius:20px;display:flex;flex-direction:column;gap:3px;background:linear-gradient(180deg,rgba(255,255,255,0.07),rgba(255,255,255,0.02));backdrop-filter:blur(40px);-webkit-backdrop-filter:blur(40px);border:0.5px solid rgba(255,255,255,0.13);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.25)">
+                <span style="display:flex;align-items:center;gap:5px;font:500 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:rgba(220,228,255,0.45)"><span style="width:4px;height:4px;border-radius:2px;background:{{ k.color }}"></span>{{ k.label }}</span>
+                <span style="font-size:20px;font-weight:600;letter-spacing:-.03em;font-variant-numeric:tabular-nums">{{ k.value }}</span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="padding:14px 16px;border-radius:26px;display:flex;flex-direction:column;gap:8px;background:linear-gradient(180deg,rgba(255,255,255,0.085),rgba(255,255,255,0.025));backdrop-filter:blur(40px) saturate(180%);-webkit-backdrop-filter:blur(40px) saturate(180%);border:0.5px solid rgba(255,255,255,0.15);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.32),0 24px 48px -18px rgba(0,0,0,0.9)">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+              <div style="display:flex;flex-direction:column;gap:3px"><span style="font:600 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.16em;color:{{ kill.color }}">{{ kill.status }}</span><span style="font-size:19px;font-weight:600;letter-spacing:-.02em">Kill switch</span></div>
+              <div onClick="{{ kill.onClick }}" style="flex:none;width:58px;height:32px;border-radius:16px;padding:2px;box-sizing:border-box;display:flex;justify-content:{{ kill.j }};background:{{ kill.bg }};cursor:pointer;box-shadow:inset 0 1px 2px rgba(0,0,0,0.3)"><div style="width:36px;height:28px;border-radius:14px;background:linear-gradient(180deg,#FFFFFF,#E4E8F0);box-shadow:0 2px 6px rgba(0,0,0,0.35),inset 0 -1px 0 rgba(0,0,0,0.08)"></div></div>
+            </div>
+            <span style="font-size:13px;line-height:1.4;color:rgba(220,228,255,0.55);text-wrap:pretty">{{ kill.desc }}</span>
+          </div>
+          <div style="padding:2px 16px;border-radius:26px;background:linear-gradient(180deg,rgba(255,255,255,0.07),rgba(255,255,255,0.02));backdrop-filter:blur(40px);-webkit-backdrop-filter:blur(40px);border:0.5px solid rgba(255,255,255,0.13);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.25)">
+            <sc-for list="{{ alerts }}" as="al" hint-placeholder-count="4">
+              <div style="display:grid;grid-template-columns:8px minmax(0,1fr) auto;gap:12px;align-items:center;padding:10px 0;border-top:{{ al.bt }}">
+                <span style="width:6px;height:6px;border-radius:3px;background:{{ al.color }};box-shadow:0 0 10px {{ al.color }}"></span>
+                <div style="display:flex;flex-direction:column;gap:2px;min-width:0"><span style="font-size:14px;font-weight:500">{{ al.title }}</span><span style="font:400 10px ui-monospace,'SF Mono',Menlo,monospace;color:rgba(220,228,255,0.45)">{{ al.meta }}</span></div>
+                <span style="font:400 10px ui-monospace,'SF Mono',Menlo,monospace;color:rgba(220,228,255,0.45)">{{ al.time }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="position:absolute;left:0;right:0;bottom:0;height:130px;background:linear-gradient(180deg,rgba(2,3,6,0),rgba(2,3,6,0.92));z-index:14;pointer-events:none"></div>
+        <div style="position:absolute;left:16px;right:16px;bottom:22px;height:64px;border-radius:32px;display:flex;align-items:center;padding:0 6px;z-index:15;background:linear-gradient(180deg,rgba(44,48,64,0.62),rgba(16,18,26,0.62));backdrop-filter:blur(40px) saturate(200%);-webkit-backdrop-filter:blur(40px) saturate(200%);border:0.5px solid rgba(255,255,255,0.16);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.36),0 20px 40px -10px rgba(0,0,0,0.9)">
+          <sc-for list="{{ tabsS }}" as="it" hint-placeholder-count="5"><div style="flex:1;height:52px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;border-radius:26px;background:{{ it.bg }};color:{{ it.color }}"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="{{ it.d }}"></path></svg><span style="font:500 10px -apple-system,'SF Pro Text',system-ui">{{ it.label }}</span></div></sc-for>
+        </div>
+        <div style="position:absolute;bottom:8px;left:128px;width:134px;height:5px;border-radius:3px;background:#F5F7FC;z-index:20"></div>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:20px">
+      <div style="display:flex;justify-content:space-between;font:500 11px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:rgba(220,228,255,0.45)"><span>08 — PROTOCOL</span><span>CRYPTO · TUNNEL</span></div>
+      <div data-screen-label="08 Protocol" style="width:390px;height:844px;border-radius:58px;position:relative;overflow:hidden;background:radial-gradient(120% 70% at 50% 0%,#0B1020 0%,#04050A 55%,#020306 100%);box-shadow:0 0 0 1px #3A3D45,0 0 0 11px #0B0C0F,0 0 0 12px #2A2C33,0 80px 120px -30px rgba(0,0,0,0.9),0 0 120px -20px rgba(92,242,255,0.12)">
+        <div style="position:absolute;width:420px;height:420px;right:-220px;top:80px;border-radius:50%;background:#5CF2FF;opacity:0.1;filter:blur(110px)"></div>
+        <div style="position:absolute;top:0;left:0;right:0;height:54px;display:flex;align-items:center;justify-content:space-between;padding:4px 30px 0 48px;box-sizing:border-box;z-index:20;font:600 16px -apple-system,'SF Pro Text',system-ui"><span>9:41</span><svg width="72" height="12" viewBox="0 0 72 12" fill="#F5F7FC"><rect x="0" y="8" width="3" height="4" rx="1"></rect><rect x="5" y="5.5" width="3" height="6.5" rx="1"></rect><rect x="10" y="3" width="3" height="9" rx="1"></rect><rect x="15" y="0.5" width="3" height="11.5" rx="1"></rect><path d="M31 3.2a9 9 0 0112 0l-1.3 1.4a7 7 0 00-9.4 0zM33.6 6a5.3 5.3 0 016.8 0L37 9.6z"></path><rect x="47.5" y="0.5" width="22" height="11" rx="3.5" fill="none" stroke="#F5F7FC" stroke-opacity="0.4"></rect><rect x="49.5" y="2.5" width="16" height="7" rx="2"></rect></svg></div>
+        <div style="position:absolute;top:11px;left:132px;width:126px;height:37px;border-radius:20px;background:#000;z-index:21"></div>
+        <div style="position:absolute;top:62px;left:16px;right:16px;display:flex;flex-direction:column;gap:10px;z-index:8">
+          <div style="display:flex;align-items:baseline;justify-content:space-between;padding:0 8px 2px"><span style="font-size:34px;font-weight:700;letter-spacing:-.03em;line-height:1">Protocol</span><span style="font:500 10px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:rgba(220,228,255,0.45)">ADMIN-LOCKED · 2</span></div>
+          <sc-for list="{{ protos }}" as="p" hint-placeholder-count="3">
+            <div onClick="{{ p.onClick }}" style="padding:14px 16px;border-radius:24px;display:grid;grid-template-columns:minmax(0,1fr) 22px;gap:12px;align-items:center;cursor:pointer;background:linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.02));backdrop-filter:blur(40px) saturate(180%);-webkit-backdrop-filter:blur(40px) saturate(180%);border:0.5px solid {{ p.border }};box-shadow:{{ p.shadow }}">
+              <div style="display:flex;flex-direction:column;gap:6px;min-width:0">
+                <div style="display:flex;align-items:center;gap:8px"><span style="font-size:16px;font-weight:600;letter-spacing:-.01em">{{ p.name }}</span><sc-if value="{{ p.tagShow }}" hint-placeholder-val="{{ false }}"><span style="font:600 8px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;padding:3px 6px;border-radius:6px;background:rgba(92,242,255,0.12);color:#5CF2FF">{{ p.tag }}</span></sc-if></div>
+                <span style="font-size:12px;color:rgba(220,228,255,0.5)">{{ p.sub }}</span>
+                <div style="display:flex;gap:5px;flex-wrap:wrap"><sc-for list="{{ p.specs }}" as="sp" hint-placeholder-count="2"><span style="font:500 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.06em;padding:3px 6px;border-radius:6px;border:0.5px solid rgba(255,255,255,0.14);color:rgba(220,228,255,0.75)">{{ sp.x }}</span></sc-for></div>
+              </div>
+              <div style="width:22px;height:22px;border-radius:11px;border:1.5px solid {{ p.ring }};box-sizing:border-box;display:flex;align-items:center;justify-content:center"><div style="width:10px;height:10px;border-radius:5px;background:{{ p.dot }};box-shadow:0 0 8px {{ p.dot }}"></div></div>
+            </div>
+          </sc-for>
+          <span style="font:500 10px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.16em;color:rgba(220,228,255,0.42);padding:6px 8px 0">TUNNEL</span>
+          <div style="padding:0 16px;border-radius:24px;background:linear-gradient(180deg,rgba(255,255,255,0.07),rgba(255,255,255,0.02));backdrop-filter:blur(40px);-webkit-backdrop-filter:blur(40px);border:0.5px solid rgba(255,255,255,0.13);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.25)">
+            <sc-for list="{{ toggles }}" as="it" hint-placeholder-count="4">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-top:{{ it.bt }}">
+                <div style="display:flex;flex-direction:column;gap:2px"><span style="font-size:15px;font-weight:500">{{ it.label }}</span><span style="font-size:12px;color:rgba(220,228,255,0.48)">{{ it.sub }}</span></div>
+                <div onClick="{{ it.onClick }}" style="flex:none;width:58px;height:32px;border-radius:16px;padding:2px;box-sizing:border-box;display:flex;justify-content:{{ it.j }};background:{{ it.bg }};cursor:pointer;box-shadow:inset 0 1px 2px rgba(0,0,0,0.3)"><div style="width:36px;height:28px;border-radius:14px;background:linear-gradient(180deg,#FFFFFF,#E4E8F0);box-shadow:0 2px 6px rgba(0,0,0,0.35)"></div></div>
+              </div>
+            </sc-for>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px">
+            <sc-for list="{{ advanced }}" as="ad" hint-placeholder-count="3"><div style="padding:9px 12px;border-radius:16px;display:flex;flex-direction:column;gap:2px;background:rgba(255,255,255,0.04);border:0.5px solid rgba(255,255,255,0.1)"><span style="font:500 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:rgba(220,228,255,0.42)">{{ ad.k }}</span><span style="font:500 12px ui-monospace,'SF Mono',Menlo,monospace">{{ ad.v }}</span></div></sc-for>
+          </div>
+        </div>
+        <div style="position:absolute;left:0;right:0;bottom:0;height:130px;background:linear-gradient(180deg,rgba(2,3,6,0),rgba(2,3,6,0.92));z-index:14;pointer-events:none"></div>
+        <div style="position:absolute;left:16px;right:16px;bottom:22px;height:64px;border-radius:32px;display:flex;align-items:center;padding:0 6px;z-index:15;background:linear-gradient(180deg,rgba(44,48,64,0.62),rgba(16,18,26,0.62));backdrop-filter:blur(40px) saturate(200%);-webkit-backdrop-filter:blur(40px) saturate(200%);border:0.5px solid rgba(255,255,255,0.16);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.36),0 20px 40px -10px rgba(0,0,0,0.9)">
+          <sc-for list="{{ tabsX }}" as="it" hint-placeholder-count="5"><div style="flex:1;height:52px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;border-radius:26px;background:{{ it.bg }};color:{{ it.color }}"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="{{ it.d }}"></path></svg><span style="font:500 10px -apple-system,'SF Pro Text',system-ui">{{ it.label }}</span></div></sc-for>
+        </div>
+        <div style="position:absolute;bottom:8px;left:128px;width:134px;height:5px;border-radius:3px;background:#F5F7FC;z-index:20"></div>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:20px">
+      <div style="display:flex;justify-content:space-between;font:500 11px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:rgba(220,228,255,0.45)"><span>09 — TEAM &amp; PLAN</span><span>ADMIN VIEW</span></div>
+      <div data-screen-label="09 Team" style="width:390px;height:844px;border-radius:58px;position:relative;overflow:hidden;background:radial-gradient(120% 70% at 50% 0%,#0B1020 0%,#04050A 55%,#020306 100%);box-shadow:0 0 0 1px #3A3D45,0 0 0 11px #0B0C0F,0 0 0 12px #2A2C33,0 80px 120px -30px rgba(0,0,0,0.9),0 0 120px -20px rgba(92,242,255,0.12)">
+        <div style="position:absolute;width:460px;height:460px;left:-35px;top:-260px;border-radius:50%;background:#5CF2FF;opacity:0.14;filter:blur(110px)"></div>
+        <div style="position:absolute;top:0;left:0;right:0;height:54px;display:flex;align-items:center;justify-content:space-between;padding:4px 30px 0 48px;box-sizing:border-box;z-index:20;font:600 16px -apple-system,'SF Pro Text',system-ui"><span>9:41</span><svg width="72" height="12" viewBox="0 0 72 12" fill="#F5F7FC"><rect x="0" y="8" width="3" height="4" rx="1"></rect><rect x="5" y="5.5" width="3" height="6.5" rx="1"></rect><rect x="10" y="3" width="3" height="9" rx="1"></rect><rect x="15" y="0.5" width="3" height="11.5" rx="1"></rect><path d="M31 3.2a9 9 0 0112 0l-1.3 1.4a7 7 0 00-9.4 0zM33.6 6a5.3 5.3 0 016.8 0L37 9.6z"></path><rect x="47.5" y="0.5" width="22" height="11" rx="3.5" fill="none" stroke="#F5F7FC" stroke-opacity="0.4"></rect><rect x="49.5" y="2.5" width="16" height="7" rx="2"></rect></svg></div>
+        <div style="position:absolute;top:11px;left:132px;width:126px;height:37px;border-radius:20px;background:#000;z-index:21"></div>
+        <div style="position:absolute;top:62px;left:16px;right:16px;display:flex;flex-direction:column;gap:10px;z-index:8">
+          <div style="display:flex;align-items:center;gap:14px;padding:0 8px 6px">
+            <div style="width:60px;height:60px;border-radius:30px;display:flex;align-items:center;justify-content:center;font-size:21px;font-weight:600;background:linear-gradient(180deg,rgba(255,255,255,0.14),rgba(255,255,255,0.04));border:0.5px solid rgba(255,255,255,0.22);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.4),0 0 0 4px rgba(92,242,255,0.1),0 12px 24px -8px rgba(0,0,0,0.8)">MC</div>
+            <div style="display:flex;flex-direction:column;gap:3px"><span style="font-size:22px;font-weight:700;letter-spacing:-.025em">Maya Chen</span><span style="font:500 10px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.12em;color:rgba(220,228,255,0.5)">SECURITY ADMIN · ACME CORP</span></div>
+          </div>
+          <div style="padding:16px 18px;border-radius:28px;display:flex;flex-direction:column;gap:12px;background:linear-gradient(180deg,rgba(255,255,255,0.085),rgba(255,255,255,0.025));backdrop-filter:blur(40px) saturate(180%);-webkit-backdrop-filter:blur(40px) saturate(180%);border:0.5px solid rgba(255,255,255,0.15);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.32),0 24px 48px -18px rgba(0,0,0,0.9)">
+            <div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:17px;font-weight:600;letter-spacing:-.01em">Business · Annual</span><span style="font:600 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;padding:4px 7px;border-radius:7px;background:rgba(98,245,168,0.12);color:#62F5A8">ACTIVE</span></div>
+            <div style="display:flex;gap:2px;height:14px;align-items:stretch">
+              <span style="flex:148;border-radius:3px 0 0 3px;background:linear-gradient(90deg,#5CF2FF,#8A9BB8);box-shadow:0 0 10px rgba(92,242,255,0.4)"></span><span style="flex:52;border-radius:0 3px 3px 0;background:repeating-linear-gradient(90deg,rgba(255,255,255,0.12) 0 2px,transparent 2px 5px)"></span>
+            </div>
+            <div style="display:flex;justify-content:space-between;font:500 10px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.1em;color:rgba(220,228,255,0.5)"><span>SEATS <span style="color:#F5F7FC">148/200</span></span><span>DEVICES <span style="color:#F5F7FC">311</span></span><span>RENEWS <span style="color:#F5F7FC">14.03.27</span></span></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;padding:6px 8px 0;font:500 10px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.16em;color:rgba(220,228,255,0.42)"><span>TEAM · ON MESH</span><span style="color:#62F5A8">96 ONLINE</span></div>
+          <div style="padding:0 16px;border-radius:24px;background:linear-gradient(180deg,rgba(255,255,255,0.07),rgba(255,255,255,0.02));backdrop-filter:blur(40px);-webkit-backdrop-filter:blur(40px);border:0.5px solid rgba(255,255,255,0.13);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.25)">
+            <sc-for list="{{ team }}" as="m" hint-placeholder-count="4">
+              <div style="display:grid;grid-template-columns:36px minmax(0,1fr) auto;gap:12px;align-items:center;padding:10px 0;border-top:{{ m.bt }}">
+                <div style="position:relative;width:36px;height:36px;border-radius:18px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;background:rgba(255,255,255,0.08);border:0.5px solid rgba(255,255,255,0.14)">{{ m.ab }}<span style="position:absolute;right:-1px;bottom:-1px;width:10px;height:10px;border-radius:5px;background:{{ m.color }};box-shadow:0 0 0 2px #0A0D18"></span></div>
+                <div style="display:flex;flex-direction:column;gap:2px;min-width:0"><span style="font-size:15px;font-weight:500">{{ m.name }}</span><span style="font-size:12px;color:rgba(220,228,255,0.48)">{{ m.role }}</span></div>
+                <span style="font:500 10px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.06em;color:rgba(220,228,255,0.6)">{{ m.loc }}</span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="padding:0 16px;border-radius:24px;background:linear-gradient(180deg,rgba(255,255,255,0.07),rgba(255,255,255,0.02));backdrop-filter:blur(40px);-webkit-backdrop-filter:blur(40px);border:0.5px solid rgba(255,255,255,0.13);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.25)">
+            <sc-for list="{{ devices }}" as="d" hint-placeholder-count="2">
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:11px 0;border-top:{{ d.bt }}"><div style="display:flex;flex-direction:column;gap:2px"><span style="font-size:15px;font-weight:500">{{ d.name }}</span><span style="font:400 10px ui-monospace,'SF Mono',Menlo,monospace;color:rgba(220,228,255,0.45)">{{ d.meta }}</span></div><span style="font:600 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.12em;color:{{ d.color }}">{{ d.state }}</span></div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="position:absolute;left:0;right:0;bottom:0;height:130px;background:linear-gradient(180deg,rgba(2,3,6,0),rgba(2,3,6,0.92));z-index:14;pointer-events:none"></div>
+        <div style="position:absolute;left:16px;right:16px;bottom:22px;height:64px;border-radius:32px;display:flex;align-items:center;padding:0 6px;z-index:15;background:linear-gradient(180deg,rgba(44,48,64,0.62),rgba(16,18,26,0.62));backdrop-filter:blur(40px) saturate(200%);-webkit-backdrop-filter:blur(40px) saturate(200%);border:0.5px solid rgba(255,255,255,0.16);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.36),0 20px 40px -10px rgba(0,0,0,0.9)">
+          <sc-for list="{{ tabsX }}" as="it" hint-placeholder-count="5"><div style="flex:1;height:52px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;border-radius:26px;background:{{ it.bg }};color:{{ it.color }}"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="{{ it.d }}"></path></svg><span style="font:500 10px -apple-system,'SF Pro Text',system-ui">{{ it.label }}</span></div></sc-for>
+        </div>
+        <div style="position:absolute;bottom:8px;left:128px;width:134px;height:5px;border-radius:3px;background:#F5F7FC;z-index:20"></div>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:20px">
+      <div style="display:flex;justify-content:space-between;font:500 11px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:rgba(220,228,255,0.45)"><span>10 — LOCK SCREEN</span><span>LIVE ACTIVITY · ISLAND</span></div>
+      <div data-screen-label="10 Lock Screen" style="width:390px;height:844px;border-radius:58px;position:relative;overflow:hidden;background:radial-gradient(90% 60% at 50% 70%,#0E1A30 0%,#05070E 60%,#020306 100%);box-shadow:0 0 0 1px #3A3D45,0 0 0 11px #0B0C0F,0 0 0 12px #2A2C33,0 80px 120px -30px rgba(0,0,0,0.9),0 0 120px -20px rgba(92,242,255,0.12)">
+        <canvas data-gfx="net" data-cy="0.55" data-r="0.42" style="position:absolute;left:0;top:200px;width:390px;height:520px;display:block;opacity:0.85"></canvas>
+        <div style="position:absolute;top:11px;left:95px;width:200px;height:37px;border-radius:20px;background:#000;z-index:21;display:flex;align-items:center;justify-content:space-between;padding:0 12px;box-sizing:border-box">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="{{ la.color }}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7.5 3v5.5c0 4.6-3.2 8.6-7.5 9.5-4.3-.9-7.5-4.9-7.5-9.5V6L12 3z"></path></svg>
+          <span style="font:600 12px ui-monospace,'SF Mono',Menlo,monospace;color:{{ la.color }};font-variant-numeric:tabular-nums">{{ la.rtt }}ms</span>
+        </div>
+        <div style="position:absolute;top:0;left:0;right:0;height:54px;display:flex;align-items:center;justify-content:space-between;padding:4px 30px 0 34px;box-sizing:border-box;z-index:20;font:600 15px -apple-system,'SF Pro Text',system-ui"><span>Acme</span><svg width="72" height="12" viewBox="0 0 72 12" fill="#F5F7FC"><rect x="0" y="8" width="3" height="4" rx="1"></rect><rect x="5" y="5.5" width="3" height="6.5" rx="1"></rect><rect x="10" y="3" width="3" height="9" rx="1"></rect><rect x="15" y="0.5" width="3" height="11.5" rx="1"></rect><path d="M31 3.2a9 9 0 0112 0l-1.3 1.4a7 7 0 00-9.4 0zM33.6 6a5.3 5.3 0 016.8 0L37 9.6z"></path><rect x="47.5" y="0.5" width="22" height="11" rx="3.5" fill="none" stroke="#F5F7FC" stroke-opacity="0.4"></rect><rect x="49.5" y="2.5" width="16" height="7" rx="2"></rect></svg></div>
+        <div style="position:absolute;top:84px;left:0;right:0;display:flex;flex-direction:column;align-items:center;gap:0;z-index:6">
+          <span style="font-size:19px;font-weight:600;color:rgba(235,240,255,0.82)">Friday 16 October</span>
+          <span style="font-size:112px;font-weight:700;letter-spacing:-.04em;line-height:1;background:linear-gradient(180deg,rgba(255,255,255,0.98),rgba(200,214,240,0.72));-webkit-background-clip:text;background-clip:text;color:transparent;font-family:-apple-system,'SF Pro Rounded','SF Pro Display',system-ui">9:41</span>
+        </div>
+        <div style="position:absolute;left:12px;right:12px;bottom:118px;padding:16px 18px;border-radius:30px;z-index:8;display:flex;flex-direction:column;gap:14px;background:linear-gradient(180deg,rgba(28,32,44,0.62),rgba(10,12,18,0.7));backdrop-filter:blur(40px) saturate(180%);-webkit-backdrop-filter:blur(40px) saturate(180%);border:0.5px solid rgba(255,255,255,0.16);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.32),0 30px 60px -20px rgba(0,0,0,0.9)">
+          <div style="display:flex;align-items:center;justify-content:space-between">
+            <div style="display:flex;align-items:center;gap:10px">
+              <div style="width:34px;height:34px;border-radius:10px;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#5CF2FF,#3C7D9A);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.6)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#03060C" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7.5 3v5.5c0 4.6-3.2 8.6-7.5 9.5-4.3-.9-7.5-4.9-7.5-9.5V6L12 3z"></path></svg></div>
+              <div style="display:flex;flex-direction:column;gap:1px"><span style="font-size:15px;font-weight:600">{{ la.status }} · {{ la.city }}</span><span style="font:400 10px ui-monospace,'SF Mono',Menlo,monospace;color:rgba(220,228,255,0.55)">{{ la.node }} · SHAIP MESH</span></div>
+            </div>
+            <span style="font:600 15px ui-monospace,'SF Mono',Menlo,monospace;font-variant-numeric:tabular-nums;color:{{ la.color }}">{{ la.timer }}</span>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px">
+            <div style="display:flex;flex-direction:column;gap:2px"><span style="font:500 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:rgba(220,228,255,0.45)">DOWN</span><span style="font-size:20px;font-weight:600;letter-spacing:-.03em;font-variant-numeric:tabular-nums">{{ la.down }}<span style="font:400 10px ui-monospace,'SF Mono',Menlo,monospace;color:rgba(220,228,255,0.45)"> Mbps</span></span></div>
+            <div style="display:flex;flex-direction:column;gap:2px"><span style="font:500 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:rgba(220,228,255,0.45)">RTT</span><span style="font-size:20px;font-weight:600;letter-spacing:-.03em;font-variant-numeric:tabular-nums">{{ la.rtt }}<span style="font:400 10px ui-monospace,'SF Mono',Menlo,monospace;color:rgba(220,228,255,0.45)"> ms</span></span></div>
+            <div onClick="{{ toggleConnect }}" style="height:40px;border-radius:20px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;cursor:pointer;background:rgba(255,255,255,0.12);border:0.5px solid rgba(255,255,255,0.2);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.35)">{{ c.orbSub }}</div>
+          </div>
+        </div>
+        <div style="position:absolute;left:46px;right:46px;bottom:44px;display:flex;justify-content:space-between;z-index:8">
+          <div style="width:50px;height:50px;border-radius:25px;display:flex;align-items:center;justify-content:center;background:rgba(20,24,34,0.5);backdrop-filter:blur(30px);-webkit-backdrop-filter:blur(30px);border:0.5px solid rgba(255,255,255,0.16)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#F5F7FC" stroke-width="1.8" stroke-linecap="round"><path d="M9 2h6l-1 7h4l-8 13 2-9H8z"></path></svg></div>
+          <div style="width:50px;height:50px;border-radius:25px;display:flex;align-items:center;justify-content:center;background:rgba(20,24,34,0.5);backdrop-filter:blur(30px);-webkit-backdrop-filter:blur(30px);border:0.5px solid rgba(255,255,255,0.16)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#F5F7FC" stroke-width="1.8" stroke-linejoin="round"><path d="M3 8h4l2-3h6l2 3h4v11H3zM12 10a3.5 3.5 0 100 7 3.5 3.5 0 000-7z"></path></svg></div>
+        </div>
+        <div style="position:absolute;bottom:8px;left:128px;width:134px;height:5px;border-radius:3px;background:#F5F7FC;z-index:20"></div>
+      </div>
+    </div>
+
+    <i data-end="grid" style="display:none"></i>
+  </div>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;quality&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;Ultra&quot;,&quot;Standard&quot;],&quot;default&quot;:&quot;Ultra&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Rendering&quot;},&quot;density&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;min&quot;:60,&quot;max&quot;:260,&quot;step&quot;:10,&quot;default&quot;:210,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Rendering&quot;},&quot;hud&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Rendering&quot;},&quot;floor&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Rendering&quot;}}">
+const CY = '#5CF2FF', VI = '#8A9BB8', OK = '#62F5A8', WA = '#FFB547', BA = '#FF5C7A', SUB = 'rgba(220,228,255,0.5)';
+const TABS = [
+  ['Connect', 'M12 3l7.5 3v5.5c0 4.6-3.2 8.6-7.5 9.5-4.3-.9-7.5-4.9-7.5-9.5V6L12 3zM9 12l2 2 4-4'],
+  ['Network', 'M12 3a9 9 0 100 18 9 9 0 000-18zM3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z'],
+  ['Access', 'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM17 14v6M14 17h6'],
+  ['Security', 'M12 12l6.5-6.5M12 3a9 9 0 109 9M12 7.5a4.5 4.5 0 104.5 4.5'],
+  ['Settings', 'M4 7h9M17 7h3M4 17h3M11 17h9M15 5v4M9 15v4']
+];
+const SERVERS = [
+  { code: 'SYD', city: 'Sydney', region: 'AU-EAST', id: 'SYD-03', dc: 'Equinix SY4', ms: 14, load: 42, ip: '203.0.113.42', tag: 'PQ' },
+  { code: 'MEL', city: 'Melbourne', region: 'AU-SE', id: 'MEL-01', dc: 'NEXTDC M2', ms: 22, load: 31, ip: '203.0.113.87', tag: '' },
+  { code: 'AKL', city: 'Auckland', region: 'NZ-N', id: 'AKL-02', dc: 'Spark DC', ms: 38, load: 18, ip: '198.51.100.9', tag: '' },
+  { code: 'SIN', city: 'Singapore', region: 'AP-SE', id: 'SIN-01', dc: 'Digital Realty', ms: 92, load: 64, ip: '198.51.100.140', tag: 'RELAY' },
+  { code: 'TYO', city: 'Tokyo', region: 'AP-NE', id: 'TYO-04', dc: 'AT Tokyo CC1', ms: 118, load: 57, ip: '192.0.2.61', tag: '' },
+  { code: 'LAX', city: 'Los Angeles', region: 'US-W', id: 'LAX-02', dc: 'CoreSite LA1', ms: 146, load: 49, ip: '192.0.2.200', tag: '' },
+  { code: 'FRA', city: 'Frankfurt', region: 'EU-C', id: 'FRA-01', dc: 'Interxion', ms: 268, load: 22, ip: '192.0.2.18', tag: 'DEDICATED' }
+];
+const PROTOS = [
+  { k: 'mesh', name: 'SHAIP Mesh', tag: 'RECOMMENDED', sub: 'WireGuard core · multi-hop · ML-KEM-768 hybrid', specs: ['UDP 443', 'ChaCha20-Poly1305', 'PQ'] },
+  { k: 'wg', name: 'WireGuard', tag: '', sub: 'Single hop · lowest latency', specs: ['UDP 51820', 'Curve25519'] },
+  { k: 'ike', name: 'IKEv2 / IPsec', tag: '', sub: 'Native iOS fallback for restricted networks', specs: ['UDP 500/4500', 'AES-256-GCM'] }
+];
+const I = {
+  lock: 'M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 017 0v3',
+  hop: 'M5 19a2 2 0 100-4 2 2 0 000 4zM19 9a2 2 0 100-4 2 2 0 000 4zM6.7 15.8l10.6-7.6',
+  dns: 'M12 3a9 9 0 100 18 9 9 0 000-18zM8 12l3 3 5-6'
+};
+
+class Component extends DCLogic {
+  state = { connected: true, srv: 0, proto: 'mesh', kill: true, multihop: true, dns: true, split: false, posture: true, always: true, pq: true, seg: 0, aseg: 0, t: 0 };
+
+  componentDidMount() {
+    import(new URL('./shaip-engine.js', document.baseURI).href).then(m => {
+      const loop = ts => { this.raf = requestAnimationFrame(loop); const o = this.engOpts(); document.querySelectorAll('canvas[data-gfx]').forEach(c => m.draw(c, ts, o)); };
+      this.raf = requestAnimationFrame(loop);
+    });
+    this.iv = setInterval(() => this.setState(s => ({ t: s.t + 1 })), 1000);
+  }
+  componentWillUnmount() { cancelAnimationFrame(this.raf); clearInterval(this.iv); }
+
+  engOpts() {
+    const s = this.state, srv = SERVERS[s.srv];
+    return {
+      connected: s.connected, density: this.props.density ?? 170, hud: this.props.hud ?? true, floor: this.props.floor ?? true, quality: this.props.quality ?? 'Ultra',
+      c1: CY, c2: VI, bad: BA, warn: WA,
+      labels: [[srv.id, `ACTIVE · ${srv.ms}ms`], ['SIN-01', 'RELAY · 92ms'], ['TYO-04', 'STANDBY · 118ms'], ['FRA-01', 'DEDICATED · 268ms']],
+      ms: { 0: `${srv.ms}ms · ACTIVE`, 1: '92ms · RELAY', 2: '118ms', 9: '38ms' },
+      radar: [['C2 BEACON BLOCKED', '185.220.101.4'], ['PHISH DOMAIN', 'acme-sso.co']]
+    };
+  }
+
+  renderVals() {
+    const s = this.state, on = s.connected, srv = SERVERS[s.srv], proto = PROTOS.find(p => p.k === s.proto);
+    const tabs = k => TABS.map(([label, d], i) => ({ label, d, bg: i === k ? 'rgba(255,255,255,0.1)' : 'transparent', color: i === k ? CY : SUB }));
+    const f = k => 150 + 28 * Math.sin(k * .55) + 16 * Math.sin(k * 1.7 + 1) + 8 * Math.sin(k * 3.1);
+    const g = k => 38 + 10 * Math.sin(k * .8 + 2) + 6 * Math.sin(k * 2.3);
+    const rtt = srv.ms + Math.round(Math.sin(s.t * 1.3) * 2);
+    const sec = on ? 5025 + s.t : 0, pad = x => String(x).padStart(2, '0');
+    const timer = on ? `${pad(Math.floor(sec / 3600))}:${pad(Math.floor(sec / 60) % 60)}:${pad(sec % 60)}` : '--:--:--';
+    const W = 326, H = 140, pts = fn => Array.from({ length: 48 }, (_, i) => [i * W / 47, H - 4 - fn(s.t - 47 + i) / 220 * (H - 12)]);
+    const toPath = a => a.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
+    const dline = toPath(pts(on ? f : () => 0));
+    const sw = (key, label, sub) => ({ label, sub, j: s[key] ? 'flex-end' : 'flex-start', bg: s[key] ? OK : 'rgba(255,255,255,0.14)', onClick: () => this.setState({ [key]: !s[key] }) });
+    const div = (arr) => arr.map((x, i) => ({ ...x, bt: i ? '0.5px solid rgba(255,255,255,0.08)' : '0.5px solid transparent' }));
+    return {
+      tabsC: tabs(0), tabsN: tabs(1), tabsA: tabs(2), tabsS: tabs(3), tabsX: tabs(4),
+      toggleConnect: () => this.setState({ connected: !on }),
+      c: {
+        status: on ? 'PROTECTED' : 'EXPOSED', statusColor: on ? OK : BA, pillBg: on ? 'rgba(98,245,168,0.12)' : 'rgba(255,92,122,0.12)',
+        timer, city: on ? srv.city : 'Not connected', node: srv.id, dc: srv.dc, proto: proto.name, ip: on ? srv.ip : '—', rtt: on ? `${rtt} ms` : 'OFFLINE',
+        orbColor: on ? CY : 'rgba(220,228,255,0.55)', orbRing: on ? 'rgba(92,242,255,0.18)' : 'rgba(255,255,255,0.08)', orbGlow: on ? 'rgba(92,242,255,0.28)' : 'rgba(0,0,0,0)',
+        arc: on ? `${(300 + (s.t % 30) * 10).toFixed(0)} 629` : '0 629', orbLabel: on ? 'SECURED' : 'OFFLINE', orbSub: on ? 'Tap to disconnect' : 'Tap to connect'
+      },
+      metrics: [
+        { label: 'DOWN', value: on ? f(s.t).toFixed(0) : '—', unit: 'Mbps' },
+        { label: 'UP', value: on ? g(s.t).toFixed(0) : '—', unit: 'Mbps' },
+        { label: 'RTT', value: on ? String(rtt) : '—', unit: 'ms' },
+        { label: 'LOSS', value: on ? '0.02' : '—', unit: '%' }
+      ].map((m, i) => ({ ...m, pl: i ? '12px' : '0px', bl: i ? '0.5px solid rgba(255,255,255,0.08)' : '0.5px solid transparent' })),
+      quick: [
+        { label: 'Kill switch', state: s.kill ? 'ARMED' : 'OFF', color: s.kill ? OK : BA, d: I.lock, onClick: () => this.setState({ kill: !s.kill }) },
+        { label: 'Multi-hop', state: s.multihop ? '3 HOPS' : 'DIRECT', color: s.multihop ? CY : SUB, d: I.hop, onClick: () => this.setState({ multihop: !s.multihop }) },
+        { label: 'Private DNS', state: s.dns ? 'FILTERING' : 'OFF', color: s.dns ? VI : SUB, d: I.dns, onClick: () => this.setState({ dns: !s.dns }) }
+      ].map(q => ({ ...q, border: q.color === SUB ? 'rgba(255,255,255,0.14)' : q.color.replace('#', '') && hexA(q.color, .35) })),
+      routeTag: s.multihop ? 'MULTI-HOP · 3' : 'DIRECT',
+      route: [
+        { name: 'iPhone', meta: '10.84.12.7', act: true },
+        { name: `${srv.code} edge`, meta: on ? `${rtt} ms` : '—', act: on },
+        { name: 'SIN relay', meta: s.multihop ? '+41 ms' : 'bypassed', act: on && s.multihop },
+        { name: 'Acme VPC', meta: 'ap-se-2', act: on }
+      ].map(r => ({ ...r, ring: r.act ? CY : 'rgba(255,255,255,0.25)', fill: r.act ? CY : '#0A0D18', glow: r.act ? 'rgba(92,242,255,0.6)' : 'rgba(0,0,0,0)' })),
+      netStats: [{ label: 'CIPHER', value: 'ChaCha20' }, { label: 'HANDSHAKE', value: on ? `${s.t % 120}s ago` : '—' }, { label: 'MTU', value: '1420' }],
+      segs: ['All', 'Recommended', 'Dedicated'].map((label, i) => ({ label, bg: i === s.seg ? 'rgba(255,255,255,0.14)' : 'transparent', color: i === s.seg ? '#F5F7FC' : SUB, shadow: i === s.seg ? 'inset 0 0.5px 0 rgba(255,255,255,0.3),0 4px 10px rgba(0,0,0,0.4)' : 'none', onClick: () => this.setState({ seg: i }) })),
+      servers: div(SERVERS.map((x, i) => {
+        const sel = i === s.srv;
+        return {
+          ...x, msTxt: `${x.ms}`, loadPct: x.load + '%', msColor: x.ms < 50 ? OK : x.ms < 150 ? WA : BA,
+          bars: Array.from({ length: 16 }, (_, k) => ({ h: (3 + 13 * Math.abs(Math.sin(k * 1.7 + i * 0.9 + s.t * 0.35))).toFixed(1) + 'px', c: sel ? CY : 'rgba(220,228,255,0.35)' })),
+          bg: sel ? 'linear-gradient(90deg,rgba(92,242,255,0.12),rgba(92,242,255,0.02))' : 'transparent',
+          badgeBg: sel ? 'linear-gradient(135deg,#5CF2FF,#8A9BB8)' : 'rgba(255,255,255,0.06)', badgeInk: sel ? '#04050A' : '#F5F7FC',
+          tagShow: !!x.tag, onClick: () => this.setState({ srv: i, connected: true })
+        };
+      })),
+      traffic: { down: on ? f(s.t).toFixed(1) : '0.0', up: on ? g(s.t).toFixed(1) : '0.0', dline, darea: dline + ` L${W} ${H} L0 ${H} Z`, uline: toPath(pts(on ? g : () => 0)), peak: on ? '212.4' : '0.0' },
+      tiles: [
+        { label: 'SESSION', value: on ? (2.41 + s.t * .018).toFixed(2) : '0.00', unit: 'GB' },
+        { label: 'JITTER', value: on ? (1.2 + Math.abs(Math.sin(s.t)) * .6).toFixed(1) : '—', unit: 'ms' },
+        { label: 'PACKETS', value: on ? (1.84 + s.t * .0021).toFixed(2) : '0', unit: 'M' }
+      ],
+      apps: div([
+        { name: 'GitHub Enterprise', host: 'git.acme.internal', val: '1.24 GB', w: '82%', color: CY },
+        { name: 'AWS Console', host: 'ap-southeast-2', val: '640 MB', w: '48%', color: VI },
+        { name: 'Slack', host: 'acme.slack.com', val: '212 MB', w: '22%', color: OK },
+        { name: 'Figma', host: 'figma.com', val: '96 MB', w: '11%', color: WA }
+      ]),
+      asegs: ['All · 24', 'Granted · 19', 'Pending · 3'].map((label, i) => ({ label, bg: i === s.aseg ? 'rgba(255,255,255,0.14)' : 'transparent', color: i === s.aseg ? '#F5F7FC' : SUB, shadow: i === s.aseg ? 'inset 0 0.5px 0 rgba(255,255,255,0.3),0 4px 10px rgba(0,0,0,0.4)' : 'none', onClick: () => this.setState({ aseg: i }) })),
+      posture: [{ label: 'iOS 26.1', ok: true }, { label: 'Disk encrypted', ok: true }, { label: 'MDM enrolled', ok: true }, { label: 'Biometrics', ok: true }, { label: 'Patch age 4d', ok: s.posture }].map(p => ({ ...p, color: p.ok ? OK : WA })),
+      resources: div([
+        { ab: 'GT', name: 'git.acme.internal', meta: 'HTTPS · Engineering', state: 'GRANTED', color: OK },
+        { ab: 'DB', name: 'prod-db-01', meta: 'Postgres 5432 · SRE', state: 'MFA', color: WA },
+        { ab: 'SH', name: 'bastion-syd', meta: 'SSH 22 · JIT · 58m left', state: 'GRANTED', color: OK },
+        { ab: 'CI', name: 'jenkins.ci', meta: 'HTTPS · Platform', state: 'GRANTED', color: OK },
+        { ab: 'FN', name: 'finance.acme', meta: 'HTTPS · Finance only', state: 'DENIED', color: BA }
+      ].map(r => ({ ...r, pillBg: hexA(r.color, .12) }))),
+      kill: {
+        status: s.kill ? 'ARMED' : 'DISARMED', color: s.kill ? OK : BA, j: s.kill ? 'flex-end' : 'flex-start', bg: s.kill ? OK : 'rgba(255,255,255,0.14)', onClick: () => this.setState({ kill: !s.kill }),
+        desc: s.kill ? 'All traffic is blocked if the tunnel drops. Enforced by workspace policy.' : 'Traffic can leak during reconnects. Your admin has been notified.'
+      },
+      counters: [{ label: 'THREATS', value: '1,284', color: BA }, { label: 'TRACKERS', value: '9,412', color: VI }, { label: 'PHISHING', value: '7', color: WA }],
+      alerts: div([
+        { title: 'C2 beacon blocked', meta: '185.220.101.4 · Tor exit', time: '2m', color: BA },
+        { title: 'Untrusted Wi-Fi joined', meta: 'Cafe_Guest · auto-protected', time: '41m', color: WA },
+        { title: 'Tunnel renegotiated', meta: 'SYD-03 → SYD-04 · 0 loss', time: '1h', color: CY },
+        { title: 'Posture check passed', meta: 'iOS 26.1 · disk encrypted', time: '3h', color: OK }
+      ]),
+      protos: PROTOS.map(p => { const sel = p.k === s.proto; return { ...p, tagShow: !!p.tag, specs: p.specs.map(x => ({ x })), border: sel ? 'rgba(92,242,255,0.55)' : 'rgba(255,255,255,0.14)', shadow: sel ? '0 0 0 4px rgba(92,242,255,0.1),inset 0 0.5px 0 rgba(255,255,255,0.3),0 20px 40px -18px rgba(92,242,255,0.35)' : 'inset 0 0.5px 0 rgba(255,255,255,0.25)', ring: sel ? CY : 'rgba(255,255,255,0.25)', dot: sel ? CY : 'transparent', onClick: () => this.setState({ proto: p.k }) }; }),
+      toggles: div([sw('pq', 'Post-quantum handshake', 'ML-KEM-768 + X25519 hybrid'), sw('split', 'Split tunneling', 'Route corporate subnets only'), sw('always', 'On-demand', 'Reconnect on any network change'), sw('posture', 'Posture enforcement', 'Block access if device drifts')]),
+      advanced: div([{ k: 'Port', v: 'UDP 443' }, { k: 'MTU', v: '1420' }, { k: 'Keepalive', v: '25 s' }]),
+      seats: { used: 148, total: 200 },
+      team: div([
+        { ab: 'MC', name: 'Maya Chen', role: 'Security admin · you', loc: on ? srv.id : 'OFFLINE', color: on ? OK : SUB },
+        { ab: 'JR', name: 'Jonah Reyes', role: 'SRE', loc: 'SIN-01', color: OK },
+        { ab: 'PA', name: 'Priya Anand', role: 'Engineering', loc: 'MEL-01', color: OK },
+        { ab: 'TK', name: 'Tom Kowalski', role: 'Finance', loc: 'Idle 2h', color: WA }
+      ]),
+      devices: div([
+        { name: 'iPhone 17 Pro', meta: 'iOS 26.1 · this device', state: on ? 'TUNNEL UP' : 'IDLE', color: on ? OK : SUB },
+        { name: 'MacBook Pro 14"', meta: 'macOS 26 · SYD-03', state: 'TUNNEL UP', color: OK }
+      ]),
+      la: { city: on ? srv.city : 'Disconnected', node: srv.id, timer, down: on ? f(s.t).toFixed(0) : '0', rtt: on ? String(rtt) : '—', color: on ? OK : BA, status: on ? 'Protected' : 'Exposed' }
+    };
+  }
+}
+function hexA(h, a) { const n = parseInt(h.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; }
+</script>
+</body>
+</html>
