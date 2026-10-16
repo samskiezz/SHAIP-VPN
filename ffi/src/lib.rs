@@ -601,7 +601,9 @@ pub unsafe extern "C" fn pqanon_enroll_link_verify(
 
 /// Enroll this device: verify the link, prove possession of the identity key,
 /// and verify + store the certificate at `<identity_path>.cert`. Returns the
-/// device id (hex; free it), or NULL.
+/// device id (hex; free it), or NULL. `name` is reduced to a platform label
+/// (iPhone, iPad, Android, Windows, Linux, Mac, or "device") before anything
+/// is sent: pass the platform, never the user's device name.
 ///
 /// # Safety
 /// String arguments must be NULL or valid NUL-terminated strings; `err` may

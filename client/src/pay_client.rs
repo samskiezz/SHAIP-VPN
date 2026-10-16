@@ -65,12 +65,22 @@ fn load_wallet(path: &Path) -> Result<Wallet> {
     }
 }
 
+/// Save the wallet readable by its owner only (0600, written atomically): its
+/// tokens are bearer credentials, and an unfinished order's blinding secrets
+/// are exactly what would link a payment to the token it bought.
 fn save_wallet(path: &Path, w: &Wallet) -> Result<()> {
-    if let Some(dir) = path.parent() {
+    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
         std::fs::create_dir_all(dir).ok();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if dir.file_name().is_some_and(|n| n == ".pqanon") {
+                let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
+            }
+        }
     }
     let data = serde_json::to_vec_pretty(w)?;
-    std::fs::write(path, data).context("writing wallet")?;
+    crate::secure_write::write_private(path, &data).context("writing wallet")?;
     Ok(())
 }
 
@@ -357,6 +367,12 @@ mod tests {
             sig_b64: "BBBB".into(),
         });
         save_wallet(&path, &w).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "the wallet holds bearer tokens: owner-only");
+        }
         let back = load_wallet(&path).unwrap();
         assert_eq!(back.tokens.len(), 1);
         assert_eq!(back.tokens[0].denom, "month");

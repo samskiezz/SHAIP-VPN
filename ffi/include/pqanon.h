@@ -91,7 +91,9 @@ int pqanon_enroll_link_verify(const char *link, const char *authority_pub_hex,
 /*
  * Enroll this device: verify the link, prove possession of the identity key,
  * then verify and store the certificate at "<identity_path>.cert".
- * Returns the device id (hex; free it), or NULL.
+ * Returns the device id (hex; free it), or NULL. `name` is reduced to a
+ * platform label (iPhone, iPad, Android, Windows, Linux, Mac, or "device")
+ * before anything is sent: pass the platform, never the user's device name.
  */
 char *pqanon_enroll(const char *link, const char *server,
                     const char *authority_pub_hex, const char *ca_pub_hex,

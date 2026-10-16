@@ -9,6 +9,11 @@
 > does (a reverse proxy or load balancer that logs requests, an upstream DNS
 > resolver that logs queries, a hosting provider's network flow logs, a
 > modified build), this policy is no longer true until you say so here.
+> Run PostgreSQL with `log_error_verbosity=terse` and
+> `log_min_error_statement=panic`, as docker-compose.yml does: otherwise a
+> constraint error's DETAIL line in the database log quotes the value, such
+> as an account number or a device key. Terminate TLS in front of the control
+> plane with access logging off.
 
 ## The short version
 
