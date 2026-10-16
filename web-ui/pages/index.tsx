@@ -7,5 +7,5 @@ export default function Home() {
   useEffect(() => {
     router.replace(getToken() ? "/dashboard" : "/login");
   }, [router]);
-  return <div className="p-6 text-gray-500">Loading…</div>;
+  return <div className="p-6 text-ink-2">Loading…</div>;
 }

@@ -30,9 +30,9 @@ type Order = {
 
 const statusColor: Record<string, string> = {
   awaiting_payment: "text-amber-600",
-  paid: "text-emerald-600",
-  collected: "text-emerald-700",
-  expired: "text-gray-400",
+  paid: "text-ok",
+  collected: "text-ok",
+  expired: "text-ink-3",
 };
 
 type Grant = { session_id: string; grant: string; plan: string; expires_at: string };
@@ -91,14 +91,14 @@ export default function Pay() {
 
   return (
     <main className="mx-auto max-w-2xl p-6">
-      <h1 className="font-mono text-2xl font-bold text-brand-dark">PQ·ANON — Private access</h1>
-      <p className="mt-2 text-gray-600">
+      <h1 className="font-mono text-2xl font-bold text-signal">PQ·ANON — Private access</h1>
+      <p className="mt-2 text-ink-2">
         Pay with Monero or Bitcoin. Get blind-signed access tokens: the token you redeem carries
         nothing that links it to your payment (RFC&nbsp;9474 blind signatures).
       </p>
 
       {/* How it works */}
-      <ol className="mt-6 space-y-2 rounded-lg border bg-white p-5 text-sm text-gray-700 shadow-sm">
+      <ol className="mt-6 space-y-2 glass-tile p-5 text-sm text-ink-2">
         <li>
           <span className="font-semibold">1.</span> In the app, pick a plan and get a one-time Monero
           address.
@@ -120,16 +120,16 @@ export default function Pay() {
 
       {/* Plans */}
       <section className="mt-6">
-        <h2 className="text-lg font-semibold text-brand-dark">
+        <h2 className="text-lg font-semibold text-signal">
           Plans{" "}
           {rails.length > 0 && (
-            <span className="text-sm font-normal text-gray-400">· paid in {rails.join(" / ")}</span>
+            <span className="text-sm font-normal text-ink-3">· paid in {rails.join(" / ")}</span>
           )}
         </h2>
-        {err && <p className="mt-2 text-sm text-red-600">Could not load plans: {err}</p>}
+        {err && <p className="mt-2 text-sm text-threat">Could not load plans: {err}</p>}
         <div className="mt-3 overflow-x-auto">
-        <table className="w-full overflow-hidden rounded-lg border bg-white text-sm shadow-sm">
-          <thead className="bg-gray-50 text-left text-gray-500">
+        <table className="w-full overflow-hidden glass-tile text-sm">
+          <thead className="text-left text-ink-3">
             <tr>
               <th className="px-4 py-2">Plan</th>
               <th className="px-4 py-2">Duration</th>
@@ -139,9 +139,9 @@ export default function Pay() {
           </thead>
           <tbody>
             {denoms.map((d) => (
-              <tr key={d.id} className="border-t">
+              <tr key={d.id} className="border-t border-white/10">
                 <td className="px-4 py-2 font-medium">{d.label}</td>
-                <td className="px-4 py-2 text-gray-600">
+                <td className="px-4 py-2 text-ink-2">
                   {d.duration_days} {d.duration_days === 1 ? "day" : "days"}
                 </td>
                 <td className="px-4 py-2 text-right font-mono">{d.price_xmr} XMR</td>
@@ -150,7 +150,7 @@ export default function Pay() {
             ))}
             {denoms.length === 0 && !err && (
               <tr>
-                <td colSpan={4} className="px-4 py-3 text-gray-400">
+                <td colSpan={4} className="px-4 py-3 text-ink-3">
                   Loading…
                 </td>
               </tr>
@@ -158,16 +158,16 @@ export default function Pay() {
           </tbody>
         </table>
         </div>
-        <p className="mt-2 text-xs text-gray-500">
+        <p className="mt-2 text-xs text-ink-2">
           Buy from the app:{" "}
-          <code className="rounded bg-gray-100 px-1">pqanon buy --plan month --server &lt;url&gt;</code>
+          <code className="rounded bg-white/10 px-1">pqanon buy --plan month --server &lt;url&gt;</code>
         </p>
       </section>
 
       {/* Discount / comp code */}
       <section className="mt-8">
-        <h2 className="text-lg font-semibold text-brand-dark">Have a code?</h2>
-        <p className="mt-1 text-sm text-gray-600">
+        <h2 className="text-lg font-semibold text-signal">Have a code?</h2>
+        <p className="mt-1 text-sm text-ink-2">
           A discount, promo, or test code grants access without a payment. Like a redeemed token,
           claiming a code is identity-free: no account, no card, and it records only that one use was
           spent.
@@ -181,32 +181,32 @@ export default function Pay() {
             }}
             placeholder="SHAIP-XXXX-XXXX-XXXX"
             aria-label="discount or comp code"
-            className="flex-1 rounded-lg border px-3 py-2 font-mono text-sm uppercase"
+            className="field flex-1 font-mono text-sm uppercase"
           />
           <button
             onClick={claimCode}
             disabled={!code.trim() || claiming}
-            className="rounded-lg bg-brand-dark px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
+            className="btn-glass px-4 py-2 text-sm"
           >
             {claiming ? "Redeeming…" : "Redeem"}
           </button>
         </div>
-        {codeErr && <p className="mt-2 text-sm text-red-600">{codeErr}</p>}
+        {codeErr && <p className="mt-2 text-sm text-threat">{codeErr}</p>}
         {grant && (
-          <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm shadow-sm">
-            <p className="font-semibold text-emerald-800">Access granted — plan: {grant.plan}</p>
-            <p className="mt-1 text-emerald-700">
+          <div className="mt-3 rounded-2xl border border-ok/30 bg-ok/5 p-4 text-sm">
+            <p className="font-semibold text-ok">Access granted — plan: {grant.plan}</p>
+            <p className="mt-1 text-ok">
               Valid until <span className="font-mono">{grant.expires_at.slice(0, 10)}</span>.
             </p>
-            <p className="mt-2 text-gray-600">
+            <p className="mt-2 text-ink-2">
               Paste this access grant into the app (Setup → Paste config, or{" "}
-              <code className="rounded bg-white px-1">pqanon redeem --grant …</code>):
+              <code className="rounded bg-white/10 px-1 text-signal">pqanon redeem --grant …</code>):
             </p>
             <textarea
               readOnly
               value={grant.grant}
               onFocus={(e) => e.currentTarget.select()}
-              className="mt-2 h-20 w-full rounded border bg-white p-2 font-mono text-xs text-gray-700"
+              className="field mt-2 h-20 font-mono text-xs"
             />
           </div>
         )}
@@ -214,41 +214,41 @@ export default function Pay() {
 
       {/* Order status lookup */}
       <section className="mt-8">
-        <h2 className="text-lg font-semibold text-brand-dark">Check an order</h2>
+        <h2 className="text-lg font-semibold text-signal">Check an order</h2>
         <div className="mt-3 flex gap-2">
           <input
             value={orderId}
             onChange={(e) => setOrderId(e.target.value)}
             placeholder="order id"
-            className="flex-1 rounded-lg border px-3 py-2 font-mono text-sm"
+            className="field flex-1 font-mono text-sm"
           />
           <button
             onClick={lookup}
             disabled={!orderId.trim()}
-            className="rounded-lg bg-brand-dark px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
+            className="btn-glass px-4 py-2 text-sm"
           >
             Look up
           </button>
         </div>
-        {lookupErr && <p className="mt-2 text-sm text-red-600">{lookupErr}</p>}
+        {lookupErr && <p className="mt-2 text-sm text-threat">{lookupErr}</p>}
         {order && (
-          <div className="mt-3 rounded-lg border bg-white p-4 text-sm shadow-sm">
+          <div className="mt-3 glass-tile p-4 text-sm">
             <div className="flex justify-between">
-              <span className="text-gray-500">Status</span>
+              <span className="text-ink-2">Status</span>
               <span className={`font-semibold ${statusColor[order.status] ?? ""}`}>
                 {order.status.replace("_", " ")}
               </span>
             </div>
             <div className="mt-1 flex justify-between">
-              <span className="text-gray-500">Plan</span>
+              <span className="text-ink-2">Plan</span>
               <span>{order.denom}</span>
             </div>
             <div className="mt-1 flex justify-between">
-              <span className="text-gray-500">Amount</span>
+              <span className="text-ink-2">Amount</span>
               <span className="font-mono">{order.amount_label}</span>
             </div>
             {order.status === "awaiting_payment" && (
-              <div className="mt-2 break-all rounded bg-gray-50 p-2 font-mono text-xs text-gray-700">
+              <div className="mt-2 break-all rounded bg-white/5 p-2 font-mono text-xs text-ink-2">
                 {order.address}
               </div>
             )}
@@ -256,7 +256,7 @@ export default function Pay() {
         )}
       </section>
 
-      <p className="mt-8 rounded-lg border bg-white p-4 text-xs text-gray-600 shadow-sm">
+      <p className="mt-8 glass-tile p-4 text-xs text-ink-2">
         <span className="font-semibold">Limits.</span> No account or email is needed to pay. The token
         is unlinkable, but timing and IP addresses are not: if you buy and connect from the same
         network, or connect right after paying, the operator can guess the link. The VPN server can

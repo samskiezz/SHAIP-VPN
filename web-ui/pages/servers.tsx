@@ -26,9 +26,9 @@ const ROLE_LABEL: Record<string, string> = {
 };
 
 function statusClass(s: string): string {
-  if (s === "active" || s === "listed" || s === "online") return "text-emerald-600";
-  if (s === "jailed" || s === "slashed") return "text-red-600";
-  return "text-gray-500";
+  if (s === "active" || s === "listed" || s === "online") return "text-ok";
+  if (s === "jailed" || s === "slashed") return "text-threat";
+  return "text-ink-2";
 }
 
 export default function Servers() {
@@ -60,19 +60,19 @@ export default function Servers() {
         <div className="flex items-end justify-between">
           <h1 className="text-2xl font-bold">Servers</h1>
           {nodes && (
-            <span className="font-mono text-xs uppercase tracking-wide text-gray-500">
+            <span className="font-mono text-xs uppercase tracking-wide text-ink-2">
               {nodes.length} {nodes.length === 1 ? "node" : "nodes"} · {online} online · {regions}{" "}
               {regions === 1 ? "region" : "regions"}
             </span>
           )}
         </div>
 
-        {err && <div className="text-red-600">Error: {err}</div>}
-        {!nodes && !err && <div className="text-gray-500">Loading…</div>}
+        {err && <div className="text-threat">Error: {err}</div>}
+        {!nodes && !err && <div className="text-ink-2">Loading…</div>}
 
         {nodes && nodes.length === 0 && (
-          <div className="max-w-2xl rounded-xl border bg-white p-6 text-sm text-gray-600 shadow-sm">
-            <div className="font-semibold text-gray-800">No servers registered yet.</div>
+          <div className="max-w-2xl glass p-6 text-sm text-ink-2">
+            <div className="font-semibold text-ink">No servers registered yet.</div>
             <p className="mt-2">
               Servers appear here once an operator registers one with the control plane and bonds
               stake to be listed in the signed directory. This list is exactly the directory — never
@@ -84,7 +84,7 @@ export default function Servers() {
         {nodes && nodes.length > 0 && (
           <div className="max-w-4xl overflow-x-auto">
             <table className="w-full text-left text-sm">
-              <thead className="text-xs uppercase text-gray-500">
+              <thead className="text-xs uppercase text-ink-2">
                 <tr>
                   <th className="py-2">Server</th>
                   <th>Region</th>
@@ -96,10 +96,10 @@ export default function Servers() {
               </thead>
               <tbody>
                 {nodes.map((n) => (
-                  <tr key={n.id} className="border-t">
+                  <tr key={n.id} className="border-t border-white/10">
                     <td className="py-2">
                       <div className="font-medium">{n.name || n.id.slice(0, 8)}</div>
-                      <div className="font-mono text-xs text-gray-400">{n.address}</div>
+                      <div className="font-mono text-xs text-ink-3">{n.address}</div>
                     </td>
                     <td className="font-mono text-xs">{n.region || "—"}</td>
                     <td>{ROLE_LABEL[n.role] ?? n.role}</td>
@@ -117,7 +117,7 @@ export default function Servers() {
           </div>
         )}
 
-        <p className="max-w-2xl text-sm text-gray-500">
+        <p className="max-w-2xl text-sm text-ink-2">
           The directory is signed by the control plane and verified by the client before it trusts a
           server (see docs/directory.md). A server must bond stake to be listed; equivocation is
           slashable. The tunnel connects to one server at a time — there is no mix routing yet, so

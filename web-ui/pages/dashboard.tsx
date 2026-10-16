@@ -28,20 +28,20 @@ export default function Dashboard() {
   return (
     <div>
       <Nav />
-      <div className="space-y-6 p-6">
-        <h1 className="text-2xl font-bold">Dashboard</h1>
-        {err && <div className="text-red-600">Error: {err}</div>}
-        {!net && !err && <div className="text-gray-500">Loading…</div>}
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
-          {me && <Card label="Your account number" value={me.account_number} mono />}
+      <div className="mx-auto max-w-4xl space-y-6 p-6">
+        <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
+        {err && <div className="text-threat">Error: {err}</div>}
+        {!net && !err && <div className="text-ink-2">Loading…</div>}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3">
+          {me && <Card label="Your account number" value={me.account_number} mono accent />}
           {net && <Card label="Servers online" value={`${net.nodes_online} of ${net.nodes_total}`} />}
         </div>
-        <p className="max-w-2xl text-sm text-gray-500">
+        <p className="max-w-2xl text-sm text-ink-2">
           This page shows the network, never your activity: the control plane keeps no record of
           your connections, traffic or the sites you visit, and doesn&apos;t log the address you
           sign in from.
         </p>
-        <p className="max-w-2xl text-sm text-gray-500">
+        <p className="max-w-2xl text-sm text-ink-2">
           The tunnel connects straight to one VPN server. Mix nodes can register and be listed in the
           directory, but traffic does not route through them yet, so there is no mixnet protection.
         </p>
@@ -61,7 +61,7 @@ function DeleteAccount({ onDeleted }: { onDeleted: () => void }) {
 
   if (!open) {
     return (
-      <button onClick={() => setOpen(true)} className="text-sm text-red-600 hover:underline">
+      <button onClick={() => setOpen(true)} className="text-sm text-threat hover:underline">
         Delete account…
       </button>
     );
@@ -81,10 +81,10 @@ function DeleteAccount({ onDeleted }: { onDeleted: () => void }) {
           setBusy(false);
         }
       }}
-      className="max-w-md space-y-3 rounded-xl border border-red-200 bg-white p-4 shadow-sm"
+      className="max-w-md space-y-3 rounded-2xl border border-threat/30 bg-threat/5 p-4"
     >
-      <div className="font-semibold text-red-700">Delete this account</div>
-      <p className="text-sm text-gray-600">
+      <div className="font-semibold text-threat">Delete this account</div>
+      <p className="text-sm text-ink-2">
         Everything stored about it is erased: its devices, API keys and security log. Its devices are
         refused by every server from now on. This can&apos;t be undone.
       </p>
@@ -95,14 +95,14 @@ function DeleteAccount({ onDeleted }: { onDeleted: () => void }) {
         placeholder="your password"
         value={password}
         onChange={(e) => setPassword(e.target.value)}
-        className="w-full rounded border px-3 py-2"
+        className="field"
       />
-      {err && <div className="text-sm text-red-600">{err}</div>}
+      {err && <div className="text-sm text-threat">{err}</div>}
       <div className="flex gap-3">
-        <button type="submit" disabled={busy} className="rounded bg-red-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+        <button type="submit" disabled={busy} className="rounded-full bg-threat px-4 py-2 text-sm font-semibold text-[#160409] disabled:opacity-50">
           {busy ? "…" : "Delete forever"}
         </button>
-        <button type="button" onClick={() => setOpen(false)} className="text-sm text-gray-500">
+        <button type="button" onClick={() => setOpen(false)} className="text-sm text-ink-2">
           Cancel
         </button>
       </div>
@@ -110,11 +110,13 @@ function DeleteAccount({ onDeleted }: { onDeleted: () => void }) {
   );
 }
 
-function Card({ label, value, mono }: { label: string; value: string | number; mono?: boolean }) {
+function Card({ label, value, mono, accent }: { label: string; value: string | number; mono?: boolean; accent?: boolean }) {
   return (
-    <div className="rounded-xl border bg-white p-4 shadow-sm">
-      <div className="text-xs uppercase text-gray-500">{label}</div>
-      <div className={`mt-1 text-2xl font-semibold ${mono ? "font-mono tracking-wider" : ""}`}>{value}</div>
+    <div className="glass p-4">
+      <div className="eyebrow">{label}</div>
+      <div className={`mt-1 text-2xl font-semibold ${mono ? "font-mono tracking-wider" : ""} ${accent ? "text-signal" : "text-ink"}`}>
+        {value}
+      </div>
     </div>
   );
 }

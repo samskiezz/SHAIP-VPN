@@ -51,21 +51,25 @@ export default function Login() {
   if (created) {
     return (
       <div className="flex min-h-screen items-center justify-center p-6">
-        <div className="w-full max-w-sm space-y-4 rounded-xl border bg-white p-6 shadow-sm">
-          <div className="font-mono text-2xl font-bold text-brand-dark">PQ·ANON</div>
-          <p className="text-sm text-gray-600">Your account number is your login:</p>
-          <div className="select-all rounded bg-gray-100 px-3 py-3 text-center font-mono text-xl tracking-wider">
+        <div className="glass w-full max-w-sm space-y-4 p-6">
+          <div className="flex items-center gap-2">
+            <span className="glow-dot text-signal" />
+            <span className="eyebrow">PQANON/1 · Post-quantum VPN</span>
+          </div>
+          <div className="font-mono text-2xl font-bold text-signal">PQ·ANON</div>
+          <p className="text-sm text-ink-2">Your account number is your login:</p>
+          <div className="select-all rounded-xl bg-white/5 px-3 py-3 text-center font-mono text-xl tracking-widest text-ink">
             {formatAccount(created)}
           </div>
-          <p className="text-sm text-gray-600">
+          <p className="text-sm text-ink-2">
             Write it down and keep it with your password. We don&apos;t know who you are, so we
             can&apos;t send it to you or recover it. It is shown only now.
           </p>
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={noted} onChange={(e) => setNoted(e.target.checked)} />
+          <label className="flex items-center gap-2 text-sm text-ink-2">
+            <input type="checkbox" className="accent-signal" checked={noted} onChange={(e) => setNoted(e.target.checked)} />
             I&apos;ve written it down
           </label>
-          {err && <div className="text-sm text-red-600">{err}</div>}
+          {err && <div className="text-sm text-threat">{err}</div>}
           <button
             disabled={!noted || busy}
             onClick={async () => {
@@ -78,7 +82,7 @@ export default function Login() {
                 setBusy(false);
               }
             }}
-            className="w-full rounded bg-brand-dark py-2 font-semibold text-white disabled:opacity-50"
+            className="btn-primary h-12 w-full"
           >
             Continue
           </button>
@@ -89,12 +93,13 @@ export default function Login() {
 
   return (
     <div className="flex min-h-screen items-center justify-center p-6">
-      <form
-        onSubmit={submit}
-        className="w-full max-w-sm space-y-4 rounded-xl border bg-white p-6 shadow-sm"
-      >
-        <div className="font-mono text-2xl font-bold text-brand-dark">PQ·ANON</div>
-        <p className="text-sm text-gray-500">
+      <form onSubmit={submit} className="glass w-full max-w-sm space-y-4 p-6">
+        <div className="flex items-center gap-2">
+          <span className="glow-dot text-signal" />
+          <span className="eyebrow">PQANON/1 · Post-quantum VPN</span>
+        </div>
+        <div className="font-mono text-2xl font-bold text-signal">PQ·ANON</div>
+        <p className="text-sm text-ink-2">
           {mode === "login"
             ? "Sign in with your account number"
             : "Create an account. No email or name: you get a random account number."}
@@ -107,7 +112,7 @@ export default function Login() {
             placeholder="1234 5678 9012 3456"
             value={account}
             onChange={(e) => setAccount(formatAccount(e.target.value).slice(0, 19))}
-            className="w-full rounded border px-3 py-2 font-mono tracking-wider"
+            className="field font-mono tracking-widest"
           />
         )}
         <input
@@ -119,14 +124,10 @@ export default function Login() {
           placeholder="password (min 8 chars)"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          className="w-full rounded border px-3 py-2"
+          className="field"
         />
-        {err && <div className="text-sm text-red-600">{err}</div>}
-        <button
-          type="submit"
-          disabled={busy}
-          className="w-full rounded bg-brand-dark py-2 font-semibold text-white disabled:opacity-50"
-        >
+        {err && <div className="text-sm text-threat">{err}</div>}
+        <button type="submit" disabled={busy} className="btn-primary h-12 w-full">
           {busy ? "…" : mode === "login" ? "Sign in" : "Create account"}
         </button>
         <button
@@ -135,7 +136,7 @@ export default function Login() {
             setErr(null);
             setMode(mode === "login" ? "register" : "login");
           }}
-          className="w-full text-sm text-gray-500 hover:text-gray-900"
+          className="w-full text-sm text-ink-2 transition-colors hover:text-ink"
         >
           {mode === "login" ? "Need an account? Create one" : "Have an account number? Sign in"}
         </button>

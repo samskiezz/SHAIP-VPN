@@ -63,23 +63,23 @@ export default function Devices() {
       <div className="space-y-6 p-6">
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold">Devices</h1>
-          <button onClick={addDevice} className="rounded bg-brand-dark px-4 py-2 text-sm font-semibold text-white">
+          <button onClick={addDevice} className="btn-glass px-4 py-2 text-sm">
             Add a device
           </button>
         </div>
-        {err && <div className="text-red-600">Error: {err}</div>}
+        {err && <div className="text-threat">Error: {err}</div>}
         {link && (
-          <div className="max-w-2xl space-y-2 rounded-xl border bg-white p-4 text-sm shadow-sm">
+          <div className="max-w-2xl space-y-2 glass p-4 text-sm">
             <div>Open this link on the device you&apos;re adding (it works once, until {link.expires_at.slice(11, 16)} UTC):</div>
-            <div className="select-all break-all rounded bg-gray-100 p-2 font-mono text-xs">{link.url}</div>
+            <div className="select-all break-all rounded bg-black/30 p-2 font-mono text-xs text-ink">{link.url}</div>
           </div>
         )}
         {devices.length === 0 ? (
-          <div className="text-gray-500">No devices enrolled.</div>
+          <div className="text-ink-2">No devices enrolled.</div>
         ) : (
           <div className="max-w-3xl overflow-x-auto">
           <table className="w-full text-left text-sm">
-            <thead className="text-xs uppercase text-gray-500">
+            <thead className="text-xs uppercase text-ink-2">
               <tr>
                 <th className="py-2">Device</th>
                 <th>Enrolled</th>
@@ -90,16 +90,16 @@ export default function Devices() {
             </thead>
             <tbody>
               {devices.map((d) => (
-                <tr key={d.id} className="border-t">
+                <tr key={d.id} className="border-t border-white/10">
                   <td className="py-2">{d.name}</td>
                   <td>{dayOf(d.created_at)}</td>
                   <td>{dayOf(d.cert_expires)}</td>
                   <td className="font-mono text-xs">{d.id.slice(0, 8)}</td>
                   <td className="text-right">
                     {d.revoked_at ? (
-                      <span className="text-gray-400">revoked {dayOf(d.revoked_at)}</span>
+                      <span className="text-ink-3">revoked {dayOf(d.revoked_at)}</span>
                     ) : (
-                      <button onClick={() => revoke(d.id)} className="text-red-600 hover:underline">
+                      <button onClick={() => revoke(d.id)} className="text-threat hover:underline">
                         Revoke
                       </button>
                     )}

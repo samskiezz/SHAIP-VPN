@@ -140,7 +140,7 @@ function check(name, ok, detail = '') {
     await p2.locator('input[placeholder*="1234"]').fill(account);
     await p2.locator('input[type=password]').fill('the-wrong-password');
     await p2.getByRole('button', { name: /sign in/i }).click();
-    await p2.locator('.text-red-600').first().waitFor({ timeout: 10000 });
+    await p2.locator('.text-threat').first().waitFor({ timeout: 10000 });
     check('a wrong password is rejected at sign-in', /\/login$/.test(p2.url()) || true);
     await shot(p2, '06-wrong-password');
     await c2.close();
@@ -168,7 +168,7 @@ function check(name, ok, detail = '') {
   await page.locator('input[placeholder*="1234"]').fill(account);
   await page.locator('input[type=password]').fill(PASSWORD);
   await page.getByRole('button', { name: /sign in/i }).click();
-  await page.locator('.text-red-600').first().waitFor({ timeout: 10000 });
+  await page.locator('.text-threat').first().waitFor({ timeout: 10000 });
   check('a deleted account can no longer sign in', true);
   await shot(page, '08-deleted-cannot-sign-in');
 
