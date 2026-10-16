@@ -18,13 +18,13 @@ ChaCha20-Poly1305, HKDF/HMAC-SHA256, Argon2id).
 |-----------|----------|-------|-------------|
 | `pqanon` client lib (`wire`, `handshake`, `obf`, `transport`, `mix`, `routing`, `kdf`) | Rust | **Working** | 25 unit tests |
 | Full hybrid handshake (client **and** server sides) | Rust | **Working** | handshake + tunnel tests |
-| **The VPN, end to end**: `pqanon run` (full tunnel: routes, DNS, IPv6 block, optional kill switch, reconnect, rekey) ↔ `pqanond --tun --nat` (NAT, DNS forwarder, per-client addresses, keepalive, anti-spoofing) | Rust | **Working** | 4-namespace lab, 36 checks: traffic and DNS leave only from the server, 16 MiB intact, survives server restart and crash, kill switch holds after a client crash ([scripts/e2e/vpn_lab.sh](scripts/e2e/vpn_lab.sh)) |
+| **The VPN, end to end**: `pqanon run` (full tunnel: routes, DNS, IPv6 block, optional kill switch, reconnect, rekey) ↔ `pqanond --tun --nat` (NAT, DNS forwarder, per-client addresses, keepalive, anti-spoofing) | Rust | **Working** | 4-namespace lab, 41 checks: traffic and DNS leave only from the server, 16 MiB intact, survives server restart and crash, kill switch holds after a client crash, the server's logs hold no address or client identity, a disconnected client's NAT state is deleted ([scripts/e2e/vpn_lab.sh](scripts/e2e/vpn_lab.sh)) |
 | `pqanon` CLI (`keygen`, `selftest`, `run`, `status`, `disconnect`, `down`, `probe`, `enroll`, `crl`) | Rust | **Working** | `pqanon selftest` + battery E2E stages |
 | `pqanon::supervisor` reconnecting link + `pqanon-ffi` C ABI for native shells | Rust + C | **Working** | restart/crash/hang/rekey test vs real `pqanond`; C and Swift programs against a live server ([docs/client-api.md](docs/client-api.md)) |
 | `pqanond` session core: one session per identity, stable addresses, idempotent handshake retransmits, idle expiry, Close on shutdown | Rust | **Working** | unit tests with real handshakes + the lab |
 | `pqanon-mixd` mix node (peels + forwards onion cells) | Rust | **Working, standalone** | mix round-trip tests. The tunnel does **not** route through mixes yet. |
-| Control plane `PQANON-CP/1` (auth, nodes, connections, CRL) | Go | **Working** | `go test`, live curl |
-| Web UI (dashboard, connections, routing, login) | Next.js/TS | **Working** | `next build`, `tsc` |
+| Control plane `PQANON-CP/1` (anonymous accounts, devices, nodes, payments, CRL): no email, no request log, no stored addresses | Go | **Working** | `go test` incl. privacy tests (no address, id or path in any log line or stored record), live curl |
+| Web UI (account-number sign-up, dashboard, devices, buy access, delete account) | Next.js/TS | **Working** | `next build`, `tsc`, a browser run with no third-party requests |
 | iOS app: a Packet Tunnel extension running the Rust core; screens show only measured state and state the limits (`clients/ios`) | SwiftUI + Rust | **Written** (needs an Xcode 26 build) | the app's FFI Swift run against a live `pqanond` on Linux; Rust core clippy-clean for `aarch64-apple-ios`; `SHAIPCore` tests ([clients/ios/README.md](clients/ios/README.md)) |
 | Postgres schema + in-memory fallback | SQL/Go | **Working** | one store contract run against both, incl. real PostgreSQL |
 | Signing-key custody: key files + **PKCS#11 HSM**; persistent daemon identities | Go + Rust | **Working** | real SoftHSM2 token + restart checks ([docs/keys.md](docs/keys.md)) |
@@ -54,6 +54,25 @@ With `pqanon run` (or the iOS app) connected:
 - **With the kill switch**, nothing leaves outside the tunnel, even if the
   client crashes, until it reconnects or you run `pqanon down`.
 
+What it keeps about you: **nothing that identifies you.**
+
+- **No identity.** An account is a random account number and a password; there
+  is no email, name or phone number, and you can pay without an account.
+- **No logs of you.** No server logs a client's IP address, identity, device or
+  tunnel address, or a line per session, and there is no option that turns it
+  on. Every server log line also passes through an address filter. The control
+  plane has no request log and stores no address.
+- **No usage records.** Nothing records when you connected, for how long, how
+  much you sent, where it went or what you looked up. Account records keep the
+  day, not the moment.
+- **Nothing on your phone's lock screen or in its backups**: no server or
+  address on the Live Activity, and device keys stay out of iCloud backups.
+- **Delete your account** at any time; everything stored about it goes.
+
+What the server necessarily sees while you're connected (your address, where
+your traffic goes) is held in memory for the session only. The full list of
+what is and isn't kept: [docs/privacy-policy.md](docs/privacy-policy.md).
+
 What it does **not** do:
 
 - **Hide your traffic from the VPN server.** The server sees where your traffic
@@ -73,8 +92,8 @@ What it does **not** do:
 No cards, no fiat, no identity. Access is bought with **Monero** (or Bitcoin) and
 redeemed through **Chaumian e-cash** (RFC 9474 RSA blind signatures). The mint
 blind-signs your access tokens without ever seeing them, so a redeemed token
-carries nothing that links it to the order that paid for it, and redemptions
-are recorded without an IP address. That covers the token only. Timing and
+carries nothing that links it to the order that paid for it, and a redemption
+records only a hash of the token and the day. That covers the token only. Timing and
 network addresses can still suggest a link, for example if you buy and connect
 from the same network. A Bitcoin payment is public on-chain.
 
@@ -93,7 +112,7 @@ Full design, crypto choices, and threat model, including those limits:
 ```
 client/         Rust core library (lib "pqanon") + `pqanon` CLI binary
 server/         Rust daemons: pqanond (tunnel) + pqanon-mixd (mix node)
-control-plane/  Go REST API (PQANON-CP/1): auth, nodes, connections, CRL
+control-plane/  Go REST API (PQANON-CP/1): anonymous accounts, devices, nodes, payments, CRL
 db/             PostgreSQL schema (§15)
 web-ui/         Next.js dashboard
 clients/ios/    SwiftUI iOS app (SHAIP v2 design), SHAIPCore package, design reference

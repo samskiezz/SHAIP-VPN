@@ -33,6 +33,10 @@ type User struct {
 // already in use (a 1-in-10^16 coincidence; the caller draws a new number).
 var ErrAccountNumberTaken = errors.New("account number already in use")
 
+// ErrOwnsNodes is returned by DeleteAccount for an account that still runs
+// nodes: their bonded stake needs an owner, so the nodes go first.
+var ErrOwnsNodes = errors.New("account still owns nodes")
+
 // day is t's UTC calendar day. Every record about an account (when it was made,
 // when a device was enrolled or revoked, an audit entry, a key) stores the day,
 // never the moment: a moment could be lined up against network records kept
@@ -228,6 +232,12 @@ type Store interface {
 	GetUserByAccount(ctx context.Context, number string) (*User, error)
 	GetUserByID(ctx context.Context, id string) (*User, error)
 	CountUsers(ctx context.Context) (int, error)
+	// DeleteAccount erases an account and everything stored about it: its API
+	// keys, enrollment tokens, devices and security log. Its devices stay
+	// refused: their ids (and nothing else) move to the CRL until their
+	// certificates expire. ErrOwnsNodes if it still owns nodes, ErrNotFound if
+	// there is no such account; either way nothing changes.
+	DeleteAccount(ctx context.Context, userID string, now time.Time) error
 
 	ListNodes(ctx context.Context) ([]Node, error)
 	GetNode(ctx context.Context, id string) (*Node, error)
@@ -259,6 +269,9 @@ type Store interface {
 	// RevokeDevice marks one of the user's devices revoked. Revoking twice keeps
 	// the first day. ErrNotFound if the device is not theirs.
 	RevokeDevice(ctx context.Context, id, userID string) error
+	// ListRevokedDevices returns the ids and revocation days of every refused
+	// device: revoked ones, and those of deleted accounts whose certificates
+	// have not expired yet. Only ID and RevokedAt are filled in.
 	ListRevokedDevices(ctx context.Context) ([]Device, error)
 
 	CreateBond(ctx context.Context, b *StakeBond) error
@@ -300,6 +313,7 @@ type MemStore struct {
 	spent    map[string]bool         // keyed by denom|nonce_hash
 	enroll   map[string]*EnrollToken // keyed by token id
 	devices  map[string]*Device      // keyed by device id
+	crlOnly  map[string]*Device      // deleted accounts' devices: id, revoked, cert expiry only
 	bonds    map[string]*StakeBond   // keyed by bond id
 	unbonds  []Unbonding
 	unbondSq int64
@@ -316,6 +330,7 @@ func NewMemStore() *MemStore {
 		spent:   make(map[string]bool),
 		enroll:  make(map[string]*EnrollToken),
 		devices: make(map[string]*Device),
+		crlOnly: make(map[string]*Device),
 		bonds:   make(map[string]*StakeBond),
 		slashes: make(map[string]*SlashEvent),
 	}
@@ -362,6 +377,57 @@ func (m *MemStore) GetUserByID(_ context.Context, id string) (*User, error) {
 		}
 	}
 	return nil, ErrNotFound
+}
+
+func (m *MemStore) DeleteAccount(_ context.Context, userID string, now time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	number := ""
+	for n, u := range m.users {
+		if u.ID == userID {
+			number = n
+		}
+	}
+	if number == "" {
+		return ErrNotFound
+	}
+	for _, n := range m.nodes {
+		if n.OwnerID == userID {
+			return ErrOwnsNodes
+		}
+	}
+	for id, d := range m.devices {
+		if d.UserID != userID {
+			continue
+		}
+		revoked := day(now)
+		if d.RevokedAt != nil {
+			revoked = *d.RevokedAt
+		}
+		if d.CertExpires.After(now) {
+			m.crlOnly[id] = &Device{ID: id, RevokedAt: &revoked, CertExpires: d.CertExpires}
+		}
+		delete(m.devices, id)
+	}
+	for id, k := range m.apiKeys {
+		if k.UserID == userID {
+			delete(m.apiKeys, id)
+		}
+	}
+	for id, t := range m.enroll {
+		if t.UserID == userID {
+			delete(m.enroll, id)
+		}
+	}
+	kept := m.audit[:0]
+	for _, e := range m.audit {
+		if e.UserID != userID {
+			kept = append(kept, e)
+		}
+	}
+	m.audit = kept
+	delete(m.users, number)
+	return nil
 }
 
 func (m *MemStore) CountUsers(_ context.Context) (int, error) {
@@ -621,7 +687,13 @@ func (m *MemStore) ListRevokedDevices(_ context.Context) ([]Device, error) {
 	out := make([]Device, 0)
 	for _, d := range m.devices {
 		if d.RevokedAt != nil {
-			out = append(out, *d)
+			out = append(out, Device{ID: d.ID, RevokedAt: d.RevokedAt})
+		}
+	}
+	now := time.Now()
+	for _, d := range m.crlOnly {
+		if d.CertExpires.After(now) {
+			out = append(out, Device{ID: d.ID, RevokedAt: d.RevokedAt})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })

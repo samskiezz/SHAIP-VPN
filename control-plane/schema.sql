@@ -119,6 +119,15 @@ CREATE TABLE IF NOT EXISTS devices (
     revoked_at     TIMESTAMPTZ
 );
 
+-- Devices of deleted accounts: the account and everything about it are gone,
+-- but tunnel servers must keep refusing the devices' certificates until they
+-- expire, so the CRL keeps their ids (nothing else) until then.
+CREATE TABLE IF NOT EXISTS crl_devices (
+    id             TEXT PRIMARY KEY,
+    revoked_at     TIMESTAMPTZ NOT NULL,           -- a UTC day
+    cert_expires   TIMESTAMPTZ NOT NULL
+);
+
 -- Node staking (docs/staking.md). Stake is bonded by paying a real charge, is
 -- locked through an unbonding period during which it stays slashable, and is
 -- slashed only on cryptographic proof of equivocation (two conflicting signed

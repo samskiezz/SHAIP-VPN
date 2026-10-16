@@ -150,7 +150,12 @@ Defends:
 
 - From the token, the operator cannot tell which order paid for a session; it
   keeps no record that links the two, so there is none to leak or hand over.
-  Redemptions are recorded without the caller's IP address.
+  A redemption records only a hash of the token's nonce and the day: no
+  account, no address, no moment. Orders keep days, not moments, too, and
+  access grants expire at a day boundary, so the redemption moment can't be
+  read back from a grant.
+- The live order and redemption counters are on a private metrics listener,
+  not the public API, so outsiders can't watch for the moment someone pays.
 - An on-chain observer sees no amounts and no addresses for a Monero payment
   (within Monero's known limits, above).
 - A stolen `spent_tokens` table reveals no nonces and no payment links.

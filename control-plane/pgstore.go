@@ -84,6 +84,54 @@ func (s *PgStore) GetUserByID(ctx context.Context, id string) (*User, error) {
 	return scanUser(s.pool.QueryRow(ctx, `SELECT `+userColumns+` FROM users WHERE id = $1`, id))
 }
 
+func (s *PgStore) DeleteAccount(ctx context.Context, userID string, now time.Time) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx) // no-op once committed
+
+	var found string
+	err = tx.QueryRow(ctx, `SELECT id::text FROM users WHERE id = $1 FOR UPDATE`, userID).Scan(&found)
+	if errors.Is(err, pgx.ErrNoRows) || isBadUUID(err) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	var ownsNodes bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM nodes WHERE owner_id = $1)`, userID).Scan(&ownsNodes); err != nil {
+		return err
+	}
+	if ownsNodes {
+		return ErrOwnsNodes
+	}
+	// The devices stay refused until their certificates expire: only the id,
+	// the revocation day and the expiry are kept, in the CRL table.
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO crl_devices (id, revoked_at, cert_expires)
+		   SELECT id, COALESCE(revoked_at, $2), cert_expires FROM devices
+		    WHERE user_id = $1 AND cert_expires > $3
+		 ON CONFLICT (id) DO NOTHING`, userID, day(now), now); err != nil {
+		return err
+	}
+	for _, q := range []string{
+		`DELETE FROM devices WHERE user_id = $1`,
+		`DELETE FROM enroll_tokens WHERE user_id = $1`,
+		`DELETE FROM api_keys WHERE user_id = $1`,
+		`DELETE FROM audit_log WHERE user_id = $1`,
+		`DELETE FROM users WHERE id = $1`,
+	} {
+		if _, err := tx.Exec(ctx, q, userID); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM crl_devices WHERE cert_expires <= $1`, now); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 func (s *PgStore) CountUsers(ctx context.Context) (int, error) {
 	var n int
 	err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM users`).Scan(&n)
@@ -445,9 +493,24 @@ func (s *PgStore) RevokeDevice(ctx context.Context, id, userID string) error {
 }
 
 func (s *PgStore) ListRevokedDevices(ctx context.Context) ([]Device, error) {
-	return s.queryDevices(ctx,
-		`SELECT id, user_id::text, name, ed_pub, token_id, cert_expires, created_at, revoked_at
-		 FROM devices WHERE revoked_at IS NOT NULL ORDER BY id`)
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, revoked_at FROM devices WHERE revoked_at IS NOT NULL
+		 UNION ALL
+		 SELECT id, revoked_at FROM crl_devices WHERE cert_expires > NOW()
+		 ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]Device, 0)
+	for rows.Next() {
+		var d Device
+		if err := rows.Scan(&d.ID, &d.RevokedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
 }
 
 func (s *PgStore) queryDevices(ctx context.Context, sql string, args ...any) ([]Device, error) {

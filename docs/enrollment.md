@@ -50,7 +50,7 @@ Device-certificate body:
 u16 len | "PQANON-DEVCERT-V1"
 u8      | version (1)
 [16]    | device id
-u16 len | account (UTF-8)
+u16 len | account (UTF-8): "-" in every certificate the control plane issues
 [32]    | device Ed25519 public key
 u64     | issued-at  (Unix seconds)
 u64     | expires-at (Unix seconds)
@@ -98,7 +98,7 @@ format ever changes, both sides change together.
 | Endpoint | Auth | Does |
 |---|---|---|
 | `POST /api/enroll/issue` | session | Issue a one-time token for the caller's account (default 15 min, max 24 h). Returns `token`, the `pqanon://enroll?t=…&v=1` link, and the expiry. |
-| `POST /api/enroll/claim` | none (the token is the authorization) | `{token, device_pub, pop, name}` returns a device certificate (1 year). |
+| `POST /api/enroll/claim` | none (the token is the authorization) | `{token, device_pub, pop, name}` returns a device certificate (1 year from the UTC day). `name` is reduced to a platform label: iPhone, iPad, Android, Windows, Linux, Mac, or "device". |
 | `GET /api/enroll/keys` | none | `enroll_authority_pub`, `device_ca_pub`, `crl_pub` — the pins. |
 | `GET /api/devices` | session | The caller's devices. |
 | `DELETE /api/devices/{id}` | session | Revoke a device. It is published in the signed CRL. |
@@ -112,8 +112,16 @@ format ever changes, both sides change together.
   claim — a reused device key, a bad proof — changes nothing and does not burn the
   token. The certificate is signed *before* the claim commits, so a signing
   failure (say, an HSM error) burns nothing either.
-- **No personal data in artifacts.** Tokens and certificates name the account by
-  its opaque user id, never its email.
+- **No personal data.** Accounts have no email or name to begin with. The
+  token names the account by its opaque id, and only the device being enrolled
+  sees it. The certificate names no account at all (the field is `"-"`): every
+  tunnel server the device connects to sees the certificate, and none needs to
+  know whose device it is, so servers run by third parties can't link one
+  customer's devices together. Device names are never stored, only a platform
+  label (clients used to send the OS's device name, "Alex's iPhone", and the
+  CLI and iOS app now send only the platform). Issue, claim and revocation
+  times are stored as UTC days, and certificates are issued on the day
+  boundary, so none of them can be lined up against network logs.
 - **Keys.** The enrollment authority and the device CA are resolved like every
   other control-plane key (`ENROLL_AUTHORITY_SIGNER`, `DEVICE_CA_SIGNER`, or
   `KEY_DIR`), so both can live in an HSM — see [keys.md](keys.md).
@@ -126,8 +134,8 @@ format ever changes, both sides change together.
 ```bash
 pqanon enroll 'pqanon://enroll?t=PQE1.…&v=1' --server https://cp.example \
   --authority-key <pinned enroll_authority_pub> --ca-key <pinned device_ca_pub> \
-  --identity ~/.pqanon/client.id --name laptop
-#  Enrolled device 4b40…0a08 for account 21f6…b2e7
+  --identity ~/.pqanon/client.id
+#  Enrolled device 4b40…0a08
 #  certificate: ~/.pqanon/client.id.cert
 ```
 
@@ -135,7 +143,9 @@ The client verifies the link against the pinned authority key **before**
 contacting anyone, so a tampered or forged link is refused locally. It binds the
 identity's Ed25519 key — the same key that signs every tunnel handshake. It also
 checks that the returned certificate verifies under the pinned CA and binds
-exactly that key to the token's account before storing it (0600). Point
+exactly that key before storing it (0600). The device's only description sent
+is its platform label (`--name` defaults to this machine's platform; anything
+else given is reduced to one). Point
 `[client].device_cert` at the file and `pqanon run` presents it.
 `pqanon crl --url … --pubkey <crl_pub>` fetches and verifies the revocation
 list.
@@ -158,10 +168,12 @@ and says so in its log.
 
 The certificate travels inside CLIENT_FINISH, which is **AEAD-sealed** under a
 key derived from `ss_mix`. Neither the client's long-term keys nor its
-certificate (and so its account id) ever appear on the wire. This was previously
-documented but not true: CLIENT_FINISH went out in plaintext. A regression test
-now fails if the identity key, the certificate, or the account id is ever
-visible in the bytes on the wire.
+certificate ever appear on the wire. This was previously documented but not
+true: CLIENT_FINISH went out in plaintext. A regression test now fails if the
+identity key, the certificate, or an account id is ever visible in the bytes on
+the wire. The server learns the device's key and id while the device is
+connected (that is how it admits it), logs neither, and forgets both when the
+session ends.
 
 ## Tested
 

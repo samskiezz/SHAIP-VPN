@@ -1,7 +1,10 @@
 package main
 
 import (
+	"encoding/json"
+	"errors"
 	"net/http"
+	"time"
 )
 
 // userID pulls the authenticated subject the auth middleware stored on the
@@ -27,6 +30,40 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		"role":           u.Role,
 		"created_at":     u.CreatedAt,
 	})
+}
+
+// handleDeleteAccount erases the caller's account and everything stored about
+// it (Store.DeleteAccount). The password is asked again, so a stolen session
+// token alone can't do it.
+func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxAuthBody)).Decode(&body); err != nil {
+		errJSON(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	u, err := s.store.GetUserByID(r.Context(), userID(r))
+	if err != nil {
+		errJSON(w, http.StatusNotFound, "not found")
+		return
+	}
+	if ok, err := verifyPassword(body.Password, u.PasswordHash); err != nil || !ok {
+		errJSON(w, http.StatusUnauthorized, "wrong password")
+		return
+	}
+	switch err := s.store.DeleteAccount(r.Context(), u.ID, time.Now()); {
+	case errors.Is(err, ErrOwnsNodes):
+		errJSON(w, http.StatusConflict, "this account still owns nodes: unbond and delete them first")
+		return
+	case errors.Is(err, ErrNotFound):
+		errJSON(w, http.StatusNotFound, "not found")
+		return
+	case err != nil:
+		errJSON(w, http.StatusInternalServerError, "could not delete the account")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
 // --- network stats (§16) ---

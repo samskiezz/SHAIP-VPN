@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strconv"
 	"time"
 
@@ -142,11 +143,10 @@ func main() {
 // the real router, middleware stack, and auth group.
 //
 // There is no request logger, and nothing reads the client's address or a
-// forwarding header: a request leaves no record of who made it. (Recoverer
-// prints a panic's value and stack, never the request.)
+// forwarding header: a request leaves no record of who made it.
 func routes(srv *Server, label string) http.Handler {
 	r := chi.NewRouter()
-	r.Use(middleware.Recoverer)
+	r.Use(recoverer)
 	r.Use(middleware.Timeout(30 * time.Second))
 	r.Use(corsMiddleware)
 	r.Use(metricsMiddleware)
@@ -190,6 +190,7 @@ func routes(srv *Server, label string) http.Handler {
 			r.Get("/stats", srv.handleStats)
 			r.Get("/admin/stats", srv.handleAdminStats)
 			r.Get("/me", srv.handleMe)
+			r.Delete("/me", srv.handleDeleteAccount)
 			r.Get("/apikeys", srv.handleListAPIKeys)
 			r.Post("/apikeys", srv.handleCreateAPIKey)
 			r.Delete("/apikeys/{id}", srv.handleDeleteAPIKey)
@@ -202,6 +203,24 @@ func routes(srv *Server, label string) http.Handler {
 		})
 	})
 	return r
+}
+
+// recoverer turns a handler panic into a 500. It logs the panic and its stack
+// through the standard logger (so through the address redactor), and nothing
+// about the request.
+func recoverer(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if v := recover(); v != nil {
+				if v == http.ErrAbortHandler {
+					panic(v) // net/http's own signal; it logs nothing for it
+				}
+				log.Printf("panic in a request handler: %v\n%s", v, debug.Stack())
+				errJSON(w, http.StatusInternalServerError, "internal error")
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
 }
 
 // metricsRoutes is the metrics listener's handler: /metrics and nothing else.

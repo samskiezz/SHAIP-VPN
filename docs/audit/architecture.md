@@ -11,7 +11,7 @@ but not-yet-wired pieces are called out explicitly so the picture stays honest.
 | `pqanon` (client bin) | `client/src/main.rs` | Rust | CLI: `keygen`, `selftest`, `run` |
 | `pqanond` | `server/src/bin/pqanond.rs` | Rust | Tunnel server daemon (handshake responder + data echo) |
 | `pqanon-mixd` | `server/src/bin/pqanon-mixd.rs` | Rust | Mix node: peels one onion layer, replay-filters, forwards |
-| Control plane | `control-plane/` | Go | Users, nodes, connections, routing rules, settings, signed CRL |
+| Control plane | `control-plane/` | Go | Anonymous accounts (random account numbers), devices, nodes, payments, staking, signed CRL |
 | Web UI | `web-ui/` | TypeScript / Next.js | Operator dashboard |
 
 The Rust side is a two-package Cargo workspace (`client/`, `server/`); `server`
@@ -78,13 +78,19 @@ keys.
 `control-plane/` exposes (chi router, `Store` interface backed by an in-memory
 store by default or Postgres when `DATABASE_URL` is set):
 
-- `POST /api/auth/register`, `POST /api/auth/login`
+- `POST /api/auth/register` (`{password}` → a random 16-digit `account_number`,
+  the login; no email or name is taken), `POST /api/auth/login`
+  (`{account_number, password}`)
 - `GET /api/crl` (Ed25519-signed revocation list, unauthenticated)
-- Authenticated (`Bearer` token): `GET/POST /api/nodes`, `DELETE /api/nodes/{id}`,
-  `GET /api/connections`, `DELETE /api/connections/{id}`, `GET /api/mixnet`,
-  `GET /api/dashboard`, `GET /api/stats`, `GET /api/me`,
-  `GET/POST /api/routing`, `DELETE /api/routing/{id}`,
-  `GET/PUT /api/settings`.
+- Payments, enrollment claims, staking status and the directory (public)
+- Authenticated (`Bearer` token): `GET/POST /api/nodes`, `GET/DELETE /api/nodes/{id}`,
+  `GET /api/mixnet`, `GET /api/dashboard`, `GET /api/stats`, `GET/DELETE /api/me`
+  (deleting erases the account), API keys, the caller's own audit log, devices
+  and enrollment, staking bonds.
+
+The control plane keeps no per-account connection log, no domain rules and no
+settings; it has no request logger and stores no IP address
+(docs/privacy-policy.md, docs/log-schema.md).
 
 ## Trust boundaries
 

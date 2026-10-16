@@ -160,7 +160,7 @@ Link a static build with the libraries `cargo rustc -p pqanon-ffi --lib
   - an enrolled device is admitted via `pqanon probe` **and** via the C program;
   - an unenrolled identity is refused;
   - after revocation, the same device is refused once the daemon refreshes its
-    CRL (its log reads `device has been revoked`);
+    CRL (it is refused, and the server logs nothing about it);
   - in **TUN mode**, `pqanon probe` sends ICMP echo requests through the tunnel,
     and the server's **kernel** answers. Three checksum-valid echo replies come
     back from the gateway, to the address assigned in the ACK.

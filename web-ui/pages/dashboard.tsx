@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import Nav from "@/components/Nav";
-import { api, getToken } from "@/lib/api";
+import { api, clearToken, getToken } from "@/lib/api";
 
 type Network = {
   nodes_online: number;
@@ -45,8 +45,68 @@ export default function Dashboard() {
           The tunnel connects straight to one VPN server. Mix nodes can register and be listed in the
           directory, but traffic does not route through them yet, so there is no mixnet protection.
         </p>
+        <DeleteAccount onDeleted={() => { clearToken(); router.replace("/login"); }} />
       </div>
     </div>
+  );
+}
+
+// Erases the account and everything stored about it (devices, API keys, the
+// security log). Enrolled devices stay refused by every server.
+function DeleteAccount({ onDeleted }: { onDeleted: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [password, setPassword] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)} className="text-sm text-red-600 hover:underline">
+        Delete account…
+      </button>
+    );
+  }
+  return (
+    <form
+      onSubmit={async (e) => {
+        e.preventDefault();
+        setBusy(true);
+        setErr(null);
+        try {
+          await api("/api/me", { method: "DELETE", body: { password } });
+          onDeleted();
+        } catch (e) {
+          setErr(e instanceof Error ? e.message : "request failed");
+        } finally {
+          setBusy(false);
+        }
+      }}
+      className="max-w-md space-y-3 rounded-xl border border-red-200 bg-white p-4 shadow-sm"
+    >
+      <div className="font-semibold text-red-700">Delete this account</div>
+      <p className="text-sm text-gray-600">
+        Everything stored about it is erased: its devices, API keys and security log. Its devices are
+        refused by every server from now on. This can&apos;t be undone.
+      </p>
+      <input
+        type="password"
+        required
+        autoComplete="current-password"
+        placeholder="your password"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+        className="w-full rounded border px-3 py-2"
+      />
+      {err && <div className="text-sm text-red-600">{err}</div>}
+      <div className="flex gap-3">
+        <button type="submit" disabled={busy} className="rounded bg-red-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+          {busy ? "…" : "Delete forever"}
+        </button>
+        <button type="button" onClick={() => setOpen(false)} className="text-sm text-gray-500">
+          Cancel
+        </button>
+      </div>
+    </form>
   );
 }
 

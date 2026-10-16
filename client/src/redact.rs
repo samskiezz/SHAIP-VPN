@@ -128,8 +128,13 @@ impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Redacting {
 }
 
 /// Install the daemon log subscriber: `RUST_LOG` (default `default_filter`),
-/// to stderr, through the address redactor.
+/// to stderr, through the address redactor. Panic messages go through it too.
 pub fn init_server_logging(default_filter: &str) {
+    std::panic::set_hook(Box::new(|info| {
+        let thread = std::thread::current();
+        let line = format!("thread '{}' panicked: {info}\n", thread.name().unwrap_or("<unnamed>"));
+        let _ = io::stderr().write_all(redact_addrs(&line).as_bytes());
+    }));
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| default_filter.into()),

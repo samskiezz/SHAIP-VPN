@@ -275,6 +275,54 @@ func TestAccountNumbers(t *testing.T) {
 	}
 }
 
+// An account can erase itself: afterwards nothing about it remains, its token
+// stops working, and its devices stay refused by the CRL.
+func TestAccountDeletion(t *testing.T) {
+	_, h, _ := newTestServer(t)
+	rec := do(t, h, "POST", "/api/auth/register", "", map[string]any{"password": "password123"})
+	var reg struct {
+		AccountNumber string `json:"account_number"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &reg)
+	rec = do(t, h, "POST", "/api/auth/login", "", map[string]any{"account_number": reg.AccountNumber, "password": "password123"})
+	var login struct {
+		Token string `json:"token"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &login)
+	tok := login.Token
+
+	rec = do(t, h, "POST", "/api/enroll/issue", tok, map[string]any{})
+	var issued struct {
+		Token string `json:"token"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &issued)
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	rec = do(t, h, "POST", "/api/enroll/claim", "", map[string]any{
+		"token": issued.Token, "device_pub": hex.EncodeToString(pub),
+		"pop": hex.EncodeToString(ed25519.Sign(priv, ClaimPoPMessage(issued.Token))), "name": "iPhone",
+	})
+	var claimed struct {
+		DeviceID string `json:"device_id"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &claimed)
+
+	if rec := do(t, h, "DELETE", "/api/me", tok, map[string]any{"password": "wrong password"}); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("deletion without the password must be refused, got %d", rec.Code)
+	}
+	if rec := do(t, h, "DELETE", "/api/me", tok, map[string]any{"password": "password123"}); rec.Code != http.StatusOK {
+		t.Fatalf("delete: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := do(t, h, "GET", "/api/me", tok, nil); rec.Code != http.StatusNotFound {
+		t.Fatalf("the account must be gone, got %d", rec.Code)
+	}
+	if rec := do(t, h, "POST", "/api/auth/login", "", map[string]any{"account_number": reg.AccountNumber, "password": "password123"}); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("a deleted account must not log in, got %d", rec.Code)
+	}
+	if crl := do(t, h, "GET", "/api/crl", "", nil).Body.String(); !strings.Contains(crl, claimed.DeviceID) {
+		t.Fatalf("the deleted account's device must stay in the CRL: %s", crl)
+	}
+}
+
 // Nobody can read another account's security log, admins included.
 func TestAuditLogIsOwnAccountOnly(t *testing.T) {
 	srv, h, store := newTestServer(t)
@@ -345,5 +393,31 @@ func TestRedactAddrs(t *testing.T) {
 	l.Printf("http: panic serving %s:%d: boom", peerAddr, 41000)
 	if strings.Contains(buf.String(), peerAddr) || !strings.Contains(buf.String(), redactedAddr) {
 		t.Fatalf("redacting writer let an address through: %q", buf.String())
+	}
+}
+
+// A handler panic becomes a 500, and its log line names nothing about the
+// request and goes through the address redactor.
+func TestPanicsAreLoggedWithoutTheRequest(t *testing.T) {
+	var logged bytes.Buffer
+	prev := log.Writer()
+	log.SetOutput(&redactingWriter{w: &logged})
+	defer log.SetOutput(prev)
+
+	h := recoverer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		panic("lookup failed for " + peerAddr)
+	}))
+	rec := call(t, h, "GET", "/api/pay/order/some-order-id", "", nil)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("a panic must answer 500, got %d", rec.Code)
+	}
+	out := logged.String()
+	if !strings.Contains(out, "panic in a request handler") {
+		t.Fatalf("the panic must be logged: %q", out)
+	}
+	for _, needle := range []string{peerAddr, forwardedAddr, "some-order-id"} {
+		if strings.Contains(out, needle) {
+			t.Fatalf("the panic log carries %q: %s", needle, out)
+		}
 	}
 }

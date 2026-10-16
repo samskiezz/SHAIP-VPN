@@ -260,6 +260,58 @@ func storeContract(t *testing.T, st Store) {
 		}
 	})
 
+	t.Run("delete-account", func(t *testing.T) {
+		uid := mkUser(t, st)
+		other := mkUser(t, st)
+		d := mkDevice(uid)
+		if err := st.ClaimEnrollment(ctx, mkToken(t, st, uid, time.Hour), time.Now().UTC(), d); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.CreateAPIKey(ctx, &APIKey{UserID: uid, Name: "k", Prefix: "pqa_x", KeyHash: randHex(32)}); err != nil {
+			t.Fatal(err)
+		}
+		_ = st.AppendAudit(ctx, &AuditEntry{UserID: uid, Action: "x"})
+		_ = st.AppendAudit(ctx, &AuditEntry{UserID: other, Action: "kept"})
+		mkToken(t, st, uid, time.Hour) // an unclaimed token goes too
+
+		if err := st.DeleteAccount(ctx, uid, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.GetUserByID(ctx, uid); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("the account must be gone: %v", err)
+		}
+		if keys, _ := st.ListAPIKeys(ctx, uid); len(keys) != 0 {
+			t.Fatal("API keys must be gone")
+		}
+		if devs, _ := st.ListDevices(ctx, uid); len(devs) != 0 {
+			t.Fatal("devices must be gone")
+		}
+		if entries, _ := st.ListAudit(ctx, uid, 10); len(entries) != 0 {
+			t.Fatal("the security log must be gone")
+		}
+		if entries, _ := st.ListAudit(ctx, other, 10); len(entries) != 1 {
+			t.Fatal("another account's log must stay")
+		}
+		// The device's certificate is still refused: its id is in the CRL.
+		if at := revokedAt(t, st, d.ID); !isDay(at) {
+			t.Fatalf("revocation day: %v", at)
+		}
+		if err := st.DeleteAccount(ctx, uid, time.Now()); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("deleting twice: %v", err)
+		}
+		// An account that runs nodes keeps them (and its stake) until it removes them.
+		pub, _, _ := ed25519.GenerateKey(rand.Reader)
+		if err := st.CreateNode(ctx, &Node{Name: "del-" + randHex(3), Address: "203.0.113.4:443", PublicKey: pub, EdPub: pub, OwnerID: other}); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.DeleteAccount(ctx, other, time.Now()); !errors.Is(err, ErrOwnsNodes) {
+			t.Fatalf("an account with nodes: %v", err)
+		}
+		if _, err := st.GetUserByID(ctx, other); err != nil {
+			t.Fatal("a refused deletion must change nothing")
+		}
+	})
+
 	t.Run("staking", func(t *testing.T) {
 		owner := mkUser(t, st)
 		pub, _, _ := ed25519.GenerateKey(rand.Reader)
