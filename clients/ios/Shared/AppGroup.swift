@@ -21,6 +21,22 @@ enum AppGroup {
     /// The device certificate enrollment stores next to the identity.
     static var certificatePath: String? { identityPath.map { $0 + ".cert" } }
 
+    /// Keep this device's identity and certificate out of iCloud and computer
+    /// backups, and readable only after the device's first unlock (the tunnel
+    /// reconnects while the phone is locked, so it can't be stricter). A
+    /// restored or new phone enrolls again instead of inheriting this one's
+    /// keys.
+    static func protectKeyFiles() {
+        for path in [identityPath, certificatePath].compactMap({ $0 }) where FileManager.default.fileExists(atPath: path) {
+            var url = URL(fileURLWithPath: path)
+            var values = URLResourceValues()
+            values.isExcludedFromBackup = true
+            try? url.setResourceValues(values)
+            try? FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+                                                   ofItemAtPath: path)
+        }
+    }
+
     /// The certificate path if this device has enrolled.
     static var enrolledCertificatePath: String? {
         guard let p = certificatePath, FileManager.default.fileExists(atPath: p) else { return nil }

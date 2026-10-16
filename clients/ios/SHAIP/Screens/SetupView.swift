@@ -83,7 +83,7 @@ struct SetupView: View {
             Task { await adopt(ConfigFile.read(result)) }
         }
         .sheet(isPresented: $pasting) {
-            ImportConfigSheet { config in try await install(config) }
+            ImportConfigSheet { config in try await install(config) }.privacyCover()
         }
     }
 

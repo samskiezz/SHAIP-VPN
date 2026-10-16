@@ -35,6 +35,26 @@ SHAIP app ──NETunnelProviderManager──▶ SHAIPTunnel (NEPacketTunnelProv
   `pqanon://enroll` link: `pqanon_enroll` proves possession of this device's identity key and
   stores the certificate in the App Group container, where the extension finds it.
 
+## What the app keeps to itself
+
+The app collects nothing about the person using it and has no analytics, crash reporting or
+third-party SDKs: it talks to the VPN server, and to the control plane only to enroll.
+
+- **Enrollment sends no device name.** Only "iPhone" or "iPad" goes to the control plane, never
+  the phone's name (often "Alex's iPhone"); the Rust core reduces any name to a platform label
+  as well.
+- **The lock screen shows no server.** The Live Activity and Dynamic Island say whether the VPN
+  is on, for how long, and how fast. Not which server, its address or the tunnel address:
+  anyone holding the phone can read a lock screen.
+- **The app-switcher snapshot is covered.** iOS saves a picture of the screen as the app leaves
+  the foreground; the app (and every sheet) shows a plain cover then, so the snapshot holds no
+  server, fingerprint or address.
+- **System logs are private.** The tunnel extension logs only that the tunnel came up or why it
+  failed, with the details marked `.private`, so they are redacted from diagnostics reports.
+- **Keys stay on this phone.** The device identity and certificate are excluded from iCloud and
+  computer backups and readable only after the first unlock. A restored or new phone enrolls
+  again rather than inheriting this one's keys.
+
 ## Screens
 
 | Tab | What it shows |

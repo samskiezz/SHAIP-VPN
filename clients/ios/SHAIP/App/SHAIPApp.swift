@@ -67,17 +67,20 @@ struct RootView: View {
         }
         .tint(Tok.signal)
         .sensoryFeedback(.selection, trigger: router.tab)
+        .privacyCover()
         // No server yet: set one up first. Nothing in the app pretends to
         // work without one.
         .fullScreenCover(isPresented: Binding(get: { store.loaded && store.config == nil }, set: { _ in })) {
             SetupView()
                 .environment(store)
                 .environment(router)
+                .privacyCover()
         }
         .sheet(isPresented: Binding(get: { router.pendingEnrollLink != nil && store.config != nil },
                                     set: { if !$0 { router.pendingEnrollLink = nil } })) {
             EnrollSheet(link: router.pendingEnrollLink ?? "")
                 .environment(store)
+                .privacyCover()
         }
     }
 }

@@ -9,7 +9,7 @@ final class LiveActivityController {
     private var lastState: TunnelActivityAttributes.ContentState?
     private var lastUpdate = Date.distantPast
 
-    func sync(_ state: TunnelActivityAttributes.ContentState, server: String, force: Bool) {
+    func sync(_ state: TunnelActivityAttributes.ContentState, force: Bool) {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
         if activity == nil { activity = Activity<TunnelActivityAttributes>.activities.first }
         let content = ActivityContent(state: state, staleDate: nil)
@@ -17,7 +17,7 @@ final class LiveActivityController {
         guard let activity else {
             // Start with a session; with the VPN off there is nothing to show.
             guard state.connected || state.reconnecting else { return }
-            self.activity = try? Activity.request(attributes: TunnelActivityAttributes(server: server),
+            self.activity = try? Activity.request(attributes: TunnelActivityAttributes(),
                                                   content: content, pushType: nil)
             lastState = state
             lastUpdate = Date()

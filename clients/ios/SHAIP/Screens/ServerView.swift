@@ -24,10 +24,10 @@ struct ServerView: View {
         }
         .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $replacing) {
-            ImportConfigSheet { config in try await store.install(config) }
+            ImportConfigSheet { config in try await store.install(config) }.privacyCover()
         }
         .sheet(isPresented: $enrolling) {
-            EnrollSheet(link: "").environment(store)
+            EnrollSheet(link: "").environment(store).privacyCover()
         }
         .confirmationDialog("Remove this server from your iPhone?", isPresented: $confirmRemove, titleVisibility: .visible) {
             Button("Remove", role: .destructive) { Task { await store.removeConfiguration() } }

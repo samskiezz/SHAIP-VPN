@@ -58,7 +58,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             }
             guard let s = started else {
                 let message = takeString(err) ?? "Could not connect to \(config.address)."
-                log.error("connect failed: \(message, privacy: .public)")
+                // Private: the message can name the server, and iOS logs end up
+                // in diagnostics reports.
+                log.error("connect failed: \(message, privacy: .private)")
                 completionHandler(CoreError(message: message))
                 return
             }
@@ -74,7 +76,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 ?? ServerConfig.host(of: config.address) ?? config.address
             setTunnelNetworkSettings(Self.settings(for: st, remote: remote)) { [self] error in
                 if let error {
-                    log.error("applying network settings failed: \(error.localizedDescription, privacy: .public)")
+                    log.error("applying network settings failed: \(error.localizedDescription, privacy: .private)")
                     pqanon_session_free(s)
                     completionHandler(error)
                     return
@@ -95,7 +97,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 readPackets()
                 startMonitor()
                 observePath()
-                log.info("tunnel up to \(remote, privacy: .public)")
+                AppGroup.protectKeyFiles() // the core creates the identity on first use
+                log.info("tunnel up")
                 completionHandler(nil)
             }
         }

@@ -16,7 +16,7 @@ struct TunnelLiveActivity: Widget {
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(s.server).font(.system(size: 15, weight: .semibold)).foregroundStyle(Tok.ink).lineLimit(1)
+                        Text(stateTitle(s)).font(.system(size: 15, weight: .semibold)).foregroundStyle(Tok.ink).lineLimit(1)
                         SessionClock(state: s).font(.system(size: 13, weight: .semibold, design: .monospaced))
                     }
                     .padding(.leading, 4)
@@ -48,6 +48,10 @@ struct TunnelLiveActivity: Widget {
 
 private func stateColor(_ s: TunnelActivityAttributes.ContentState) -> Color {
     s.connected ? Tok.ok : s.reconnecting ? Tok.warn : Tok.ink2
+}
+
+private func stateTitle(_ s: TunnelActivityAttributes.ContentState) -> String {
+    s.connected ? "Protected" : s.reconnecting ? "Reconnecting" : "VPN off"
 }
 
 private func stateWord(_ s: TunnelActivityAttributes.ContentState) -> String {
@@ -109,8 +113,9 @@ private struct TunnelActionButton: View {
     }
 }
 
-/// The lock-screen card: state · server, the tunnel address, the session
-/// timer, measured DOWN and RTT, and the connect/disconnect intent.
+/// The lock-screen card: the state, the session timer, measured DOWN and RTT,
+/// and the connect/disconnect intent. No server, address or tunnel address:
+/// anyone can read a lock screen.
 struct LockScreenTunnelView: View {
     let state: TunnelActivityAttributes.ContentState
 
@@ -123,9 +128,9 @@ struct LockScreenTunnelView: View {
                     .overlay(Image(systemName: "lock").font(.system(size: 16, weight: .bold)).foregroundStyle(Color(hex: 0x03060C)))
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("\(state.connected ? "Connected" : state.reconnecting ? "Reconnecting" : "VPN off") · \(state.server)")
+                    Text(stateTitle(state))
                         .font(.system(size: 15, weight: .semibold)).foregroundStyle(Tok.ink).lineLimit(1)
-                    Text("\(state.tunnelAddress ?? "—") · PQANON/1").font(.system(size: 10, design: .monospaced)).foregroundStyle(Tok.dim(0.55))
+                    Text("SHAIP · PQANON/1").font(.system(size: 10, design: .monospaced)).foregroundStyle(Tok.dim(0.55))
                 }
                 Spacer(minLength: 8)
                 SessionClock(state: state).font(.system(size: 15, weight: .semibold, design: .monospaced))
@@ -152,12 +157,10 @@ struct LockScreenTunnelView: View {
     }
 }
 
-#Preview("Lock screen", as: .content, using: TunnelActivityAttributes(server: "vpn.example.com")) {
+#Preview("Lock screen", as: .content, using: TunnelActivityAttributes()) {
     TunnelLiveActivity()
 } contentStates: {
-    TunnelActivityAttributes.ContentState(connected: true, reconnecting: false, server: "vpn.example.com",
-                                          tunnelAddress: "10.77.0.23/24", sessionStart: Date().addingTimeInterval(-5025),
-                                          downMbps: 41.2, rttMs: 23)
-    TunnelActivityAttributes.ContentState(connected: false, reconnecting: false, server: "vpn.example.com",
-                                          tunnelAddress: nil, sessionStart: nil, downMbps: nil, rttMs: nil)
+    TunnelActivityAttributes.ContentState(connected: true, reconnecting: false,
+                                          sessionStart: Date().addingTimeInterval(-5025), downMbps: 41.2, rttMs: 23)
+    TunnelActivityAttributes.ContentState(connected: false, reconnecting: false, sessionStart: nil, downMbps: nil, rttMs: nil)
 }

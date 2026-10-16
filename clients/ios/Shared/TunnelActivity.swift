@@ -6,25 +6,22 @@ import Foundation
 /// Every value is real: the app fills it from the tunnel extension's status.
 /// It updates at most every 15 s; the session clock ticks on its own via
 /// `Text(timerInterval:)`, so it never needs per-second updates.
+///
+/// The lock screen is visible to anyone holding the phone, so the activity
+/// says only whether the VPN is on, for how long, and how fast: never which
+/// server, its address, or the tunnel address.
 struct TunnelActivityAttributes: ActivityAttributes {
     struct ContentState: Codable, Hashable {
         /// A confirmed session is carrying traffic right now.
         var connected: Bool
         /// The tunnel is negotiating a new session (traffic is held meanwhile).
         var reconnecting: Bool
-        /// The server's name as configured.
-        var server: String
-        /// The tunnel address the server assigned, if any.
-        var tunnelAddress: String?
         var sessionStart: Date?
         /// Measured download rate.
         var downMbps: Double?
         /// Measured keepalive round-trip time.
         var rttMs: Int?
     }
-
-    /// The server label, for the activity's static part.
-    var server: String
 }
 
 enum TunnelIntentAction: Sendable {

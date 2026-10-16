@@ -74,6 +74,7 @@ final class TunnelStore {
     // MARK: Loading and configuration
 
     func load() async {
+        AppGroup.protectKeyFiles() // installs from before keys were kept out of backups
         do {
             manager = try await NETunnelProviderManager.loadAllFromPreferences().first
         } catch {
@@ -192,7 +193,10 @@ final class TunnelStore {
         guard let identity = AppGroup.identityPath else {
             throw CoreError(message: "The shared app container is unavailable (App Group entitlement).")
         }
-        let name = UIDevice.current.name
+        // Only the platform is sent, never the device's name: names like
+        // "Alex's iPhone" carry their owner's name. (The core reduces any name
+        // to a platform label too.)
+        let name = UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone"
         let id: String = try await withCheckedThrowingContinuation { cont in
             DispatchQueue.global(qos: .userInitiated).async {
                 var err: UnsafeMutablePointer<CChar>?
@@ -203,6 +207,7 @@ final class TunnelStore {
                 }
             }
         }
+        AppGroup.protectKeyFiles()
         deviceID = id
         UserDefaults.standard.set(id, forKey: "shaip.deviceID")
     }
@@ -277,12 +282,11 @@ final class TunnelStore {
     }
 
     private func syncActivity(force: Bool) {
-        guard let config else { return }
-        activity.sync(.init(connected: connected, reconnecting: reconnecting, server: config.label,
-                            tunnelAddress: snapshot?.tunnelAddress,
+        guard config != nil else { return }
+        activity.sync(.init(connected: connected, reconnecting: reconnecting,
                             sessionStart: isOn ? (snapshot?.upSince ?? connectedSince) : nil,
                             downMbps: connected ? downMbps : nil, rttMs: rttMs),
-                      server: config.label, force: force)
+                      force: force)
     }
 
     // MARK: Scene
