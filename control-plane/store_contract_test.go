@@ -454,6 +454,30 @@ func storeContract(t *testing.T, st Store) {
 			t.Fatalf("double spend: %v", err)
 		}
 	})
+
+	t.Run("comp-codes", func(t *testing.T) {
+		code := &CompCode{CodeHash: "hash-" + randHex(8), Plan: "test", DurationDays: 365, MaxUses: 2}
+		if err := st.CreateCompCode(ctx, code); err != nil {
+			t.Fatal(err)
+		}
+		// Two claims succeed and count up; the created day is a day.
+		first, err := st.ClaimCompCode(ctx, code.CodeHash)
+		if err != nil || first.Uses != 1 || first.DurationDays != 365 || first.Plan != "test" || !isDay(first.CreatedAt) {
+			t.Fatalf("claim 1: %v %+v", err, first)
+		}
+		second, err := st.ClaimCompCode(ctx, code.CodeHash)
+		if err != nil || second.Uses != 2 {
+			t.Fatalf("claim 2: %v %+v", err, second)
+		}
+		// A third is refused: no uses left.
+		if _, err := st.ClaimCompCode(ctx, code.CodeHash); !errors.Is(err, ErrCompExhausted) {
+			t.Fatalf("exhausted: %v", err)
+		}
+		// An unknown code is not found.
+		if _, err := st.ClaimCompCode(ctx, "no-such-code"); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("unknown: %v", err)
+		}
+	})
 }
 
 func containsBond(bs []StakeBond, id string) bool {

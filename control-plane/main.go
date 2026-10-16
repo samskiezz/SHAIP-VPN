@@ -113,6 +113,7 @@ func main() {
 	if srv.devSettle {
 		log.Printf("WARNING: PAY_DEV_SETTLE enabled — /api/pay/dev/settle will mark orders paid without a chain; never set this in production")
 	}
+	seedCompCodes(context.Background(), srv, os.Getenv("COMP_CODES"))
 
 	go srv.watchBonds(context.Background(), time.Duration(atoiOr("STAKE_WATCH_SECS", 30))*time.Second)
 

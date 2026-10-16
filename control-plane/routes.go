@@ -42,6 +42,7 @@ func routes(srv *Server, label string) http.Handler {
 		r.Get("/pay/order/{id}", srv.handleOrderStatus)
 		r.Post("/pay/collect", srv.handleCollect)
 		r.Post("/pay/redeem", srv.handleRedeem)
+		r.Post("/pay/claim-code", srv.handleClaimCode) // discount/comp code → access grant (identity-free)
 		r.Post("/pay/dev/settle", srv.handleDevSettle) // gated by PAY_DEV_SETTLE
 
 		// One-click enrollment: the token authorizes the claim, so no session.
@@ -64,6 +65,7 @@ func routes(srv *Server, label string) http.Handler {
 			r.Get("/dashboard", srv.handleDashboard)
 			r.Get("/stats", srv.handleStats)
 			r.Get("/admin/stats", srv.handleAdminStats)
+			r.Post("/admin/comp-codes", srv.handleCreateCompCode) // operator issues a discount/comp code
 			r.Get("/me", srv.handleMe)
 			r.Delete("/me", srv.handleDeleteAccount)
 			r.Get("/apikeys", srv.handleListAPIKeys)

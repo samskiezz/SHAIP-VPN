@@ -35,6 +35,8 @@ Everything else below is real.
 | Go control plane: anonymous accounts, devices, API keys, node directory, staking/slashing, unlinkable payments, enrollment, signed CRL | **Real** | `go test` + live curl (register → login → API key → auth → delete; times day-coarsened) |
 | Privacy posture (no IP/connection logs, day-only timestamps, log redaction, account deletion) | **Real** | privacy tests in Rust + Go; the netns lab asserts no client data in server logs |
 | Web account dashboard | **Real** | `tsc --noEmit` + `next build` |
+| Discount / comp codes (operator-issued free or promo access, incl. a test pass) | **Real** | Go store-contract + handler tests; claimed in the browser sandbox |
+| Web product end to end, clicked in a browser (register → dashboard → devices → redeem a code → delete account, plus the safety gates) | **Real** | `web-ui/e2e/run.sh` — 11/11 checks against the real control plane |
 | iOS **core logic** (config parsing, telemetry, render engine) | **Real** | `swift test` (13 tests) — builds on Linux, Foundation-only |
 | iOS ↔ Rust boundary (the app's FFI Swift against a live `pqanond`) | **Real** | `clients/ios/FFIInterop` runs in the battery on Linux |
 | Full battery | **16 stages, 0 failed** | `scripts/test-all.sh` |
@@ -91,11 +93,16 @@ on the roadmap; none will be faked.
    brings up the control plane, the web dashboard, Postgres, and `pqanond`
    (see `docker-compose.yml`). Run `pqanond --identity … --print-public` to get
    the `[server]` block for clients. Terminate TLS in front with logging off.
-2. **Build the app on a Mac** (Xcode 26): `cd clients/ios && brew install xcodegen
+2. **Free access for testing or promos.** Set `COMP_CODES="MYCODE:pro:365:50"` on the
+   control plane (or `POST /api/admin/comp-codes` as an admin) and redeem the code on
+   the web pay page's "Have a code?" box, or `POST /api/pay/claim-code`. It grants a real
+   access token without a crypto payment — a legitimate coupon, not a backdoor. For CI,
+   `PAY_DEV_SETTLE=1` settles a normal order without a chain.
+3. **Build the app on a Mac** (Xcode 26): `cd clients/ios && brew install xcodegen
    && ./scripts/build-ffi.sh && xcodegen generate && open SHAIP.xcodeproj`. A
    Network Extension needs an Apple Developer account and signing. Install on a
    device via Xcode or TestFlight (packet tunnels don't run in the Simulator).
-3. **Point the app at the server** — import the `[server]` block. It connects to
+4. **Point the app at the server** — import the `[server]` block. It connects to
    the real tunnel; every number on screen then comes from that tunnel.
 
 Until step 1 and step 2 are done by someone with a Linux host and a Mac, there

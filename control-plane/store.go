@@ -92,6 +92,23 @@ type AuditEntry struct {
 // ErrSpent is returned when a token nonce has already been redeemed.
 var ErrSpent = errors.New("token already spent")
 
+// ErrCompExhausted is returned when a comp (discount) code has no uses left.
+var ErrCompExhausted = errors.New("code has no uses left")
+
+// CompCode is an operator-issued discount/comp code that grants plan access
+// without a crypto payment (a free trial, a promo, or a test pass). Only a
+// hash of the code is stored, never the code itself, and a claim is
+// identity-free like a token redemption: the only state is the use counter, so
+// a code reveals nothing about who claimed it.
+type CompCode struct {
+	CodeHash     string    `json:"-"`
+	Plan         string    `json:"plan"`
+	DurationDays int       `json:"duration_days"`
+	MaxUses      int       `json:"max_uses"`
+	Uses         int       `json:"uses"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
 // PayOrder is one untraceable purchase: a denomination, a payment address, and
 // the buyer's blinded tokens (and, after collection, the blind signatures). It
 // carries no identity — nothing links it to a person or to the tokens once they
@@ -259,6 +276,12 @@ type Store interface {
 	// SpendToken records a redeemed nonce, returning ErrSpent if already spent.
 	SpendToken(ctx context.Context, denom, nonceHash string) error
 
+	// CreateCompCode stores an operator-issued discount/comp code (hashed).
+	CreateCompCode(ctx context.Context, c *CompCode) error
+	// ClaimCompCode atomically consumes one use of a code, returning it, or
+	// ErrNotFound (unknown) / ErrCompExhausted (no uses left).
+	ClaimCompCode(ctx context.Context, codeHash string) (*CompCode, error)
+
 	ListRevoked(ctx context.Context) ([]RevokedIdentity, error)
 
 	CreateEnrollToken(ctx context.Context, t *EnrollToken) error
@@ -320,6 +343,7 @@ type MemStore struct {
 	unbonds  []Unbonding
 	unbondSq int64
 	slashes  map[string]*SlashEvent // keyed by node id|epoch
+	comp     map[string]*CompCode   // keyed by code hash
 }
 
 func NewMemStore() *MemStore {
@@ -335,6 +359,7 @@ func NewMemStore() *MemStore {
 		crlOnly: make(map[string]*Device),
 		bonds:   make(map[string]*StakeBond),
 		slashes: make(map[string]*SlashEvent),
+		comp:    make(map[string]*CompCode),
 	}
 }
 
@@ -616,6 +641,33 @@ func (m *MemStore) SpendToken(_ context.Context, denom, nonceHash string) error 
 	}
 	m.spent[key] = true
 	return nil
+}
+
+func (m *MemStore) CreateCompCode(_ context.Context, c *CompCode) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.comp[c.CodeHash]; ok {
+		return errors.New("comp code already exists")
+	}
+	cp := *c
+	cp.CreatedAt = day(time.Now())
+	m.comp[c.CodeHash] = &cp
+	return nil
+}
+
+func (m *MemStore) ClaimCompCode(_ context.Context, codeHash string) (*CompCode, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	c, ok := m.comp[codeHash]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	if c.Uses >= c.MaxUses {
+		return nil, ErrCompExhausted
+	}
+	c.Uses++
+	out := *c
+	return &out, nil
 }
 
 func (m *MemStore) ListRevoked(_ context.Context) ([]RevokedIdentity, error) {

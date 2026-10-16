@@ -407,6 +407,36 @@ func (s *PgStore) SpendToken(ctx context.Context, denom, nonceHash string) error
 	return nil
 }
 
+func (s *PgStore) CreateCompCode(ctx context.Context, c *CompCode) error {
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO comp_codes (code_hash, plan, duration_days, max_uses, created_at)
+		 VALUES ($1, $2, $3, $4, $5)`,
+		c.CodeHash, c.Plan, c.DurationDays, c.MaxUses, day(time.Now()))
+	return err
+}
+
+func (s *PgStore) ClaimCompCode(ctx context.Context, codeHash string) (*CompCode, error) {
+	// Atomic: increment only while uses remain; RETURNING tells us what we got.
+	var c CompCode
+	err := s.pool.QueryRow(ctx,
+		`UPDATE comp_codes SET uses = uses + 1
+		  WHERE code_hash = $1 AND uses < max_uses
+		  RETURNING code_hash, plan, duration_days, max_uses, uses, created_at`, codeHash).
+		Scan(&c.CodeHash, &c.Plan, &c.DurationDays, &c.MaxUses, &c.Uses, &c.CreatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Either the code does not exist, or it is exhausted. Distinguish.
+			var exists bool
+			if e2 := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM comp_codes WHERE code_hash=$1)`, codeHash).Scan(&exists); e2 == nil && exists {
+				return nil, ErrCompExhausted
+			}
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &c, nil
+}
+
 func (s *PgStore) ListRevoked(ctx context.Context) ([]RevokedIdentity, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT identity_id, reason, revoked_at, signature FROM revoked_identities`)

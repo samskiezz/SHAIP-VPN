@@ -46,6 +46,11 @@ var (
 		Help: "Token redemptions, by denomination and result (ok/spent/invalid).",
 	}, []string{"denom", "result"})
 
+	mCompClaims = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "pqanon", Subsystem: "cp", Name: "comp_claims_total",
+		Help: "Comp/discount code claims, by result (ok/invalid/exhausted).",
+	}, []string{"result"})
+
 	mEnrollments = promauto.NewCounterVec(prometheus.CounterOpts{
 		Namespace: "pqanon", Subsystem: "cp", Name: "enrollments_total",
 		Help: "Device enrollment events, by result (issued/claimed/rejected).",

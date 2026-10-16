@@ -35,6 +35,8 @@ const statusColor: Record<string, string> = {
   expired: "text-gray-400",
 };
 
+type Grant = { session_id: string; grant: string; plan: string; expires_at: string };
+
 export default function Pay() {
   const [rails, setRails] = useState<string[]>([]);
   const [denoms, setDenoms] = useState<Denom[]>([]);
@@ -43,6 +45,29 @@ export default function Pay() {
   const [orderId, setOrderId] = useState("");
   const [order, setOrder] = useState<Order | null>(null);
   const [lookupErr, setLookupErr] = useState("");
+
+  const [code, setCode] = useState("");
+  const [grant, setGrant] = useState<Grant | null>(null);
+  const [codeErr, setCodeErr] = useState("");
+  const [claiming, setClaiming] = useState(false);
+
+  const claimCode = async () => {
+    setCodeErr("");
+    setGrant(null);
+    setClaiming(true);
+    try {
+      const g = await api<Grant>("/api/pay/claim-code", {
+        method: "POST",
+        auth: false,
+        body: { code: code.trim() },
+      });
+      setGrant(g);
+    } catch (e) {
+      setCodeErr((e as Error).message);
+    } finally {
+      setClaiming(false);
+    }
+  };
 
   useEffect(() => {
     api<DenomResp>("/api/pay/denominations", { auth: false })
@@ -137,6 +162,54 @@ export default function Pay() {
           Buy from the app:{" "}
           <code className="rounded bg-gray-100 px-1">pqanon buy --plan month --server &lt;url&gt;</code>
         </p>
+      </section>
+
+      {/* Discount / comp code */}
+      <section className="mt-8">
+        <h2 className="text-lg font-semibold text-brand-dark">Have a code?</h2>
+        <p className="mt-1 text-sm text-gray-600">
+          A discount, promo, or test code grants access without a payment. Like a redeemed token,
+          claiming a code is identity-free: no account, no card, and it records only that one use was
+          spent.
+        </p>
+        <div className="mt-3 flex gap-2">
+          <input
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && code.trim()) claimCode();
+            }}
+            placeholder="SHAIP-XXXX-XXXX-XXXX"
+            aria-label="discount or comp code"
+            className="flex-1 rounded-lg border px-3 py-2 font-mono text-sm uppercase"
+          />
+          <button
+            onClick={claimCode}
+            disabled={!code.trim() || claiming}
+            className="rounded-lg bg-brand-dark px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
+          >
+            {claiming ? "Redeeming…" : "Redeem"}
+          </button>
+        </div>
+        {codeErr && <p className="mt-2 text-sm text-red-600">{codeErr}</p>}
+        {grant && (
+          <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm shadow-sm">
+            <p className="font-semibold text-emerald-800">Access granted — plan: {grant.plan}</p>
+            <p className="mt-1 text-emerald-700">
+              Valid until <span className="font-mono">{grant.expires_at.slice(0, 10)}</span>.
+            </p>
+            <p className="mt-2 text-gray-600">
+              Paste this access grant into the app (Setup → Paste config, or{" "}
+              <code className="rounded bg-white px-1">pqanon redeem --grant …</code>):
+            </p>
+            <textarea
+              readOnly
+              value={grant.grant}
+              onFocus={(e) => e.currentTarget.select()}
+              className="mt-2 h-20 w-full rounded border bg-white p-2 font-mono text-xs text-gray-700"
+            />
+          </div>
+        )}
       </section>
 
       {/* Order status lookup */}
