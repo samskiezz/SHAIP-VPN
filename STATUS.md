@@ -36,6 +36,7 @@ Everything else below is real.
 | Privacy posture (no IP/connection logs, day-only timestamps, log redaction, account deletion) | **Real** | privacy tests in Rust + Go; the netns lab asserts no client data in server logs |
 | Web account dashboard | **Real** | `tsc --noEmit` + `next build` |
 | Discount / comp codes (operator-issued free or promo access, incl. a test pass) | **Real** | Go store-contract + handler tests; claimed in the browser sandbox |
+| Servers screen from the signed node directory (web) | **Real** | lists real nodes; sandbox registers one and sees it appear |
 | Web product end to end, clicked in a browser (register → dashboard → devices → redeem a code → delete account, plus the safety gates) | **Real** | `web-ui/e2e/run.sh` — 11/11 checks against the real control plane |
 | iOS **core logic** (config parsing, telemetry, render engine) | **Real** | `swift test` (13 tests) — builds on Linux, Foundation-only |
 | iOS ↔ Rust boundary (the app's FFI Swift against a live `pqanond`) | **Real** | `clients/ios/FFIInterop` runs in the battery on Linux |
@@ -65,8 +66,7 @@ They are a product decision, not an engineering task:
 | Onboarding → **Setup** | **Built** (needs Mac) | Real config import. SSO/passkey/SOC2/ISO/FIPS: **no backend, cut** |
 | Protocol → folded into **Settings** | **Built** (needs Mac) | Only PQANON/1 exists. WireGuard/IKEv2: **do not exist** |
 | Security (kill switch half) | **Built** (needs Mac) | Kill switch real; threat radar / "1,284 threats": **no backend** |
-| Network globe | **Cut** | Node directory is real; globe routes/exit-IPs/regions: **fabricated** |
-| Nodes list | **Cut** | Directory has name/address/region only; data centres/loads/RTT sparklines: **fabricated** |
+| Network globe / Nodes | **Real on web** (globe art cut) | A real **Servers** page now lists the signed node directory (region, role, capacity, stake, status). The *globe animation* and per-node exit-IPs/loads/RTT sparklines remain unbuilt — no real source. |
 | Zero-trust Access (trust score, CrowdStrike, MFA grants) | **Cut** | **No backend whatsoever** |
 | Team & plan (seats, roster, "Acme Corp / Maya Chen") | **Cut** | Anonymous access plans are real; seats/team/SSO: **no backend** |
 
