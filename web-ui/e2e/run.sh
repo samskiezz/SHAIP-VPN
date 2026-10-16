@@ -19,6 +19,7 @@ WEB_PORT=${WEB_PORT:-3000}
 WEB_URL=${WEB_URL:-http://127.0.0.1:$WEB_PORT}
 OUT=${OUT:-$(mktemp -d /tmp/shaip-e2e.XXXXXX)}
 PW_ROOT=${PW_ROOT:-$(npm root -g)}
+mkdir -p "$OUT"
 
 if [ ! -d "$PW_ROOT/playwright" ]; then echo "SKIP: playwright not installed globally (npm i -g playwright)"; exit 0; fi
 

@@ -14,6 +14,7 @@ const path = require('path');
 const { chromium } = require(path.join(process.env.PW_ROOT, 'playwright'));
 
 const WEB = process.env.WEB_URL || 'http://127.0.0.1:3000';
+const API = process.env.API_URL || 'http://127.0.0.1:8080';
 const OUT = process.env.OUT || '/tmp/shaip-e2e';
 const PASSWORD = 'correct horse battery staple';
 
@@ -73,6 +74,38 @@ function check(name, ok, detail = '') {
   check('a one-time enrollment link is issued', /enroll/i.test(enrollLink), enrollLink.slice(0, 48) + '…');
   await shot(page, '03-devices-enroll-link');
 
+  // Servers: the real signed node directory. Honestly empty first; then we
+  // register a real node via the API and it appears. No invented servers.
+  let nodeId = '';
+  await page.goto(`${WEB}/servers`, { waitUntil: 'networkidle' });
+  // The page renders the real signed directory: a table of real nodes, or an
+  // honest empty state when none are registered (dev seeds a couple of demo
+  // nodes with documentation IPs; production starts empty). Never sample data.
+  await page.waitForFunction(() => {
+    const t = document.body.innerText;
+    return /no servers registered yet/i.test(t) || !!document.querySelector('table');
+  }, { timeout: 10000 });
+  check('the Servers page renders the real node directory', true);
+  await shot(page, '03b-servers');
+
+  const reg = await page.evaluate(async (api) => {
+    const tok = sessionStorage.getItem('token');
+    const r = await fetch(api + '/api/nodes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tok },
+      body: JSON.stringify({ name: 'syd-edge-01', address: 'vpn-syd.example.net:443', public_key: 'ab'.repeat(32), role: 'entry', region: 'AU', capacity_mbps: 1000 }),
+    });
+    return { status: r.status, body: await r.json().catch(() => ({})) };
+  }, API);
+  check('registering a real node via the API succeeds', reg.status === 201, 'HTTP ' + reg.status);
+  nodeId = reg.body.id || '';
+
+  await page.goto(`${WEB}/servers`, { waitUntil: 'networkidle' });
+  await page.getByText('syd-edge-01').first().waitFor({ timeout: 10000 });
+  const serversText = await page.locator('body').innerText();
+  check('the registered node appears in the Servers list (real directory data)', /AU/.test(serversText) && /entry/i.test(serversText));
+  await shot(page, '03c-servers-listed');
+
   // Redeem a comp/discount code for free access (the test "1-year pass").
   await page.goto(`${WEB}/pay`, { waitUntil: 'networkidle' });
   const codeInput = page.getByLabel(/discount or comp code/i);
@@ -112,6 +145,15 @@ function check(name, ok, detail = '') {
     await shot(p2, '06-wrong-password');
     await c2.close();
   }
+
+  // An account that owns a node cannot be deleted, so remove the node first
+  // (its stake is zero, so it is releasable). This also exercises node deletion.
+  const delNode = await page.evaluate(async ({ api, id }) => {
+    const tok = sessionStorage.getItem('token');
+    const r = await fetch(api + '/api/nodes/' + id, { method: 'DELETE', headers: { Authorization: 'Bearer ' + tok } });
+    return r.status;
+  }, { api: API, id: nodeId });
+  check('the operator can delete their own (unstaked) node', delNode === 200, 'HTTP ' + delNode);
 
   // --- Delete the account (requires the password), then prove it's gone. ---
   await page.goto(`${WEB}/dashboard`, { waitUntil: 'networkidle' });
