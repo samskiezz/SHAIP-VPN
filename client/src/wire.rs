@@ -35,6 +35,7 @@ pub enum MsgType {
     Cover = 0x08,
     MixCell = 0x09,
     ProbeResp = 0x0A,
+    Retry = 0x0B,
 }
 
 impl MsgType {
@@ -51,6 +52,7 @@ impl MsgType {
             0x08 => Cover,
             0x09 => MixCell,
             0x0A => ProbeResp,
+            0x0B => Retry,
             _ => return None,
         })
     }

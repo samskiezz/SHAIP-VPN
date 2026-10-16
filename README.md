@@ -1,5 +1,10 @@
 # PQ-ANON — Post-Quantum Anonymizing VPN Stack
 
+> **[STATUS.md](STATUS.md) is the honest, no-spin build status** — what is real
+> and proven, what is written but needs a Mac to compile, what was deliberately
+> cut rather than faked, and the exact path to a working app and server. Read it
+> first.
+
 A from-scratch VPN stack implementing **PQANON/1**: a hybrid post-quantum
 handshake, a custom obfuscated UDP transport, a fixed-size onion mixnet, a REST
 control plane, and a web dashboard. Every wire format and cryptographic
@@ -269,10 +274,14 @@ remove functionality — they correct or complete it:
 - **Handshake cost under attack.** Before a client has proved its address, the
   server sends it at most three times what it received (every CLIENT_HELLO is
   padded to two datagrams for this), and it never answers a datagram it can't
-  open, so it can't be used as an amplifier. But a CLIENT_HELLO from someone
-  who has the server's keys still costs the server a signature: half-open
-  handshakes are capped and expire, and a stateless retry cookie for use under
-  load (§10) is still to do.
+  open, so it can't be used as an amplifier. Once its half-open table is full,
+  an unvalidated CLIENT_HELLO gets a **stateless retry cookie** instead of a
+  signature (`client/src/retry.rs`, QUIC/DTLS-style address validation): a
+  spoofed source, which never receives the cookie, can no longer cost the
+  server its ML-KEM + ML-DSA work. A sender that echoes a valid cookie has
+  proved its address and is admitted. A flood from *real* addresses that can
+  complete this is still bounded only by the half-open cap (no global rate
+  limiter yet), and the mix delay queue remains unwired.
 - **IPv4 inside the tunnel only.** IPv6 is blocked while connected, not carried.
 - **Roaming is a reconnect.** A client whose address changes renegotiates (at once
   on iOS, after the dead-peer timeout on Linux). It keeps its tunnel address, so

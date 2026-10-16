@@ -35,6 +35,7 @@ pub mod metrics;
 pub mod mix;
 pub mod obf;
 pub mod redact;
+pub mod retry;
 pub mod router;
 pub mod routing;
 pub mod supervisor;

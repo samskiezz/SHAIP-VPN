@@ -9,14 +9,16 @@ but not-yet-wired pieces are called out explicitly so the picture stays honest.
 |---|---|---|---|
 | `pqanon` (library) | `client/` (lib name `pqanon`) | Rust | Core PQANON/1 protocol: handshake, wire framing, obfuscation, transport, mix onion, routing |
 | `pqanon` (client bin) | `client/src/main.rs` | Rust | CLI: `keygen`, `selftest`, `run` |
-| `pqanond` | `server/src/bin/pqanond.rs` | Rust | Tunnel server daemon (handshake responder + data echo) |
+| `pqanond` | `server/src/bin/pqanond.rs` | Rust | Tunnel server daemon: handshake responder, session table, TUN device, egress NAT, DNS forwarder |
 | `pqanon-mixd` | `server/src/bin/pqanon-mixd.rs` | Rust | Mix node: peels one onion layer, replay-filters, forwards |
 | Control plane | `control-plane/` | Go | Anonymous accounts (random account numbers), devices, nodes, payments, staking, signed CRL |
 | Web UI | `web-ui/` | TypeScript / Next.js | Operator dashboard |
 
-The Rust side is a two-package Cargo workspace (`client/`, `server/`); `server`
-depends on `client` via `pqanon = { path = "../client", package = "pqanon-client" }`.
-There is no single root crate, no `crates/*` split, and no FFI crate yet.
+The Rust side is a three-package Cargo workspace (`client/`, `server/`, `ffi/`);
+`server` and `ffi` depend on `client` via
+`pqanon = { path = "../client", package = "pqanon-client" }`. `ffi/` builds the
+`pqanon-ffi` static library and C header (`ffi/include/pqanon.h`) that the iOS
+Packet Tunnel links against. There is no single root crate and no `crates/*` split.
 
 ## Cryptography
 
@@ -141,20 +143,27 @@ settings; it has no request logger and stores no IP address
 
 ## Not yet wired (honest status)
 
-These are designed/partially present but **not** end-to-end today:
+Kept deliberately short and current. (Earlier versions of this file listed TUN
+I/O, the FFI crate, the rekey driver and the anti-DoS cookie here; all four
+have since shipped — see `scripts/e2e/vpn_lab.sh`, `ffi/`, `client/src/supervisor.rs`
+and `client/src/retry.rs` respectively. If this section and the top-level
+README disagree, the README is newer.)
 
-- Real TUN device I/O and server-side session routing by destination IP. The
-  testable kernel of that routing (destination extraction from an IP header)
-  exists and is unit-tested in `client/src/ipparse.rs`; the platform TUN device
-  and the read/write loops are the remaining integration work (§19).
-- Per-hop exponential mix delay queue (the global cover *scheduler* is done;
-  the per-hop queuing delay is not).
-- DNSSEC NSEC/NSEC3 negative-answer proofs and wildcard proofs, on top of the
-  verified RRSIG + chain-of-trust primitives. (The positive A/AAAA validation
-  path, the multi-algorithm RRSIG verifier, the DS/DNSKEY chain walk, and the
-  real IANA root anchors are wired; proving *non-existence* is the remaining
-  piece.) A live end-to-end validation against the real root also needs a DNS
-  path that returns DNSKEY RRsets — some sandboxed networks strip them.
-- Rekey driver and the cookie anti-DoS exchange (the TLS-decoy half of
-  anti-probing is wired).
-- Native platform clients (macOS/iOS/Android/desktop) and an FFI crate.
+Genuinely not end-to-end today:
+
+- **No mixnet in the data path.** `pqanon-mixd` peels and forwards onion cells
+  and runs a global cover-traffic scheduler, but the tunnel goes straight to one
+  server; `pqanon run --route anon` refuses rather than pretend. The per-hop
+  exponential mix delay queue is also not wired.
+- **DNSSEC negative answers.** NSEC/NSEC3 non-existence and wildcard proofs are
+  not implemented. The positive path — multi-algorithm RRSIG verification, the
+  DS/DNSKEY chain walk, and the real IANA root anchors — is wired and tested
+  (`client/src/dnssec.rs`). A live test against the real root also needs a DNS
+  path that returns DNSKEY RRsets, which some sandboxed networks strip.
+- **Native app builds.** The iOS app's Rust core (via `pqanon-ffi`) is exercised
+  on Linux against a live `pqanond`, but the SwiftUI/NetworkExtension/WidgetKit
+  layer compiles only in Xcode on macOS; Android and desktop shells don't exist.
+
+What IS wired end-to-end: the IPv4 VPN (real TUN device, egress NAT, DNS
+forwarder, 4-netns lab), the FFI C ABI, rekey every 20 minutes via a fresh
+handshake, and the stateless retry cookie for address validation under load.

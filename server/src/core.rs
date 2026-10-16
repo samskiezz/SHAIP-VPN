@@ -34,9 +34,10 @@ use crate::pool::Pool;
 use pqanon::client::{SessionInfo, CLIENT_HELLO_DATAGRAMS, MTU, TUNNEL_MTU};
 use pqanon::ctl::{self, Keepalive};
 use pqanon::dataplane::DataPlane;
-use pqanon::handshake::{DevicePolicy, Established, Identity, ServerHandshake};
+use pqanon::handshake::{ClientHandshake, DevicePolicy, Established, Identity, ServerHandshake};
 use pqanon::metrics;
 use pqanon::obf::{BootKey, Obfuscator, Reassembly, AMPLIFICATION_LIMIT, BOOT_DATAGRAM};
+use pqanon::retry::RetryCookies;
 use pqanon::transport::Session;
 use pqanon::wire::{Envelope, MsgType};
 use std::collections::HashMap;
@@ -145,6 +146,8 @@ pub struct CoreStats {
     pub ended: u64,
     /// CLIENT_HELLOs dropped at the half-open handshake limit.
     pub dropped: u64,
+    /// RETRY cookies issued to unvalidated senders while the table was full.
+    pub retries: u64,
 }
 
 pub struct Core {
@@ -163,6 +166,8 @@ pub struct Core {
     stats: CoreStats,
     /// When the half-open limit was last reported (at most once a minute).
     last_drop_warning: Option<Instant>,
+    /// Issues/verifies retry cookies for address validation under load.
+    cookies: RetryCookies,
 }
 
 /// Destinations a client may not reach through the server unless allowed:
@@ -200,6 +205,7 @@ impl Core {
             routes: HashMap::new(),
             stats: CoreStats::default(),
             last_drop_warning: None,
+            cookies: RetryCookies::new(),
         })
     }
 
@@ -301,6 +307,21 @@ impl Core {
         }
     }
 
+    /// Answer an unvalidated CLIENT_HELLO with a RETRY cookie: one HMAC, no
+    /// stored state, and never more bytes than arrived. Nothing is logged.
+    fn issue_retry(&mut self, src: SocketAddr, conn_id: u64, received: usize, now: Instant) -> Vec<Out> {
+        let cookie = self.cookies.issue(&src, now);
+        let env = Envelope { msg_type: MsgType::Retry, epoch: 0, conn_id, seq: 0, payload: cookie.to_vec() };
+        match self.boot.seal_message(&env.to_plain(), 1) {
+            Ok(d) if d.iter().map(Vec::len).sum::<usize>() <= AMPLIFICATION_LIMIT * received => {
+                self.stats.retries += 1;
+                metrics::HANDSHAKE_RETRIES.inc();
+                d.into_iter().map(|x| Out::Udp(x, src)).collect()
+            }
+            _ => Vec::new(),
+        }
+    }
+
     /// `received`: datagram bytes the hello arrived in. Until the client
     /// completes the handshake its address is unproven (it could be spoofed),
     /// so the reply may be at most [`AMPLIFICATION_LIMIT`] times that.
@@ -317,9 +338,23 @@ impl Core {
                 return send(&p.server_hello); // a retransmission
             }
         }
-        if self.pending.len() >= self.limits.max_pending && !self.pending.contains_key(&src) {
-            self.drop_handshake(now);
-            return Vec::new();
+        // Address validation under load: once the half-open table is full, an
+        // unvalidated sender gets a cheap RETRY cookie instead of a signature,
+        // so a spoofed-source flood never costs the expensive handshake. A
+        // sender that echoes a valid cookie has proved it receives at its
+        // address and is admitted over the soft cap, up to a hard ceiling that
+        // still bounds a flood from real (validated) addresses. Below the cap,
+        // nothing changes.
+        if !self.pending.contains_key(&src) && self.pending.len() >= self.limits.max_pending {
+            let validated = ClientHandshake::client_hello_cookie(&env)
+                .is_some_and(|c| self.cookies.verify(&src, &c, now));
+            if !validated {
+                return self.issue_retry(src, env.conn_id, received, now);
+            }
+            if self.pending.len() >= self.limits.max_pending.saturating_mul(2) {
+                self.drop_handshake(now);
+                return Vec::new();
+            }
         }
         let mut hs = self.gate.handshake(env.conn_id);
         let server_hello = match hs
@@ -622,14 +657,27 @@ mod tests {
     /// data plane and the session info the ACK carried.
     fn connect(core: &mut Core, server_pub: PeerPublic, client: Identity, src: SocketAddr) -> (DataPlane, SessionInfo) {
         let now = Instant::now();
-        let mut hs = ClientHandshake::new(client, server_pub.clone(), rand::random());
-        let hello = hs.client_hello([0u8; 32]).unwrap();
-        let out = send_hs(core, &server_pub, src, &hello, CLIENT_HELLO_DATAGRAMS, now);
-        // The reply stays within the anti-amplification limit.
-        assert!(udp_bytes(&out) <= AMPLIFICATION_LIMIT * CLIENT_HELLO_DATAGRAMS * BOOT_DATAGRAM, "{} bytes back", udp_bytes(&out));
-        // A retransmitted hello gets the very same SERVER_HELLO datagrams.
-        assert_eq!(send_hs(core, &server_pub, src, &hello, CLIENT_HELLO_DATAGRAMS, now), out);
-        hs.recv_server_hello(&recv_hs(&server_pub, &out)).unwrap();
+        // Mirror the real client: if the table is full we get a RETRY and
+        // repeat the hello with the cookie echoed.
+        let mut cookie = [0u8; 32];
+        let mut hs = loop {
+            let mut hs = ClientHandshake::new(client.clone(), server_pub.clone(), rand::random());
+            let hello = hs.client_hello(cookie).unwrap();
+            let out = send_hs(core, &server_pub, src, &hello, CLIENT_HELLO_DATAGRAMS, now);
+            // The reply stays within the anti-amplification limit.
+            assert!(udp_bytes(&out) <= AMPLIFICATION_LIMIT * CLIENT_HELLO_DATAGRAMS * BOOT_DATAGRAM, "{} bytes back", udp_bytes(&out));
+            let env = recv_hs(&server_pub, &out);
+            match env.msg_type {
+                MsgType::ServerHello => {
+                    // A retransmitted hello gets the very same SERVER_HELLO datagrams.
+                    assert_eq!(send_hs(core, &server_pub, src, &hello, CLIENT_HELLO_DATAGRAMS, now), out);
+                    hs.recv_server_hello(&env).unwrap();
+                    break hs;
+                }
+                MsgType::Retry if pqanon::retry::is_empty(&cookie) => cookie.copy_from_slice(&env.payload),
+                other => panic!("unexpected reply {other:?}"),
+            }
+        };
         let (finish, est) = hs.client_finish().unwrap();
         let ack = send_hs(core, &server_pub, src, &finish, 1, now);
         // A retransmitted finish gets the cached ACK back.
@@ -828,7 +876,7 @@ mod tests {
                 send_hs(&mut core, &sp, mallory, &h1.client_hello([0u8; 32]).unwrap(), CLIENT_HELLO_DATAGRAMS, now);
                 let mut h2 = ClientHandshake::new(Identity::generate(), sp.clone(), 9);
                 send_hs(&mut core, &sp, a_addr, &h2.client_hello([0u8; 32]).unwrap(), CLIENT_HELLO_DATAGRAMS, now);
-                assert_eq!(core.stats().dropped, 1, "the second half-open handshake is dropped");
+                assert_eq!(core.stats().retries, 1, "the second half-open sender is deflected with a cheap retry, not a signature");
                 core.on_datagram(mallory, &[0x16; 600], now);
                 core.on_tick(now + Duration::from_secs(11)); // the half-open one expires
                 let (_, _) = connect(&mut core, server.public(), Identity::generate(), "198.51.100.9:1".parse().unwrap());
@@ -841,9 +889,53 @@ mod tests {
             for needle in ["198.51.100", "203.0.113", "40000", "40001", "5555", &alice_id[..8], &assigned.to_string(), "10.77.0."] {
                 assert!(!text.contains(needle), "a log line carries {needle:?}:\n{text}");
             }
-            // The one thing reported is the aggregate condition, without a client.
-            assert!(text.contains("half-open handshake limit reached"), "{text}");
-            assert_eq!(text.lines().count(), 1, "nothing else is logged:\n{text}");
+            // Under half-open pressure the server now deflects with a retry
+            // cookie instead of dropping, so it logs nothing at all.
+            assert!(text.trim().is_empty(), "the server logged something about a client:\n{text}");
+        });
+    }
+
+    /// Under a full half-open table, an unvalidated CLIENT_HELLO is deflected
+    /// with a RETRY cookie (no slot, no signature); echoing the cookie proves
+    /// the address and is admitted; a different address cannot reuse it.
+    #[test]
+    fn retry_cookie_gates_a_full_table_then_admits_a_validated_sender() {
+        big_stack(|| {
+            let server = Identity::generate();
+            let sp = server.public();
+            let mut core = tun_core(&server);
+            core.limits.max_pending = 1;
+            let now = Instant::now();
+            let hello = |conn| ClientHandshake::new(Identity::generate(), sp.clone(), conn).client_hello([0u8; 32]).unwrap();
+
+            // One real half-open fills the table.
+            let occupant: SocketAddr = "198.51.100.10:1".parse().unwrap();
+            let out = send_hs(&mut core, &sp, occupant, &hello(1), CLIENT_HELLO_DATAGRAMS, now);
+            assert_eq!(recv_hs(&sp, &out).msg_type, MsgType::ServerHello);
+            assert_eq!(core.pending(), 1);
+
+            // A newcomer finds it full: deflected with a RETRY, no slot taken.
+            let newcomer: SocketAddr = "198.51.100.11:1".parse().unwrap();
+            let r = send_hs(&mut core, &sp, newcomer, &hello(2), CLIENT_HELLO_DATAGRAMS, now);
+            let retry = recv_hs(&sp, &r);
+            assert_eq!(retry.msg_type, MsgType::Retry);
+            assert_eq!(retry.payload.len(), 32);
+            assert_eq!(core.pending(), 1, "a deflected hello takes no slot");
+            assert_eq!(core.stats().retries, 1);
+            assert!(udp_bytes(&r) <= AMPLIFICATION_LIMIT * CLIENT_HELLO_DATAGRAMS * BOOT_DATAGRAM, "reply within 3x");
+
+            // Echoing the cookie proves the address and is admitted over the cap.
+            let cookie: [u8; 32] = retry.payload.clone().try_into().unwrap();
+            let cookied = ClientHandshake::new(Identity::generate(), sp.clone(), 3).client_hello(cookie).unwrap();
+            let out2 = send_hs(&mut core, &sp, newcomer, &cookied, CLIENT_HELLO_DATAGRAMS, now);
+            assert_eq!(recv_hs(&sp, &out2).msg_type, MsgType::ServerHello, "a validated sender gets in");
+            assert_eq!(core.pending(), 2);
+
+            // A different address cannot reuse that cookie.
+            let thief: SocketAddr = "203.0.113.5:1".parse().unwrap();
+            let stolen = ClientHandshake::new(Identity::generate(), sp.clone(), 4).client_hello(cookie).unwrap();
+            let r3 = send_hs(&mut core, &sp, thief, &stolen, CLIENT_HELLO_DATAGRAMS, now);
+            assert_eq!(recv_hs(&sp, &r3).msg_type, MsgType::Retry, "a stolen cookie is just another unvalidated hello");
         });
     }
 

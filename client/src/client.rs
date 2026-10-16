@@ -219,6 +219,13 @@ pub struct Tunnel {
     srtt_us: AtomicU64,
 }
 
+/// What a server sends back to a CLIENT_HELLO over the boot layer.
+enum HelloReply {
+    ServerHello(Envelope),
+    /// A retry cookie: the server's table is full and wants address validation.
+    Retry(Vec<u8>),
+}
+
 impl Tunnel {
     /// Handshake with the server and wait for it to confirm the session.
     pub async fn connect(cfg: ClientConfig) -> Result<Tunnel> {
@@ -241,26 +248,48 @@ impl Tunnel {
         // small datagrams sealed under a key from the server's pinned public
         // keys. The server is authenticated against those keys while
         // processing SERVER_HELLO.
+        //
+        // A server whose half-open table is full answers an unvalidated hello
+        // with a RETRY carrying a cookie (crate::retry); we repeat the hello
+        // with the cookie echoed, which proves we receive at this address. At
+        // most one retry, so a server that only ever asks to retry can't loop
+        // us. A fresh ClientHandshake is built for the cookied attempt (the
+        // first one's ephemeral keys and transcript are discarded).
         let boot = BootKey::for_server(&cfg.server_pub);
-        let mut hs = ClientHandshake::new(cfg.identity, cfg.server_pub, rand::random());
-        if let Some(cert) = cfg.device_cert {
-            hs.set_device_cert(cert);
-        }
-        let hello = boot.seal_message(&hs.client_hello([0u8; 32])?.to_plain(), CLIENT_HELLO_DATAGRAMS)?;
-        let mut reassembly = Reassembly::new();
-        let shello = exchange(&sock, &hello, &mut buf, deadline, |b| {
-            let msg = reassembly.push(boot.open(b)?)?;
-            Envelope::from_plain(&msg).ok().filter(|e| e.msg_type == MsgType::ServerHello)
-        })
-        .await
-        .map_err(|_| {
-            anyhow!(
-                "no SERVER_HELLO from {server} within {:?}: the server is unreachable, or the server \
-                 keys in this config are not that server's (a server stays silent to a handshake \
-                 sealed for another server's keys)",
-                cfg.handshake_timeout
-            )
-        })?;
+        let mut cookie = [0u8; 32];
+        let (mut hs, shello) = loop {
+            let mut hs = ClientHandshake::new(cfg.identity.clone(), cfg.server_pub.clone(), rand::random());
+            if let Some(cert) = &cfg.device_cert {
+                hs.set_device_cert(cert.clone());
+            }
+            let hello = boot.seal_message(&hs.client_hello(cookie)?.to_plain(), CLIENT_HELLO_DATAGRAMS)?;
+            let mut reassembly = Reassembly::new();
+            let reply = exchange(&sock, &hello, &mut buf, deadline, |b| {
+                let msg = reassembly.push(boot.open(b)?)?;
+                let env = Envelope::from_plain(&msg).ok()?;
+                match env.msg_type {
+                    MsgType::ServerHello => Some(HelloReply::ServerHello(env)),
+                    MsgType::Retry if env.payload.len() == 32 => Some(HelloReply::Retry(env.payload)),
+                    _ => None,
+                }
+            })
+            .await
+            .map_err(|_| {
+                anyhow!(
+                    "no SERVER_HELLO from {server} within {:?}: the server is unreachable, or the server \
+                     keys in this config are not that server's (a server stays silent to a handshake \
+                     sealed for another server's keys)",
+                    cfg.handshake_timeout
+                )
+            })?;
+            match reply {
+                HelloReply::ServerHello(env) => break (hs, env),
+                HelloReply::Retry(c) if crate::retry::is_empty(&cookie) => {
+                    cookie.copy_from_slice(&c); // retry once, with the cookie
+                }
+                HelloReply::Retry(_) => bail!("the server kept asking to retry the handshake"),
+            }
+        };
         hs.recv_server_hello(&shello)?;
         let (finish, est) = hs.client_finish()?;
 

@@ -57,6 +57,7 @@ impl Default for Gauge {
 pub static HANDSHAKES_OK: Counter = Counter::new();
 pub static HANDSHAKES_FAILED: Counter = Counter::new();
 pub static HANDSHAKES_DROPPED: Counter = Counter::new();
+pub static HANDSHAKE_RETRIES: Counter = Counter::new();
 pub static POOL_EXHAUSTED: Counter = Counter::new();
 pub static SESSIONS_ESTABLISHED: Counter = Counter::new();
 pub static DATA_PACKETS: Counter = Counter::new();
@@ -97,6 +98,7 @@ fn snapshot() -> Vec<Metric> {
         counter("pqanon_server_handshakes_ok_total", "Completed server handshakes.", HANDSHAKES_OK.get()),
         counter("pqanon_server_handshakes_failed_total", "Server handshakes that errored or were rejected.", HANDSHAKES_FAILED.get()),
         counter("pqanon_server_handshakes_dropped_total", "CLIENT_HELLOs dropped at the half-open handshake limit.", HANDSHAKES_DROPPED.get()),
+        counter("pqanon_server_handshake_retries_total", "RETRY cookies issued to unvalidated senders while the half-open table was full.", HANDSHAKE_RETRIES.get()),
         counter("pqanon_server_pool_exhausted_total", "Sessions refused because every tunnel address was in use.", POOL_EXHAUSTED.get()),
         counter("pqanon_server_sessions_established_total", "Sessions established (keys derived).", SESSIONS_ESTABLISHED.get()),
         counter("pqanon_server_data_packets_total", "DATA packets decrypted by the server.", DATA_PACKETS.get()),

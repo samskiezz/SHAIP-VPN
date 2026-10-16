@@ -426,6 +426,20 @@ impl ClientHandshake {
         self.device_cert = Some(cert.into());
     }
 
+    /// The cookie field (5th) of a CLIENT_HELLO, read without any crypto, so the
+    /// server can check address validation before doing the expensive handshake.
+    /// `None` if the message is malformed or the cookie is the wrong size.
+    pub fn client_hello_cookie(env: &Envelope) -> Option<[u8; 32]> {
+        if env.msg_type != MsgType::ClientHello {
+            return None;
+        }
+        let mut r = FieldReader::new(&env.payload);
+        for _ in 0..4 {
+            r.take().ok()?;
+        }
+        r.take().ok()?.try_into().ok()
+    }
+
     /// Message 1 — CLIENT_HELLO (§6.2).
     pub fn client_hello(&mut self, cookie: [u8; 32]) -> Result<Envelope> {
         let (dk, ek) = MlKem768::generate(&mut OsRng);
