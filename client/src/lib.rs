@@ -19,6 +19,7 @@ pub mod dataplane;
 pub mod decoy;
 pub mod directory;
 pub mod dnssec;
+pub mod enrollment;
 pub mod handshake;
 pub mod i18n;
 pub mod ipparse;
