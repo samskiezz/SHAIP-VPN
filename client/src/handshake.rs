@@ -26,9 +26,10 @@ use ed25519_dalek::{
 };
 use hmac::{Hmac, Mac};
 use ml_dsa::{
-    EncodedSignature, EncodedVerifyingKey, KeyGen, MlDsa65, Signature as DsaSignature,
-    SigningKey as DsaSigningKey, VerifyingKey as DsaVerifyingKey,
+    EncodedSignature, EncodedSigningKey, EncodedVerifyingKey, KeyGen, MlDsa65,
+    Signature as DsaSignature, SigningKey as DsaSigningKey, VerifyingKey as DsaVerifyingKey,
 };
+use zeroize::Zeroizing;
 use ml_kem::kem::{Decapsulate, Encapsulate};
 use ml_kem::{Ciphertext, Encoded, EncodedSizeUser, KemCore, MlKem768};
 use rand::rngs::OsRng;
@@ -119,7 +120,63 @@ impl Identity {
         let ed_sig = self.ed.sign(transcript);
         (pq_sig.encode().to_vec(), ed_sig.to_bytes())
     }
+
+    /// Serialize the full secret identity for storage:
+    /// `magic || Ed25519 seed (32) || ML-DSA-65 signing key || ML-DSA-65 verifying key`.
+    ///
+    /// FIPS 204's signing-key encoding omits `t1`, so the verifying key cannot be
+    /// recomputed from it and is stored alongside. The bytes are secret key
+    /// material and are zeroized on drop.
+    pub fn to_secret_bytes(&self) -> Zeroizing<Vec<u8>> {
+        let sk = self.pq_sk.encode();
+        let vk = self.pq_vk.encode();
+        let mut out = Zeroizing::new(Vec::with_capacity(
+            IDENTITY_MAGIC.len() + 32 + sk.len() + vk.len(),
+        ));
+        out.extend_from_slice(IDENTITY_MAGIC);
+        out.extend_from_slice(&self.ed.to_bytes());
+        out.extend_from_slice(&sk);
+        out.extend_from_slice(&vk);
+        out
+    }
+
+    /// Parse [`Identity::to_secret_bytes`] output. Rejects a wrong magic or
+    /// length, and proves the stored halves belong together with a sign/verify
+    /// round trip, so a corrupted or spliced key file fails here instead of as an
+    /// unexplained handshake failure later.
+    pub fn from_secret_bytes(b: &[u8]) -> Result<Self> {
+        let sk_len = std::mem::size_of::<EncodedSigningKey<MlDsa65>>();
+        let vk_len = std::mem::size_of::<EncodedVerifyingKey<MlDsa65>>();
+        let rest = b
+            .strip_prefix(IDENTITY_MAGIC)
+            .ok_or_else(|| anyhow!("not a PQANON identity (bad magic)"))?;
+        if rest.len() != 32 + sk_len + vk_len {
+            bail!("identity has the wrong length ({} bytes)", b.len());
+        }
+        let (ed_seed, rest) = rest.split_at(32);
+        let (sk_bytes, vk_bytes) = rest.split_at(sk_len);
+        let ed_seed = Zeroizing::new(<[u8; 32]>::try_from(ed_seed).expect("split at 32"));
+        let sk_enc = EncodedSigningKey::<MlDsa65>::try_from(sk_bytes)
+            .map_err(|_| anyhow!("bad ML-DSA signing key encoding"))?;
+        let vk_enc = EncodedVerifyingKey::<MlDsa65>::try_from(vk_bytes)
+            .map_err(|_| anyhow!("bad ML-DSA verifying key encoding"))?;
+        let id = Self {
+            pq_sk: DsaSigningKey::<MlDsa65>::decode(&sk_enc),
+            pq_vk: DsaVerifyingKey::<MlDsa65>::decode(&vk_enc),
+            ed: EdSigningKey::from_bytes(&ed_seed),
+        };
+        let (pq_sig, ed_sig) = id.sign_transcript(IDENTITY_SELFTEST);
+        id.public()
+            .verify_transcript(IDENTITY_SELFTEST, &pq_sig, &ed_sig)
+            .map_err(|_| anyhow!("identity is corrupt: its signing and verifying keys do not match"))?;
+        Ok(id)
+    }
 }
+
+/// Leading magic of a serialized [`Identity`].
+const IDENTITY_MAGIC: &[u8] = b"PQANON-IDENTITY-V1";
+/// Message signed when loading an identity to prove its key halves match.
+const IDENTITY_SELFTEST: &[u8] = b"PQANON-IDENTITY-SELFTEST-V1";
 
 /// The public half of an [`Identity`]: pinned ML-DSA-65 + Ed25519 verifying keys.
 #[derive(Clone)]
@@ -607,6 +664,53 @@ mod tests {
         client.recv_server_hello(&shello).unwrap();
         let (finish, _) = client.client_finish().unwrap();
         assert!(server.recv_client_finish(&finish).is_err());
+    }
+
+    #[test]
+    fn restored_identity_still_matches_its_pin() {
+        // A server restarts from its stored identity; a client that pinned the
+        // original public keys must still complete the handshake.
+        let original = Identity::generate();
+        let pinned = original.public();
+        let bytes = original.to_secret_bytes();
+        // FIPS 204 ML-DSA-65 sizes: signing key 4032, verifying key 1952.
+        assert_eq!(bytes.len(), IDENTITY_MAGIC.len() + 32 + 4032 + 1952);
+        let restored = Identity::from_secret_bytes(&bytes).unwrap();
+        assert_eq!(restored.identity_id(), original.identity_id());
+
+        let client_id = Identity::generate();
+        let authorized = vec![client_id.identity_id()];
+        let mut client = ClientHandshake::new(client_id, pinned, 9);
+        let mut server = ServerHandshake::new(restored, authorized, 9);
+        let hello = client.client_hello([0u8; 32]).unwrap();
+        server.recv_client_hello(&hello, false).unwrap();
+        let shello = server.server_hello().unwrap();
+        client.recv_server_hello(&shello).unwrap();
+        let (fin, ce) = client.client_finish().unwrap();
+        let se = server.recv_client_finish(&fin).unwrap();
+        assert_eq!(ce.ss_mix, se.ss_mix);
+    }
+
+    #[test]
+    fn corrupt_identity_bytes_are_rejected() {
+        let a = Identity::generate();
+        let good = a.to_secret_bytes();
+
+        let mut bad_magic = good.to_vec();
+        bad_magic[0] ^= 0xff;
+        assert!(Identity::from_secret_bytes(&bad_magic).is_err());
+
+        assert!(Identity::from_secret_bytes(&good[..good.len() - 1]).is_err());
+
+        // Splice another identity's ML-DSA verifying key onto a's signing key:
+        // lengths are right, but the halves no longer belong together.
+        let b = Identity::generate().to_secret_bytes();
+        let vk_len = 1952;
+        let mut spliced = good.to_vec();
+        let n = spliced.len();
+        spliced[n - vk_len..].copy_from_slice(&b[n - vk_len..]);
+        let err = Identity::from_secret_bytes(&spliced).err().unwrap().to_string();
+        assert!(err.contains("do not match"), "{err}");
     }
 
     #[test]

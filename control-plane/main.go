@@ -7,18 +7,17 @@ package main
 
 import (
 	"context"
-	"crypto/ed25519"
-	"crypto/rand"
-	"encoding/base64"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+
+	"pqanon/control-plane/keystore"
 )
 
 func main() {
@@ -27,23 +26,41 @@ func main() {
 	store, label := openStore()
 	defer store.Close()
 
-	tokens, err := openTokenSigner(24 * time.Hour)
+	// Signing keys: each one may be a key file, an env seed, or an HSM key (see
+	// keys.go and the keystore package).
+	tokenKey, tokenSrc, err := resolveSigner("token", "TOKEN_SIGNER", "TOKEN_SIGNING_KEY")
 	if err != nil {
 		log.Fatalf("token signer: %v", err)
 	}
-	crlPub, crlPriv, err := ed25519.GenerateKey(rand.Reader)
+	tokens, err := NewTokenSignerFromSigner(24*time.Hour, tokenKey)
 	if err != nil {
-		log.Fatalf("crl key: %v", err)
+		log.Fatalf("token signer: %v", err)
 	}
+	crlKey, crlSrc, err := resolveSigner("crl", "CRL_SIGNER", "")
+	if err != nil {
+		log.Fatalf("crl signer: %v", err)
+	}
+	crlPub, err := keystore.Ed25519Public(crlKey)
+	if err != nil {
+		log.Fatalf("crl signer: %v", err)
+	}
+	log.Printf("signing keys: token=%s crl=%s", tokenSrc, crlSrc)
 
-	mint, err := NewMint(os.Getenv("PAY_KEY_DIR"), defaultDenominations())
+	// E-cash denomination keys are RSA blind-signing keys (RFC 9474), which the
+	// Ed25519 keystore does not hold; they live under PAY_KEY_DIR, defaulting to
+	// $KEY_DIR/mint when only KEY_DIR is set.
+	payKeyDir := os.Getenv("PAY_KEY_DIR")
+	if payKeyDir == "" && os.Getenv("KEY_DIR") != "" {
+		payKeyDir = filepath.Join(os.Getenv("KEY_DIR"), "mint")
+	}
+	mint, err := NewMint(payKeyDir, defaultDenominations())
 	if err != nil {
 		log.Fatalf("e-cash mint: %v", err)
 	}
 	rails, defaultRail := buildRails()
 
 	srv := &Server{
-		store: store, tokens: tokens, crlPub: crlPub, crlPriv: crlPriv,
+		store: store, tokens: tokens, crlPub: crlPub, crlSigner: crlKey,
 		mint: mint, rails: rails, defaultRail: defaultRail,
 		devSettle: os.Getenv("PAY_DEV_SETTLE") == "1",
 	}
@@ -117,22 +134,6 @@ func routes(srv *Server, label string) http.Handler {
 		})
 	})
 	return r
-}
-
-// openTokenSigner loads a stable token signing key from TOKEN_SIGNING_KEY
-// (base64 of a 32-byte Ed25519 seed) so tokens survive restarts and are shared
-// across replicas. Without it, an ephemeral key is generated and a warning is
-// logged — fine for dev, not for production.
-func openTokenSigner(ttl time.Duration) (*TokenSigner, error) {
-	if v := os.Getenv("TOKEN_SIGNING_KEY"); v != "" {
-		seed, err := base64.StdEncoding.DecodeString(v)
-		if err != nil {
-			return nil, fmt.Errorf("TOKEN_SIGNING_KEY must be base64: %w", err)
-		}
-		return NewTokenSignerWithSeed(ttl, seed)
-	}
-	log.Printf("WARNING: TOKEN_SIGNING_KEY not set — using an ephemeral key; tokens will not survive a restart. Generate one with: openssl rand -base64 32")
-	return NewTokenSigner(ttl)
 }
 
 // buildRails assembles the available payment backends. The dev rail is always

@@ -37,6 +37,58 @@ rust_tunsmoke(){ ./target/release/pqanon tun-test; }
 # --- Go ---
 go_all() { ( cd control-plane && go build ./... && go vet ./... && go test ./... ); }
 
+# --- HSM: control-plane signing keys inside a real PKCS#11 token (SoftHSM2) ---
+SOFTHSM_MODULE=/usr/lib/softhsm/libsofthsm2.so
+hsm_pkcs11() {
+  local D OUT ok=0 bad=0 B=http://127.0.0.1:8099 BIN=control-plane/bin/control-plane
+  D=$(mktemp -d)
+  printf 'directories.tokendir = %s\nobjectstore.backend = file\nlog.level = ERROR\n' "$D" > "$D/softhsm2.conf"
+  export SOFTHSM2_CONF="$D/softhsm2.conf"
+  softhsm2-util --init-token --free --label pqanon-ci --pin 1234 --so-pin 5678 >/dev/null \
+    || { rm -rf "$D"; unset SOFTHSM2_CONF; return 1; }
+  chk() { if [ "$1" = "$2" ]; then ok=$((ok+1)); else echo "  ✗ $3: got $1 want $2"; bad=$((bad+1)); fi; }
+
+  # 1. The keystore's PKCS#11 test must actually run against the token.
+  OUT=$(cd control-plane && PQANON_TEST_PKCS11_MODULE="$SOFTHSM_MODULE" PQANON_TEST_PKCS11_TOKEN=pqanon-ci \
+    PQANON_TEST_PKCS11_PIN=1234 go test -count=1 -run 'TestPKCS11' -v ./keystore/ 2>&1)
+  echo "$OUT" | grep -E '^(--- |ok|FAIL)'
+  if echo "$OUT" | grep -q -- '--- PASS: TestPKCS11SoftHSM' && ! echo "$OUT" | grep -q -- '--- SKIP'; then
+    ok=$((ok+1)); else echo "  ✗ PKCS#11 test did not run and pass"; bad=$((bad+1)); fi
+
+  # 2. The live control plane signs its auth tokens and CRL inside the token.
+  ( cd control-plane && go build -o bin/control-plane . ) || { rm -rf "$D"; unset SOFTHSM2_CONF; return 1; }
+  local P11="?module-path=$SOFTHSM_MODULE&pin-env=PQANON_HSM_PIN&create=1"
+  local ENVS=(PQANON_HSM_PIN=1234 LISTEN_ADDR=:8099
+    "TOKEN_SIGNER=pkcs11:token=pqanon-ci;object=cp-token$P11"
+    "CRL_SIGNER=pkcs11:token=pqanon-ci;object=cp-crl$P11")
+  env "${ENVS[@]}" "$BIN" >/tmp/hsm_cp.log 2>&1 &
+  local PID=$!
+  curl -fsS --retry 40 --retry-delay 1 --retry-connrefused "$B/health" >/dev/null || { kill $PID; rm -rf "$D"; unset SOFTHSM2_CONF; return 1; }
+  grep -q "signing keys: token=pkcs11:" /tmp/hsm_cp.log && ok=$((ok+1)) || { echo "  ✗ token key not from the HSM"; bad=$((bad+1)); }
+  chk "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/api/auth/register" -H 'Content-Type: application/json' -d '{"email":"hsm@x.co","password":"password123"}')" 201 "register"
+  local TOK CRLPUB
+  TOK=$(curl -s -X POST "$B/api/auth/login" -H 'Content-Type: application/json' -d '{"email":"hsm@x.co","password":"password123"}' | python3 -c "import sys,json;print(json.load(sys.stdin)['token'])" 2>/dev/null)
+  chk "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOK" "$B/api/me")" 200 "HSM-signed token accepted"
+  CRLPUB=$(curl -s "$B/api/crl" | python3 -c "import sys,json;print(json.load(sys.stdin)['ed25519_pub'])" 2>/dev/null)
+  [ ${#CRLPUB} -eq 64 ] && ok=$((ok+1)) || { echo "  ✗ CRL pub missing"; bad=$((bad+1)); }
+  kill $PID 2>/dev/null; wait $PID 2>/dev/null
+
+  # 3. Restart: both keys persist inside the token (the old token still
+  #    verifies; the CRL key is unchanged — no more per-boot CRL keys).
+  env "${ENVS[@]}" "$BIN" >/tmp/hsm_cp2.log 2>&1 &
+  PID=$!
+  curl -fsS --retry 40 --retry-delay 1 --retry-connrefused "$B/health" >/dev/null || { kill $PID; rm -rf "$D"; unset SOFTHSM2_CONF; return 1; }
+  # /api/routing needs only a valid token (the in-memory user table is wiped by
+  # the restart, so /api/me would 404 even though auth passed).
+  chk "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOK" "$B/api/routing")" 200 "token survives restart (HSM key persisted)"
+  chk "$(curl -s "$B/api/crl" | python3 -c "import sys,json;print(json.load(sys.stdin)['ed25519_pub'])" 2>/dev/null)" "$CRLPUB" "CRL key stable across restart"
+  kill $PID 2>/dev/null; wait $PID 2>/dev/null
+
+  rm -rf "$D"; unset SOFTHSM2_CONF
+  echo "  HSM: $ok checks passed, $bad failed"
+  [ "$bad" -eq 0 ]
+}
+
 # --- Web UI ---
 web_build() { ( cd web-ui && npx tsc --noEmit && npm run build >/dev/null ); }
 
@@ -134,6 +186,11 @@ else
   skip  "rust: live TUN smoke test"          "needs root + /dev/net/tun"
 fi
 stage "go: build+vet+test (fuzz/brute/race)" go_all
+if command -v softhsm2-util >/dev/null && [ -e "$SOFTHSM_MODULE" ] && command -v python3 >/dev/null; then
+  stage "hsm: PKCS#11 signing keys (SoftHSM2)" hsm_pkcs11
+else
+  skip  "hsm: PKCS#11 signing keys (SoftHSM2)" "needs softhsm2 (apt install softhsm2) + python3"
+fi
 if [ -d web-ui/node_modules ]; then
   stage "web: typecheck + production build"  web_build
 else

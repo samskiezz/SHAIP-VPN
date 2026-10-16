@@ -23,7 +23,9 @@
 package enrollment
 
 import (
+	"crypto"
 	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
@@ -164,17 +166,23 @@ func wrap(label string, body, sig []byte) string {
 }
 
 // IssueEnrollToken signs an enrollment token with the enrollment-authority key.
-func IssueEnrollToken(authority ed25519.PrivateKey, c EnrollClaims) (string, error) {
+//
+// The authority is any crypto.Signer holding an Ed25519 key — an in-memory key
+// or one inside an HSM (see the keystore package).
+func IssueEnrollToken(authority crypto.Signer, c EnrollClaims) (string, error) {
 	if len(c.Account) == 0 || len(c.Account) > 255 {
 		return "", fmt.Errorf("account length %d out of range", len(c.Account))
 	}
 	body := encodeEnrollBody(c)
-	sig := ed25519.Sign(authority, body)
+	sig, err := sign(authority, body)
+	if err != nil {
+		return "", err
+	}
 	return wrap(LabelEnroll, body, sig), nil
 }
 
 // IssueDeviceCert signs a device certificate with the device-CA key.
-func IssueDeviceCert(ca ed25519.PrivateKey, c CertClaims) (string, error) {
+func IssueDeviceCert(ca crypto.Signer, c CertClaims) (string, error) {
 	if len(c.DevicePub) != ed25519.PublicKeySize {
 		return "", fmt.Errorf("device public key must be %d bytes", ed25519.PublicKeySize)
 	}
@@ -182,8 +190,28 @@ func IssueDeviceCert(ca ed25519.PrivateKey, c CertClaims) (string, error) {
 		return "", fmt.Errorf("account length %d out of range", len(c.Account))
 	}
 	body := encodeCertBody(c)
-	sig := ed25519.Sign(ca, body)
+	sig, err := sign(ca, body)
+	if err != nil {
+		return "", err
+	}
 	return wrap(LabelCert, body, sig), nil
+}
+
+// sign makes a pure Ed25519 signature with any crypto.Signer and verifies it
+// before use, so a misconfigured backend cannot mint artifacts nobody accepts.
+func sign(s crypto.Signer, body []byte) ([]byte, error) {
+	pub, ok := s.Public().(ed25519.PublicKey)
+	if !ok {
+		return nil, fmt.Errorf("signer is not Ed25519 (%T)", s.Public())
+	}
+	sig, err := s.Sign(rand.Reader, body, crypto.Hash(0))
+	if err != nil {
+		return nil, err
+	}
+	if !ed25519.Verify(pub, body, sig) {
+		return nil, errors.New("signer produced a signature that does not verify")
+	}
+	return sig, nil
 }
 
 // ---- verify -----------------------------------------------------------------

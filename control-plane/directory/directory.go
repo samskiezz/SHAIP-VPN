@@ -12,7 +12,9 @@ package directory
 
 import (
 	"bytes"
+	"crypto"
 	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -97,7 +99,8 @@ func (d *Document) Digest() [32]byte {
 
 // Sign adds this authority's Ed25519 signature over the digest. The authority
 // must be listed in the document.
-func (d *Document) Sign(authorityName string, priv ed25519.PrivateKey) error {
+// The key is any crypto.Signer holding an Ed25519 key (in memory or in an HSM).
+func (d *Document) Sign(authorityName string, priv crypto.Signer) error {
 	known := false
 	for _, a := range d.Authorities {
 		if a.Name == authorityName {
@@ -111,8 +114,19 @@ func (d *Document) Sign(authorityName string, priv ed25519.PrivateKey) error {
 	if d.Signatures == nil {
 		d.Signatures = make(map[string][]byte)
 	}
+	pub, ok := priv.Public().(ed25519.PublicKey)
+	if !ok {
+		return fmt.Errorf("authority %s: signer is not Ed25519", authorityName)
+	}
 	digest := d.Digest()
-	d.Signatures[authorityName] = ed25519.Sign(priv, digest[:])
+	sig, err := priv.Sign(rand.Reader, digest[:], crypto.Hash(0))
+	if err != nil {
+		return fmt.Errorf("authority %s: %w", authorityName, err)
+	}
+	if !ed25519.Verify(pub, digest[:], sig) {
+		return fmt.Errorf("authority %s: signer produced a signature that does not verify", authorityName)
+	}
+	d.Signatures[authorityName] = sig
 	return nil
 }
 

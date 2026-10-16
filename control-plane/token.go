@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
@@ -8,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"pqanon/control-plane/keystore"
 )
 
 // Token is a compact EdDSA-signed bearer token: base64url(claims).base64url(sig)
@@ -21,11 +24,12 @@ type Token struct {
 	ExpiresAt int64  `json:"exp"`
 }
 
-// TokenSigner signs and verifies tokens with an Ed25519 keypair.
+// TokenSigner signs and verifies tokens with an Ed25519 key. The private half is
+// a crypto.Signer, so it may live in memory, in a key file, or in an HSM.
 type TokenSigner struct {
-	priv ed25519.PrivateKey
-	pub  ed25519.PublicKey
-	ttl  time.Duration
+	signer crypto.Signer
+	pub    ed25519.PublicKey
+	ttl    time.Duration
 }
 
 // NewTokenSigner generates a fresh signing key. The key is ephemeral: every
@@ -37,7 +41,16 @@ func NewTokenSigner(ttl time.Duration) (*TokenSigner, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &TokenSigner{priv: priv, pub: pub, ttl: ttl}, nil
+	return &TokenSigner{signer: priv, pub: pub, ttl: ttl}, nil
+}
+
+// NewTokenSignerFromSigner uses an already-resolved key (see keystore.Open).
+func NewTokenSignerFromSigner(ttl time.Duration, s crypto.Signer) (*TokenSigner, error) {
+	pub, err := keystore.Ed25519Public(s)
+	if err != nil {
+		return nil, err
+	}
+	return &TokenSigner{signer: s, pub: pub, ttl: ttl}, nil
 }
 
 // NewTokenSignerWithSeed derives a stable signing key from a 32-byte Ed25519
@@ -50,7 +63,7 @@ func NewTokenSignerWithSeed(ttl time.Duration, seed []byte) (*TokenSigner, error
 	}
 	priv := ed25519.NewKeyFromSeed(seed)
 	pub := priv.Public().(ed25519.PublicKey)
-	return &TokenSigner{priv: priv, pub: pub, ttl: ttl}, nil
+	return &TokenSigner{signer: priv, pub: pub, ttl: ttl}, nil
 }
 
 var b64 = base64.RawURLEncoding
@@ -74,7 +87,10 @@ func (t *TokenSigner) IssueWithTTL(sub, email string, ttl time.Duration) (string
 		return "", err
 	}
 	encoded := b64.EncodeToString(payload)
-	sig := ed25519.Sign(t.priv, []byte(encoded))
+	sig, err := keystore.Sign(t.signer, []byte(encoded))
+	if err != nil {
+		return "", err
+	}
 	return encoded + "." + b64.EncodeToString(sig), nil
 }
 

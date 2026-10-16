@@ -72,8 +72,10 @@ make build           # release binaries + control plane + web build
 #  → DATA packet sealed → morphed → demorphed → opened OK
 #  → PQAN magic absent on the wire
 
-# 3. Generate a long-term identity
-./target/release/pqanon keygen
+# 3. Generate persistent long-term identities (created 0600; see docs/keys.md)
+./target/release/pqanon keygen --out ~/.pqanon/client.id
+./target/release/pqanond --identity /var/lib/pqanon/pqanond.id --print-public
+#  → identity_id / server_ml_dsa_pub / server_ed_pub: paste into the client's [server]
 
 # 4. Run the control plane + daemons locally
 ./scripts/run-local.sh

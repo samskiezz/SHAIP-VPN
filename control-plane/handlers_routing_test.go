@@ -23,7 +23,7 @@ func newTestServer(t *testing.T) (*Server, http.Handler, *MemStore) {
 	if err != nil {
 		t.Fatalf("crl key: %v", err)
 	}
-	srv := &Server{store: store, tokens: tokens, crlPub: pub, crlPriv: priv}
+	srv := &Server{store: store, tokens: tokens, crlPub: pub, crlSigner: priv}
 	return srv, routes(srv, "memory"), store
 }
 

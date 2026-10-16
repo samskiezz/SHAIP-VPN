@@ -44,6 +44,12 @@ struct Cli {
     /// Expose Prometheus metrics on this TCP address (e.g. 127.0.0.1:9101).
     #[arg(long)]
     metrics: Option<String>,
+
+    /// Persistent X25519 onion key, created 0600 on first run. The directory
+    /// lists each mix's public key, so without it the listing goes stale on
+    /// every restart and clients build onions this node can no longer peel.
+    #[arg(long)]
+    key: Option<std::path::PathBuf>,
 }
 
 #[tokio::main]
@@ -55,9 +61,21 @@ async fn main() -> Result<()> {
         .init();
     let cli = Cli::parse();
 
-    // Long-term mix key. In production this is loaded from disk and published to
-    // the control plane; for the demo it is generated on boot.
-    let secret = StaticSecret::random_from_rng(OsRng);
+    // Long-term mix key: loaded from (or created in) --key so it survives
+    // restarts and its public half can be published in the directory.
+    let secret = match &cli.key {
+        Some(path) => {
+            let (raw, created) = pqanon::keystore::load_or_create_x25519(path)?;
+            if created {
+                tracing::info!(path = %path.display(), "created a new persistent mix key");
+            }
+            StaticSecret::from(*raw)
+        }
+        None => {
+            tracing::warn!("no --key: using an ephemeral mix key; directory listings go stale on restart");
+            StaticSecret::random_from_rng(OsRng)
+        }
+    };
     let public = PublicKey::from(&secret);
     tracing::info!(mix_pubkey = %hex(public.as_bytes()), "pqanon-mixd identity");
 

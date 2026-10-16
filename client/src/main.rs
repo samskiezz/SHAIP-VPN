@@ -31,7 +31,12 @@ struct Cli {
 #[derive(Subcommand)]
 enum Cmd {
     /// Generate a long-term identity (ML-DSA-65 + Ed25519) and print its id.
-    Keygen,
+    Keygen {
+        /// Store the identity here (mode 0600) so it persists; if the file
+        /// already exists, its public keys are printed and it is left unchanged.
+        #[arg(long)]
+        out: Option<String>,
+    },
     /// Run an end-to-end self-test of the PQANON/1 stack.
     Selftest,
     /// Create a real TUN device and prove IP packets flow from the kernel
@@ -138,7 +143,7 @@ fn cli_main() -> Result<()> {
 
     let cli = Cli::parse();
     match cli.cmd {
-        Cmd::Keygen => keygen(),
+        Cmd::Keygen { out } => keygen(out.as_deref()),
         Cmd::Selftest => selftest(),
         Cmd::TunTest => tun_test(),
         Cmd::Run { config, route } => run(&config, &route),
@@ -286,8 +291,17 @@ fn tun_test() -> Result<()> {
     anyhow::bail!("tun-test is Linux only (TUN is a Linux kernel interface)")
 }
 
-fn keygen() -> Result<()> {
-    let id = Identity::generate();
+fn keygen(out: Option<&str>) -> Result<()> {
+    let id = match out {
+        Some(path) => {
+            let (id, created) = pqanon::keystore::load_or_create_identity(std::path::Path::new(path))?;
+            if !created {
+                eprintln!("{path} already exists; showing its public keys (unchanged)");
+            }
+            id
+        }
+        None => Identity::generate(),
+    };
     let pubk = id.public();
     println!("identity_id : {}", hex::encode(id.identity_id()));
     println!("ml_dsa_pub  : {}", hex::encode(pubk.pq_bytes()));
@@ -401,6 +415,16 @@ fn run(config: &str, route: &str) -> Result<()> {
         &hex::decode(server_ed_hex.trim())?,
     )?;
 
+    // A persistent identity lets a server allow-list this client; without one a
+    // fresh identity is generated per run (fine only for open demo servers).
+    let id = match gstr("client", "identity") {
+        Some(path) => pqanon::keystore::load_or_create_identity(std::path::Path::new(&path))?.0,
+        None => {
+            tracing::warn!("no [client].identity: using a throwaway identity for this run");
+            Identity::generate()
+        }
+    };
+
     let tun_name = gstr("client", "tun_device").unwrap_or_else(|| "pqanon-c0".into());
     let (tun_ip, tun_prefix) =
         parse_cidr(&gstr("client", "tun_address").unwrap_or_else(|| "10.77.0.2/24".into()))?;
@@ -417,7 +441,6 @@ fn run(config: &str, route: &str) -> Result<()> {
         sock.connect(server_sa).await?;
 
         // --- PQANON-HS/1 handshake over UDP (plain-framed, pre-key) ---
-        let id = Identity::generate();
         let conn: u64 = rand::random();
         let mut hs = ClientHandshake::new(id, server_pub, conn);
         sock.send(&hs.client_hello([0u8; 32])?.to_plain()).await?;

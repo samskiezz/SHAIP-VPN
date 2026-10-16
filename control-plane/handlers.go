@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
@@ -12,15 +13,18 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+
+	"pqanon/control-plane/keystore"
 )
 
 // Server bundles the dependencies the HTTP handlers need.
 type Server struct {
 	store  Store
 	tokens *TokenSigner
-	// crlKey signs the CRL distributed to tunnel servers (§7).
-	crlPub  ed25519.PublicKey
-	crlPriv ed25519.PrivateKey
+	// crlSigner signs the CRL distributed to tunnel servers (§7). Tunnel servers
+	// pin crlPub, so it must be stable: resolve it from a key file or HSM.
+	crlPub    ed25519.PublicKey
+	crlSigner crypto.Signer
 	// Untraceable payments (§20): the e-cash mint and the payment rails.
 	mint        *Mint
 	rails       map[string]PaymentRail // by name: "monero", "btcpay", "dev"
@@ -358,7 +362,11 @@ func (s *Server) handleCRL(w http.ResponseWriter, r *http.Request) {
 		"issued_at": time.Now().UTC().Format(time.RFC3339),
 		"revoked":   ids,
 	})
-	sig := ed25519.Sign(s.crlPriv, payload)
+	sig, err := keystore.Sign(s.crlSigner, payload)
+	if err != nil {
+		errJSON(w, http.StatusInternalServerError, "crl signing failed")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"crl":           json.RawMessage(payload),
 		"ed25519_sig":   hex.EncodeToString(sig),

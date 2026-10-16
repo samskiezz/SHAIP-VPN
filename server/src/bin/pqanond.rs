@@ -51,6 +51,17 @@ struct Cli {
     /// Expose Prometheus metrics on this TCP address (e.g. 127.0.0.1:9100).
     #[arg(long)]
     metrics: Option<String>,
+
+    /// Persistent server identity (ML-DSA-65 + Ed25519), created 0600 on first
+    /// run. Clients pin its public keys, so without it the identity — and every
+    /// client's pin — changes on each restart.
+    #[arg(long)]
+    identity: Option<std::path::PathBuf>,
+
+    /// Print the public identity in client-config form (the `[server]` keys a
+    /// client pins) and exit. Requires `--identity`.
+    #[arg(long)]
+    print_public: bool,
 }
 
 enum PeerState {
@@ -63,14 +74,38 @@ enum PeerState {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Logs go to stderr so stdout stays clean for --print-public.
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
+        .with_writer(std::io::stderr)
         .init();
     let cli = Cli::parse();
 
-    let identity = Identity::generate();
+    let identity = match &cli.identity {
+        Some(path) => {
+            let (id, created) = pqanon::keystore::load_or_create_identity(path)?;
+            if created {
+                tracing::info!(path = %path.display(), "created a new persistent server identity");
+            }
+            id
+        }
+        None if cli.print_public => anyhow::bail!(
+            "--print-public needs --identity: an ephemeral identity changes on every run, so there is nothing to pin"
+        ),
+        None => {
+            tracing::warn!("no --identity: using an ephemeral server identity that clients cannot pin across restarts");
+            Identity::generate()
+        }
+    };
+    if cli.print_public {
+        let p = identity.public();
+        println!("identity_id       = \"{}\"", hex16(identity.identity_id()));
+        println!("server_ml_dsa_pub = \"{}\"", pqanon::hex_util::encode(&p.pq_bytes()));
+        println!("server_ed_pub     = \"{}\"", pqanon::hex_util::encode(&p.ed_bytes()));
+        return Ok(());
+    }
     tracing::warn!(
         "demo mode: accepting ANY client identity (use a pinned allow-list in production)"
     );
