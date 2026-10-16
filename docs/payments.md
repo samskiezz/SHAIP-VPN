@@ -8,10 +8,13 @@ Two independent privacy properties stack:
 
 | Layer | Primitive | What it hides |
 |-------|-----------|---------------|
-| Payment rail | **Monero** (per-order subaddress) | amount, sender, receiver — on-chain |
+| Payment rail | **Monero** (per-order subaddress) or **Bitcoin + Lightning** (self-hosted BTCPay) | the on-chain payment (Monero hides amount/sender/receiver; BTCPay keeps it KYC-free and processor-free) |
 | Access tokens | **RFC 9474 RSA blind signatures** (RSABSSA-SHA384-PSS-Deterministic) | the link between the payment and the token that is later redeemed |
 
 No Stripe, no PayPal, no KYC, no account. You never give a name or an email.
+Whichever coin funds the order, the blind-token layer makes the tokens the mint
+signs unlinkable to it — so even a *transparent* Bitcoin payment can't be tied to
+your VPN usage.
 
 ## The flow
 
@@ -90,23 +93,51 @@ pqanon redeem  --plan month --server https://cp.example      # → VPN access gr
 Tokens and in-flight orders live in `~/.pqanon/wallet.json` (override with
 `--store`).
 
-**Operator — Monero rail**
+**Operator — payment rails**
 
-Point the control plane at a `monero-wallet-rpc` (which fronts a `monerod`):
+Any combination of rails can be enabled; the default rail is Monero if present,
+else BTCPay, else the dev rail. A denomination carries a price in each coin's own
+unit (piconero and satoshis), so no exchange-rate feed is needed — the operator
+sets both.
+
+Monero — point at a `monero-wallet-rpc` (which fronts a `monerod`):
 
 ```sh
-export MONERO_WALLET_RPC=http://127.0.0.1:18083/json_rpc
+export MONERO_WALLET_RPC=http://127.0.0.1:18083
 export MONERO_ACCOUNT_INDEX=0        # optional (default 0)
 export MONERO_MIN_CONF=10            # optional (default 10)
+export MONERO_RPC_USER=...           # optional (if wallet-rpc requires auth)
+export MONERO_RPC_PASS=...
+```
+
+Each order gets a fresh subaddress via `create_address`; the rail confirms it by
+summing confirmed transfers to that subaddress with `get_transfers`.
+
+Bitcoin + Lightning — point at a self-hosted **BTCPay Server** (no KYC, no
+processor):
+
+```sh
+export BTCPAY_URL=https://btcpay.example.com
+export BTCPAY_STORE_ID=...
+export BTCPAY_API_KEY=...            # a store API key with invoice permissions
+```
+
+Each order creates a BTCPay invoice (priced in BTC); the rail returns the on-chain
+address and Lightning invoice, and confirms the order when BTCPay marks it
+`Settled`.
+
+Shared:
+
+```sh
 export PAY_KEY_DIR=/var/lib/pqanon/denoms   # persist denomination keys across restarts
 ```
 
-Without `MONERO_WALLET_RPC` the control plane uses an in-process **dev rail** (no
+Without any rail configured the control plane uses an in-process **dev rail** (no
 chain) so the whole flow runs in tests and local dev; its manual settle endpoint
 is gated behind `PAY_DEV_SETTLE` and must never be enabled in production.
 
-Each order gets a fresh subaddress via `create_address`; the rail confirms an
-order by summing confirmed transfers to that subaddress with `get_transfers`.
+The client picks a rail with `pqanon buy --rail monero|btcpay` (or omit it for the
+server default); `pqanon plans` lists the rails and per-coin prices.
 
 ## Threat model (what this does and does not defend)
 

@@ -37,12 +37,19 @@ var blindRSAVariant = blindrsa.SHA384PSSDeterministic
 // ample for short-lived access tokens; bump to 3072 for a longer key lifetime.
 const blindRSABits = 2048
 
-// DenomSpec declares a plan the mint will sell.
+// DenomSpec declares a plan the mint will sell. Prices are set per coin in its
+// own native unit, so no exchange-rate feed is needed.
 type DenomSpec struct {
 	ID           string
 	Label        string
 	DurationDays int
 	PriceAtomic  uint64 // price in Monero atomic units (1 XMR = 1e12)
+	PriceSats    uint64 // price in Bitcoin satoshis (1 BTC = 1e8)
+}
+
+// Price bundles a denomination's per-coin prices for the payment rail.
+func (d *Denomination) Price() Price {
+	return Price{MoneroAtomic: d.PriceAtomic, BitcoinSats: d.PriceSats}
 }
 
 // Denomination is a plan plus its blind-signing key.
@@ -149,10 +156,11 @@ func loadOrCreateDenomKey(keyDir, id string) (*rsa.PrivateKey, error) {
 // operator tunes; durations are what a redeemed token grants.
 func defaultDenominations() []DenomSpec {
 	const xmr = 1_000_000_000_000
+	const btc = 100_000_000
 	return []DenomSpec{
-		{ID: "day", Label: "1 day", DurationDays: 1, PriceAtomic: xmr / 100},      // 0.01 XMR
-		{ID: "week", Label: "1 week", DurationDays: 7, PriceAtomic: xmr / 20},     // 0.05 XMR
-		{ID: "month", Label: "1 month", DurationDays: 30, PriceAtomic: xmr / 8},   // 0.125 XMR
-		{ID: "quarter", Label: "3 months", DurationDays: 90, PriceAtomic: xmr / 4}, // 0.25 XMR
+		{ID: "day", Label: "1 day", DurationDays: 1, PriceAtomic: xmr / 100, PriceSats: btc / 5000},    // 0.01 XMR / 20k sats
+		{ID: "week", Label: "1 week", DurationDays: 7, PriceAtomic: xmr / 20, PriceSats: btc / 1100},   // 0.05 XMR / ~90k sats
+		{ID: "month", Label: "1 month", DurationDays: 30, PriceAtomic: xmr / 8, PriceSats: btc / 450},  // 0.125 XMR / ~222k sats
+		{ID: "quarter", Label: "3 months", DurationDays: 90, PriceAtomic: xmr / 4, PriceSats: btc / 220}, // 0.25 XMR / ~454k sats
 	}
 }

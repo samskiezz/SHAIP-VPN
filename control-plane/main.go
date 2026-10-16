@@ -40,11 +40,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("e-cash mint: %v", err)
 	}
-	rail := buildRail()
+	rails, defaultRail := buildRails()
 
 	srv := &Server{
 		store: store, tokens: tokens, crlPub: crlPub, crlPriv: crlPriv,
-		mint: mint, rail: rail, devSettle: os.Getenv("PAY_DEV_SETTLE") == "1",
+		mint: mint, rails: rails, defaultRail: defaultRail,
+		devSettle: os.Getenv("PAY_DEV_SETTLE") == "1",
 	}
 	if srv.devSettle {
 		log.Printf("WARNING: PAY_DEV_SETTLE enabled — /api/pay/dev/settle will mark orders paid without a chain; never set this in production")
@@ -132,19 +133,39 @@ func openTokenSigner(ttl time.Duration) (*TokenSigner, error) {
 	return NewTokenSigner(ttl)
 }
 
-// buildRail selects the payment backend. With MONERO_WALLET_RPC set it talks to
-// a real monero-wallet-rpc; otherwise it uses the dev rail so the stack runs
-// end-to-end without a live chain (buy→collect→redeem still works; settlement is
-// manual via the gated dev endpoint).
-func buildRail() PaymentRail {
+// buildRails assembles the available payment backends. The dev rail is always
+// present (for local/CI; its settle endpoint is separately gated). Monero and
+// BTCPay turn on when configured. The default rail is Monero if available, else
+// BTCPay, else dev.
+func buildRails() (map[string]PaymentRail, string) {
+	rails := map[string]PaymentRail{"dev": NewDevRail()}
+	defaultRail := "dev"
+
 	if url := os.Getenv("MONERO_WALLET_RPC"); url != "" {
 		account := uint32(atoiOr("MONERO_ACCOUNT_INDEX", 0))
 		minConf := atoiOr("MONERO_MIN_CONF", 10)
+		rails["monero"] = NewMoneroRail(url, account, minConf,
+			os.Getenv("MONERO_RPC_USER"), os.Getenv("MONERO_RPC_PASS"))
+		defaultRail = "monero"
 		log.Printf("payments: Monero rail via %s (account %d, min %d confirmations)", url, account, minConf)
-		return NewMoneroRail(url, account, minConf)
 	}
-	log.Printf("payments: DEV rail (no chain). Set MONERO_WALLET_RPC to accept real Monero.")
-	return NewDevRail()
+	if url := os.Getenv("BTCPAY_URL"); url != "" {
+		store := os.Getenv("BTCPAY_STORE_ID")
+		key := os.Getenv("BTCPAY_API_KEY")
+		if store == "" || key == "" {
+			log.Printf("payments: BTCPAY_URL set but BTCPAY_STORE_ID/BTCPAY_API_KEY missing; BTCPay rail disabled")
+		} else {
+			rails["btcpay"] = NewBtcpayRail(url, store, key)
+			if defaultRail == "dev" {
+				defaultRail = "btcpay"
+			}
+			log.Printf("payments: BTCPay rail (Bitcoin + Lightning) via %s", url)
+		}
+	}
+	if defaultRail == "dev" {
+		log.Printf("payments: DEV rail only (no chain). Set MONERO_WALLET_RPC and/or BTCPAY_URL for real payments.")
+	}
+	return rails, defaultRail
 }
 
 func atoiOr(key string, def int) int {

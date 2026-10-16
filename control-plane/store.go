@@ -60,7 +60,9 @@ type PayOrder struct {
 	Rail          string     `json:"rail"`
 	Address       string     `json:"address"`
 	Meta          string     `json:"-"`
-	AmountAtomic  uint64     `json:"amount_atomic"`
+	AmountAtomic  uint64     `json:"amount_atomic"` // Monero piconero (canonical record)
+	AmountLabel   string     `json:"amount_label"`  // what to pay, in the chosen coin
+	URI           string     `json:"uri,omitempty"`
 	Status        string     `json:"status"`
 	BlindedTokens [][]byte   `json:"-"`
 	BlindSigs     [][]byte   `json:"-"`

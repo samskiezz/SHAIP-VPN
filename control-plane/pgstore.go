@@ -354,11 +354,12 @@ func (s *PgStore) CreatePayOrder(ctx context.Context, o *PayOrder) error {
 	bs, _ := json.Marshal(o.BlindSigs)
 	return s.pool.QueryRow(ctx,
 		`INSERT INTO pay_orders
-		   (denom, rail, address, meta, amount_atomic, status, blinded_tokens, blind_sigs, expires_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+		   (denom, rail, address, meta, amount_atomic, amount_label, uri, status,
+		    blinded_tokens, blind_sigs, expires_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
 		 RETURNING id, created_at`,
-		o.Denom, o.Rail, o.Address, o.Meta, int64(o.AmountAtomic), o.Status,
-		string(bt), string(bs), o.ExpiresAt).Scan(&o.ID, &o.CreatedAt)
+		o.Denom, o.Rail, o.Address, o.Meta, int64(o.AmountAtomic), o.AmountLabel, o.URI,
+		o.Status, string(bt), string(bs), o.ExpiresAt).Scan(&o.ID, &o.CreatedAt)
 }
 
 func (s *PgStore) GetPayOrder(ctx context.Context, id string) (*PayOrder, error) {
@@ -366,10 +367,10 @@ func (s *PgStore) GetPayOrder(ctx context.Context, id string) (*PayOrder, error)
 	var amt int64
 	var bt, bs []byte
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, denom, rail, address, meta, amount_atomic, status,
+		`SELECT id, denom, rail, address, meta, amount_atomic, amount_label, uri, status,
 		        blinded_tokens, blind_sigs, created_at, paid_at, expires_at
 		 FROM pay_orders WHERE id = $1`, id).
-		Scan(&o.ID, &o.Denom, &o.Rail, &o.Address, &o.Meta, &amt, &o.Status,
+		Scan(&o.ID, &o.Denom, &o.Rail, &o.Address, &o.Meta, &amt, &o.AmountLabel, &o.URI, &o.Status,
 			&bt, &bs, &o.CreatedAt, &o.PaidAt, &o.ExpiresAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
@@ -387,9 +388,10 @@ func (s *PgStore) UpdatePayOrder(ctx context.Context, o *PayOrder) error {
 	bs, _ := json.Marshal(o.BlindSigs)
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE pay_orders
-		   SET address = $2, meta = $3, status = $4, paid_at = $5, blind_sigs = $6
+		   SET address = $2, meta = $3, amount_label = $4, uri = $5,
+		       status = $6, paid_at = $7, blind_sigs = $8
 		 WHERE id = $1`,
-		o.ID, o.Address, o.Meta, o.Status, o.PaidAt, string(bs))
+		o.ID, o.Address, o.Meta, o.AmountLabel, o.URI, o.Status, o.PaidAt, string(bs))
 	if err != nil {
 		return err
 	}

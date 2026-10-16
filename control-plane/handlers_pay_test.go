@@ -28,7 +28,10 @@ func newPayServer(t *testing.T) (*Server, http.Handler) {
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
-	srv := &Server{store: NewMemStore(), tokens: tokens, mint: mint, rail: NewDevRail(), devSettle: true}
+	srv := &Server{
+		store: NewMemStore(), tokens: tokens, mint: mint,
+		rails: map[string]PaymentRail{"dev": NewDevRail()}, defaultRail: "dev", devSettle: true,
+	}
 	return srv, routes(srv, "memory")
 }
 
@@ -59,15 +62,17 @@ func TestUntraceablePaymentFlow(t *testing.T) {
 		t.Fatalf("denominations: %d (%s)", rec.Code, rec.Body.String())
 	}
 	var denoms struct {
-		Rail          string `json:"rail"`
+		Rails         []string `json:"rails"`
+		DefaultRail   string   `json:"default_rail"`
 		Denominations []struct {
 			ID           string `json:"id"`
 			PublicKeyPEM string `json:"public_key_pem"`
 			PriceXMR     string `json:"price_xmr"`
+			PriceBTC     string `json:"price_btc"`
 		} `json:"denominations"`
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &denoms)
-	if denoms.Rail != "dev" || len(denoms.Denominations) != 1 {
+	if denoms.DefaultRail != "dev" || len(denoms.Denominations) != 1 {
 		t.Fatalf("unexpected denominations: %+v", denoms)
 	}
 	pk := pubKeyFromPEM(t, denoms.Denominations[0].PublicKeyPEM)
@@ -191,7 +196,10 @@ func TestUntraceablePaymentFlow(t *testing.T) {
 func TestDevSettleGated(t *testing.T) {
 	tokens, _ := NewTokenSigner(time.Hour)
 	mint, _ := NewMint("", []DenomSpec{{ID: "day", DurationDays: 1, PriceAtomic: 1}})
-	srv := &Server{store: NewMemStore(), tokens: tokens, mint: mint, rail: NewDevRail(), devSettle: false}
+	srv := &Server{
+		store: NewMemStore(), tokens: tokens, mint: mint,
+		rails: map[string]PaymentRail{"dev": NewDevRail()}, defaultRail: "dev", devSettle: false,
+	}
 	h := routes(srv, "memory")
 	if rec := do(t, h, "POST", "/api/pay/dev/settle", "", map[string]any{"order_id": "x"}); rec.Code != http.StatusNotFound {
 		t.Fatalf("dev settle must be gated off, got %d", rec.Code)

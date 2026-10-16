@@ -69,7 +69,7 @@ enum Cmd {
         #[arg(short, long)]
         server: String,
     },
-    /// Buy access anonymously: blind tokens and open an order to pay with Monero.
+    /// Buy access anonymously: blind tokens and open an order to pay with crypto.
     Buy {
         #[arg(short, long)]
         server: String,
@@ -78,6 +78,9 @@ enum Cmd {
         /// How many tokens to buy (each redeems for one access grant).
         #[arg(short, long, default_value_t = 1)]
         count: usize,
+        /// Payment rail: monero, btcpay, or dev (default: the server's default).
+        #[arg(long)]
+        rail: Option<String>,
         #[arg(long)]
         store: Option<String>,
     },
@@ -151,8 +154,9 @@ fn cli_main() -> Result<()> {
             server,
             plan,
             count,
+            rail,
             store,
-        } => pqanon::pay_client::buy(&server, &plan, count, &wallet_path(store)),
+        } => pqanon::pay_client::buy(&server, &plan, count, rail.as_deref(), &wallet_path(store)),
         Cmd::Collect {
             server,
             order,

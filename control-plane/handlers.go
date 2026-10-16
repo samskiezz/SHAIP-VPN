@@ -21,10 +21,11 @@ type Server struct {
 	// crlKey signs the CRL distributed to tunnel servers (§7).
 	crlPub  ed25519.PublicKey
 	crlPriv ed25519.PrivateKey
-	// Untraceable payments (§20): the e-cash mint and the payment rail.
-	mint      *Mint
-	rail      PaymentRail
-	devSettle bool // enable the dev settle endpoint (never in production)
+	// Untraceable payments (§20): the e-cash mint and the payment rails.
+	mint        *Mint
+	rails       map[string]PaymentRail // by name: "monero", "btcpay", "dev"
+	defaultRail string
+	devSettle   bool // enable the dev settle endpoint (never in production)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

@@ -12,16 +12,17 @@ type Denom = {
   label: string;
   duration_days: number;
   price_xmr: string;
+  price_btc: string;
 };
 
-type DenomResp = { rail: string; denominations: Denom[] };
+type DenomResp = { rails: string[]; default_rail: string; denominations: Denom[] };
 
 type Order = {
   id: string;
   denom: string;
   rail: string;
   address: string;
-  amount_xmr: string;
+  amount_label: string;
   status: string;
   expires_at: string;
   uri?: string;
@@ -35,7 +36,7 @@ const statusColor: Record<string, string> = {
 };
 
 export default function Pay() {
-  const [rail, setRail] = useState<string>("");
+  const [rails, setRails] = useState<string[]>([]);
   const [denoms, setDenoms] = useState<Denom[]>([]);
   const [err, setErr] = useState<string>("");
 
@@ -46,7 +47,7 @@ export default function Pay() {
   useEffect(() => {
     api<DenomResp>("/api/pay/denominations", { auth: false })
       .then((d) => {
-        setRail(d.rail);
+        setRails(d.rails ?? []);
         setDenoms(d.denominations);
       })
       .catch((e) => setErr(e.message));
@@ -94,7 +95,10 @@ export default function Pay() {
       {/* Plans */}
       <section className="mt-6">
         <h2 className="text-lg font-semibold text-brand-dark">
-          Plans {rail && <span className="text-sm font-normal text-gray-400">· paid in {rail}</span>}
+          Plans{" "}
+          {rails.length > 0 && (
+            <span className="text-sm font-normal text-gray-400">· paid in {rails.join(" / ")}</span>
+          )}
         </h2>
         {err && <p className="mt-2 text-sm text-red-600">Could not load plans: {err}</p>}
         <table className="mt-3 w-full overflow-hidden rounded-lg border bg-white text-sm shadow-sm">
@@ -102,7 +106,8 @@ export default function Pay() {
             <tr>
               <th className="px-4 py-2">Plan</th>
               <th className="px-4 py-2">Duration</th>
-              <th className="px-4 py-2 text-right">Price</th>
+              <th className="px-4 py-2 text-right">Monero</th>
+              <th className="px-4 py-2 text-right">Bitcoin</th>
             </tr>
           </thead>
           <tbody>
@@ -111,11 +116,12 @@ export default function Pay() {
                 <td className="px-4 py-2 font-medium">{d.label}</td>
                 <td className="px-4 py-2 text-gray-600">{d.duration_days} days</td>
                 <td className="px-4 py-2 text-right font-mono">{d.price_xmr} XMR</td>
+                <td className="px-4 py-2 text-right font-mono">{d.price_btc} BTC</td>
               </tr>
             ))}
             {denoms.length === 0 && !err && (
               <tr>
-                <td colSpan={3} className="px-4 py-3 text-gray-400">
+                <td colSpan={4} className="px-4 py-3 text-gray-400">
                   Loading…
                 </td>
               </tr>
@@ -161,7 +167,7 @@ export default function Pay() {
             </div>
             <div className="mt-1 flex justify-between">
               <span className="text-gray-500">Amount</span>
-              <span className="font-mono">{order.amount_xmr} XMR</span>
+              <span className="font-mono">{order.amount_label}</span>
             </div>
             {order.status === "awaiting_payment" && (
               <div className="mt-2 break-all rounded bg-gray-50 p-2 font-mono text-xs text-gray-700">

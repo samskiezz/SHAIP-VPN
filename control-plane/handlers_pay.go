@@ -6,6 +6,7 @@ package main
 // GET /pay/order/{id} until paid → POST /pay/collect → POST /pay/redeem.
 
 import (
+	"context"
 	crand "crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -42,6 +43,8 @@ func (s *Server) handleDenominations(w http.ResponseWriter, r *http.Request) {
 		DurationDays int    `json:"duration_days"`
 		PriceAtomic  uint64 `json:"price_atomic"`
 		PriceXMR     string `json:"price_xmr"`
+		PriceSats    uint64 `json:"price_sats"`
+		PriceBTC     string `json:"price_btc"`
 		PublicKeyPEM string `json:"public_key_pem"`
 	}
 	out := []denomOut{}
@@ -49,10 +52,35 @@ func (s *Server) handleDenominations(w http.ResponseWriter, r *http.Request) {
 		out = append(out, denomOut{
 			ID: d.ID, Label: d.Label, DurationDays: d.DurationDays,
 			PriceAtomic: d.PriceAtomic, PriceXMR: formatXMR(d.PriceAtomic),
+			PriceSats: d.PriceSats, PriceBTC: formatBTC(d.PriceSats),
 			PublicKeyPEM: d.PublicKeyPEM(),
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"rail": s.rail.Name(), "denominations": out})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"rails":         s.railNames(),
+		"default_rail":  s.defaultRail,
+		"denominations": out,
+	})
+}
+
+// railFor resolves a rail by name, defaulting to the configured default.
+func (s *Server) railFor(name string) (PaymentRail, bool) {
+	if name == "" {
+		name = s.defaultRail
+	}
+	r, ok := s.rails[name]
+	return r, ok
+}
+
+// railNames lists available rails in a stable order.
+func (s *Server) railNames() []string {
+	out := []string{}
+	for _, n := range []string{"monero", "btcpay", "dev"} {
+		if _, ok := s.rails[n]; ok {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // POST /api/pay/order {denom, blinded_tokens:[b64]} — open an order and quote an
@@ -64,6 +92,7 @@ func (s *Server) handleCreateOrder(w http.ResponseWriter, r *http.Request) {
 	}
 	var body struct {
 		Denom         string   `json:"denom"`
+		Rail          string   `json:"rail"`
 		BlindedTokens []string `json:"blinded_tokens"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -73,6 +102,11 @@ func (s *Server) handleCreateOrder(w http.ResponseWriter, r *http.Request) {
 	d, ok := s.mint.Get(body.Denom)
 	if !ok {
 		errJSON(w, http.StatusBadRequest, "unknown denomination")
+		return
+	}
+	rail, ok := s.railFor(body.Rail)
+	if !ok {
+		errJSON(w, http.StatusBadRequest, "unknown payment rail")
 		return
 	}
 	if len(body.BlindedTokens) == 0 || len(body.BlindedTokens) > maxTokens {
@@ -94,22 +128,24 @@ func (s *Server) handleCreateOrder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	order := &PayOrder{
-		Denom: d.ID, Rail: s.rail.Name(), AmountAtomic: d.PriceAtomic,
+		Denom: d.ID, Rail: rail.Name(), AmountAtomic: d.PriceAtomic,
 		Status: "awaiting_payment", BlindedTokens: blinded,
 		ExpiresAt: time.Now().Add(orderTTL).UTC(),
 	}
-	// Reserve the id first so the rail can label the address with it.
+	// Reserve the id first so the rail can label the charge with it.
 	if err := s.store.CreatePayOrder(r.Context(), order); err != nil {
 		errJSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	quote, err := s.rail.NewAddress(r.Context(), order.ID)
+	quote, err := rail.NewCharge(r.Context(), order.ID, d.Price())
 	if err != nil {
 		errJSON(w, http.StatusBadGateway, "payment backend error: "+err.Error())
 		return
 	}
 	order.Address = quote.Address
 	order.Meta = quote.Meta
+	order.AmountLabel = quote.AmountLabel
+	order.URI = quote.URI
 	if err := s.store.UpdatePayOrder(r.Context(), order); err != nil {
 		errJSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -128,8 +164,7 @@ func (s *Server) handleOrderStatus(w http.ResponseWriter, r *http.Request) {
 		if time.Now().After(order.ExpiresAt) {
 			order.Status = "expired"
 			_ = s.store.UpdatePayOrder(r.Context(), order)
-		} else if confirmed, _, err := s.rail.CheckPaid(r.Context(),
-			RailQuote{Address: order.Address, Meta: order.Meta}, order.AmountAtomic); err == nil && confirmed {
+		} else if s.checkOrderPaid(r.Context(), order) {
 			now := time.Now().UTC()
 			order.Status = "paid"
 			order.PaidAt = &now
@@ -137,6 +172,16 @@ func (s *Server) handleOrderStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, s.orderView(order))
+}
+
+// checkOrderPaid asks the order's rail whether it has been paid.
+func (s *Server) checkOrderPaid(ctx context.Context, order *PayOrder) bool {
+	rail, ok := s.rails[order.Rail]
+	if !ok {
+		return false
+	}
+	confirmed, err := rail.CheckPaid(ctx, RailQuote{Address: order.Address, Meta: order.Meta})
+	return err == nil && confirmed
 }
 
 // POST /api/pay/collect {order_id} — once paid, blind-sign the tokens and return
@@ -161,14 +206,11 @@ func (s *Server) handleCollect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Re-check payment if the client collects before polling status.
-	if order.Status == "awaiting_payment" {
-		if confirmed, _, err := s.rail.CheckPaid(r.Context(),
-			RailQuote{Address: order.Address, Meta: order.Meta}, order.AmountAtomic); err == nil && confirmed {
-			now := time.Now().UTC()
-			order.Status = "paid"
-			order.PaidAt = &now
-			_ = s.store.UpdatePayOrder(r.Context(), order)
-		}
+	if order.Status == "awaiting_payment" && s.checkOrderPaid(r.Context(), order) {
+		now := time.Now().UTC()
+		order.Status = "paid"
+		order.PaidAt = &now
+		_ = s.store.UpdatePayOrder(r.Context(), order)
 	}
 	if order.Status != "paid" && order.Status != "collected" {
 		errJSON(w, http.StatusPaymentRequired, "order not paid")
@@ -264,8 +306,8 @@ func (s *Server) handleRedeem(w http.ResponseWriter, r *http.Request) {
 // POST /api/pay/dev/settle {order_id} — dev/CI only: mark an order paid without
 // a chain. Gated by PAY_DEV_SETTLE; refused otherwise.
 func (s *Server) handleDevSettle(w http.ResponseWriter, r *http.Request) {
-	dev, ok := s.rail.(*DevRail)
-	if !s.devSettle || !ok {
+	dev, _ := s.rails["dev"].(*DevRail)
+	if !s.devSettle || dev == nil {
 		errJSON(w, http.StatusNotFound, "not found")
 		return
 	}
@@ -287,17 +329,16 @@ func (s *Server) handleDevSettle(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) orderView(o *PayOrder) map[string]any {
 	v := map[string]any{
-		"id":            o.ID,
-		"denom":         o.Denom,
-		"rail":          o.Rail,
-		"address":       o.Address,
-		"amount_atomic": o.AmountAtomic,
-		"amount_xmr":    formatXMR(o.AmountAtomic),
-		"status":        o.Status,
-		"expires_at":    o.ExpiresAt,
+		"id":           o.ID,
+		"denom":        o.Denom,
+		"rail":         o.Rail,
+		"address":      o.Address,
+		"amount_label": o.AmountLabel,
+		"status":       o.Status,
+		"expires_at":   o.ExpiresAt,
 	}
-	if o.Rail == "monero" {
-		v["uri"] = fmt.Sprintf("monero:%s?tx_amount=%s", o.Address, formatXMR(o.AmountAtomic))
+	if o.URI != "" {
+		v["uri"] = o.URI
 	}
 	return v
 }

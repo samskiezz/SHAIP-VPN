@@ -127,25 +127,34 @@ fn denomination_key(server: &str, plan: &str) -> Result<String> {
     ))
 }
 
-/// List the plans on sale.
+/// List the plans on sale and the payment rails available.
 pub fn plans(server: &str) -> Result<()> {
     let v = http_get(&format!("{}/api/pay/denominations", base(server)))?;
-    println!("Payment rail: {}", v["rail"].as_str().unwrap_or("?"));
-    println!("{:<10} {:<10} {:>10}", "PLAN", "DURATION", "PRICE (XMR)");
+    let rails: Vec<String> = v["rails"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+        .unwrap_or_default();
+    println!(
+        "Payment rails: {} (default: {})",
+        if rails.is_empty() { "?".into() } else { rails.join(", ") },
+        v["default_rail"].as_str().unwrap_or("?")
+    );
+    println!("{:<10} {:<10} {:>14} {:>16}", "PLAN", "DURATION", "PRICE (XMR)", "PRICE (BTC)");
     for d in v["denominations"].as_array().cloned().unwrap_or_default() {
         println!(
-            "{:<10} {:<10} {:>10}",
+            "{:<10} {:<10} {:>14} {:>16}",
             d["id"].as_str().unwrap_or("?"),
             format!("{}d", d["duration_days"].as_i64().unwrap_or(0)),
             d["price_xmr"].as_str().unwrap_or("?"),
+            d["price_btc"].as_str().unwrap_or("?"),
         );
     }
     Ok(())
 }
 
-/// Blind `count` tokens for `plan`, open an order, and record it in the wallet.
-/// Prints the Monero address to pay.
-pub fn buy(server: &str, plan: &str, count: usize, wallet_path: &Path) -> Result<()> {
+/// Blind `count` tokens for `plan`, open an order on `rail` (or the server
+/// default), and record it in the wallet. Prints the address to pay.
+pub fn buy(server: &str, plan: &str, count: usize, rail: Option<&str>, wallet_path: &Path) -> Result<()> {
     let count = count.clamp(1, 50);
     let pem = denomination_key(server, plan)?;
     let pk = payment::load_pubkey(&pem)?;
@@ -160,11 +169,12 @@ pub fn buy(server: &str, plan: &str, count: usize, wallet_path: &Path) -> Result
         pending.push(p);
     }
 
-    // Open the order.
-    let resp = http_post(
-        &format!("{}/api/pay/order", base(server)),
-        serde_json::json!({ "denom": plan, "blinded_tokens": blinded_b64 }),
-    )?;
+    // Open the order (rail omitted → server default).
+    let mut body = serde_json::json!({ "denom": plan, "blinded_tokens": blinded_b64 });
+    if let Some(r) = rail {
+        body["rail"] = serde_json::Value::String(r.to_string());
+    }
+    let resp = http_post(&format!("{}/api/pay/order", base(server)), body)?;
     let order_id = resp["id"].as_str().ok_or_else(|| anyhow!("no order id"))?.to_string();
 
     // Persist the pending order (blinding secrets included) so we can finalize
@@ -187,7 +197,7 @@ pub fn buy(server: &str, plan: &str, count: usize, wallet_path: &Path) -> Result
 
     println!("Order {order_id} — pay to stay anonymous:\n");
     println!("  Rail:    {}", resp["rail"].as_str().unwrap_or("?"));
-    println!("  Amount:  {} XMR", resp["amount_xmr"].as_str().unwrap_or("?"));
+    println!("  Amount:  {}", resp["amount_label"].as_str().unwrap_or("?"));
     println!("  Address: {}", resp["address"].as_str().unwrap_or("?"));
     if let Some(uri) = resp["uri"].as_str() {
         println!("  URI:     {uri}");
@@ -213,7 +223,7 @@ pub fn collect(server: &str, order_id: &str, wallet_path: &Path) -> Result<()> {
     if st != "paid" && st != "collected" {
         println!("Order {order_id} is {st}; nothing to collect yet.");
         if let Some(addr) = status["address"].as_str() {
-            println!("Pay {} XMR to {addr}", status["amount_xmr"].as_str().unwrap_or("?"));
+            println!("Pay {} to {addr}", status["amount_label"].as_str().unwrap_or("?"));
         }
         return Ok(());
     }

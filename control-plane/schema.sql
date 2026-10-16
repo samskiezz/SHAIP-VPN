@@ -99,6 +99,8 @@ CREATE TABLE IF NOT EXISTS pay_orders (
     address        TEXT NOT NULL,
     meta           TEXT NOT NULL DEFAULT '',
     amount_atomic  BIGINT NOT NULL,
+    amount_label   TEXT NOT NULL DEFAULT '',
+    uri            TEXT NOT NULL DEFAULT '',
     status         TEXT NOT NULL DEFAULT 'awaiting_payment'
                    CHECK (status IN ('awaiting_payment','paid','collected','expired')),
     blinded_tokens JSONB NOT NULL DEFAULT '[]'::jsonb,
