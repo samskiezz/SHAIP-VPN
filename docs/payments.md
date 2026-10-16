@@ -1,8 +1,11 @@
-# Untraceable payments (§20)
+# Unlinkable payments (§20)
 
 SHAIP-VPN takes **no fiat, no cards, no identity**. Access is bought with Monero
-and redeemed through **Chaumian e-cash**, so the operator cannot link a payment
-to the VPN usage it funded — not by policy, by cryptography.
+(or Bitcoin) and redeemed through **Chaumian e-cash**: the token you redeem
+carries nothing that links it to the payment that bought it. That is a property
+of the cryptography, not a promise about logs. It covers the token only; the
+operator can still guess a link from IP addresses and timing (see the threat
+model below), which is up to how you buy and connect.
 
 Two independent privacy properties stack:
 
@@ -12,9 +15,9 @@ Two independent privacy properties stack:
 | Access tokens | **RFC 9474 RSA blind signatures** (RSABSSA-SHA384-PSS-Deterministic) | the link between the payment and the token that is later redeemed |
 
 No Stripe, no PayPal, no KYC, no account. You never give a name or an email.
-Whichever coin funds the order, the blind-token layer makes the tokens the mint
-signs unlinkable to it — so even a *transparent* Bitcoin payment can't be tied to
-your VPN usage.
+Whichever coin funds the order, the tokens the mint signs are unlinkable to it.
+A Bitcoin payment is still public on-chain, though: it can be traced to the coins
+that paid it even though it can't be tied to the token you later redeem.
 
 ## The flow
 
@@ -39,21 +42,23 @@ your VPN usage.
 Step 6 is the crux: the mint signs a **blinded** nonce, so the signature it
 produces cannot be recognised when the unblinded token comes back at step 8. The
 mint stores only a hash of each spent nonce (never the nonce itself), so even its
-own records reveal nothing.
+own records cannot connect a redemption to an order.
 
-## Why it is untraceable
+## Why the tokens are unlinkable
 
 - **Blind signatures (unlinkability).** The mint's view at signing time is a
   blinded value `H(nonce)·r^e mod N`; the blinding factor `r` never leaves the
   client. The finalized token is an ordinary RSASSA-PSS signature over `nonce`.
-  There is no information linking the two, so a redeemed token cannot be tied to
-  any order or payment — even by the operator, even under subpoena.
+  Nothing in the token identifies the order it came from, so the token alone
+  can't tie a redemption to an order or payment, for the operator or anyone
+  asking it. Timing and network metadata are a separate matter (below).
 - **Denominations, not amounts.** Each plan (`day`/`week`/`month`/`quarter`) has
   its own RSA key. The plan you bought is encoded by *which key* signs your
   tokens, so the mint never needs to see a per-token amount.
-- **Monero.** The payment leg itself leaks nothing on-chain: stealth addresses,
-  ring signatures and confidential amounts hide who paid, who received, and how
-  much.
+- **Monero.** Stealth addresses, ring signatures and confidential amounts
+  obscure who paid, who received and how much on the public ledger. Ring
+  signatures hide the payer among decoys, which is strong but has known
+  statistical limits; Monero's own research documents them.
 - **No identity anywhere.** The `/api/pay/*` endpoints take and return no account,
   email, or card. The access grant carries a random session id and the plan's
   expiry, nothing else.
@@ -75,7 +80,7 @@ it is not reversible to the nonce or linkable to a payment.
   output — high entropy — so no message randomizer is needed).
 
 Cross-implementation interop (Rust blind → Go sign → Rust finalize → Go verify)
-is proven by the live `pay: untraceable buy→redeem (cross-language)` stage in
+is proven by the live `pay: unlinkable-token buy→redeem (cross-language)` stage in
 `scripts/test-all.sh`.
 
 ## Running it
@@ -143,15 +148,21 @@ server default); `pqanon plans` lists the rails and per-coin prices.
 
 Defends:
 
-- The operator cannot answer "who paid for this session?" — the blinding makes it
-  cryptographically impossible, so there is nothing to log, leak, or subpoena.
-- An on-chain observer cannot see amounts, payer, or payee (Monero).
+- From the token, the operator cannot tell which order paid for a session; it
+  keeps no record that links the two, so there is none to leak or hand over.
+  Redemptions are recorded without the caller's IP address.
+- An on-chain observer sees no amounts and no addresses for a Monero payment
+  (within Monero's known limits, above).
 - A stolen `spent_tokens` table reveals no nonces and no payment links.
 
 Does **not** defend (out of scope for the payment layer):
 
-- Network-level correlation of your connection (that is the VPN/mixnet's job —
-  see the obfuscation and mix layers).
+- Correlation by IP address and timing. If you buy, collect and redeem from the
+  same address, or connect right after paying, the operator can guess the link.
+  Use a different network to buy than to connect, and let time pass in between.
+  (The mix layer that would hide the network side is not in the tunnel yet.)
+- A Bitcoin payment's on-chain trail (it is public; only the token is
+  unlinkable).
 - A buyer who deanonymizes *themselves* by paying from a KYC exchange withdrawal
   with no intermediate hop, or by reusing one token across identities.
 - Compromise of the client device holding the wallet.

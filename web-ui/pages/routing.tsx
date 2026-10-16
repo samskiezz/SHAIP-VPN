@@ -14,7 +14,7 @@ export default function Routing() {
   const router = useRouter();
   const [rules, setRules] = useState<Rule[]>([]);
   const [domain, setDomain] = useState("");
-  const [route, setRoute] = useState<"fast" | "anon">("anon");
+  const [route, setRoute] = useState<"fast" | "anon">("fast");
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -75,8 +75,9 @@ export default function Routing() {
       <div className="p-6">
         <h1 className="mb-4 text-2xl font-bold">Routing Rules</h1>
         <p className="mb-4 text-sm text-gray-500">
-          <span className="text-brand-dark">fast</span> = low-latency single hop ·{" "}
-          <span className="text-purple-600">anon</span> = 5-hop mixnet path
+          <span className="text-brand-dark">fast</span> = straight through the VPN server ·{" "}
+          <span className="text-purple-600">anon</span> = reserved for the mix path, which the tunnel
+          does not use yet: anon rules are stored but have no effect on traffic
         </p>
 
         <div className="mb-4 flex flex-col gap-2 sm:flex-row">

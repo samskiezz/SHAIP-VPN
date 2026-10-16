@@ -1,30 +1,31 @@
-# PQ-ANON client config (§12.2). Copy to ~/.pqanon/client.toml.
+# PQ-ANON client config. Copy to ~/.pqanon/client.toml and run:
+#   sudo pqanon run --config ~/.pqanon/client.toml        (add --kill-switch to fail closed)
+# The iOS app imports this same file (Setup → Import config file).
+#
+# Only the keys below are read. Routing, DNS, MTU and keepalive come from the
+# server when the session starts.
+
 [client]
-# Persistent identity (ML-DSA-65 + Ed25519), created 0600 by
-# `pqanon keygen --out ~/.pqanon/client.id`. Omit for a throwaway per-run identity.
+# Persistent identity (ML-DSA-65 + Ed25519), created 0600 on first use (or by
+# `pqanon keygen --out …`). Omit for a throwaway per-run identity, which only
+# open demo servers accept.
 identity    = "/home/user/.pqanon/client.id"
-# Device certificate from `pqanon enroll` (needed by device-bound servers).
+# Device certificate from `pqanon enroll`, needed by servers that admit
+# enrolled devices only.
 device_cert = "/home/user/.pqanon/client.id.cert"
 tun_device  = "pqanon-c0"
+# Used only if the server assigns no address (an echo-mode test server).
 tun_address = "10.77.0.2/24"
 
 [server]
 address           = "vpn.example.com:443"
-# Pins: paste the output of `pqanond --identity <file> --print-public`.
+# Pins: paste the output of `pqanond --identity <file> --print-public` on the
+# server. The client refuses any server that can't prove it holds these keys.
 server_ml_dsa_pub = "hex..."
 server_ed_pub     = "hex..."
 
-[transport]
-mtu_probe   = true
-stream_mode = true
-congestion  = "bbr-custom"
-
-[route]
-default      = "fast"
-anon_domains = ["*.journalist.org", "*.leak.net"]
-fast_domains = ["*.cdn.example.com"]
-
-[mix]
-enabled     = true
-path_length = 5
-cover_rate  = 1.0
+# Optional, for the iOS app's device enrollment (the CLI uses `pqanon enroll`).
+# [enroll]
+# control_plane = "https://cp.example.com"
+# authority_key = "hex..."   # the control plane's enroll_authority_pub
+# ca_key        = "hex..."   # the control plane's device_ca_pub

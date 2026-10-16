@@ -298,7 +298,10 @@ func (s *Server) handleRedeem(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, http.StatusInternalServerError, "grant error")
 		return
 	}
-	s.audit(r, "token.redeem", d.ID) // no identity; records the plan only
+	// Anonymous by design: no user and no IP address. Recording who redeemed
+	// (even just the address) next to the time would let the operator match
+	// a redemption to the network that bought the token.
+	_ = s.store.AppendAudit(r.Context(), &AuditEntry{Action: "token.redeem", Detail: d.ID})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"session_id": sessionID,
 		"grant":      grant,

@@ -2,8 +2,8 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 
 // The payment page is deliberately public and identity-free: no login, no email,
-// no card. It shows the plans and their Monero prices, explains the untraceable
-// flow, and lets you look up an order's status by id. Buying (blinding tokens)
+// no card. It shows the plans and their prices, explains the unlinkable-token
+// flow and its limits, and lets you look up an order's status by id. Buying (blinding tokens)
 // happens in the app/CLI, where the tokens live — the web page never sees a
 // nonce or a blinding secret.
 
@@ -68,8 +68,8 @@ export default function Pay() {
     <main className="mx-auto max-w-2xl p-6">
       <h1 className="font-mono text-2xl font-bold text-brand-dark">PQ·ANON — Private access</h1>
       <p className="mt-2 text-gray-600">
-        Pay with Monero. Get blind-signed access tokens. We can’t link your payment to your usage —
-        not by policy, by cryptography.
+        Pay with Monero or Bitcoin. Get blind-signed access tokens: the token you redeem carries
+        nothing that links it to your payment (RFC&nbsp;9474 blind signatures).
       </p>
 
       {/* How it works */}
@@ -79,16 +79,16 @@ export default function Pay() {
           address.
         </li>
         <li>
-          <span className="font-semibold">2.</span> Pay it. Monero hides the amount, sender and
-          receiver on-chain.
+          <span className="font-semibold">2.</span> Pay it. Monero obscures the amount, sender and
+          receiver on its public ledger; a Bitcoin payment is public on-chain.
         </li>
         <li>
           <span className="font-semibold">3.</span> The app collects tokens the mint signed{" "}
           <em>without seeing them</em> (RFC&nbsp;9474 blind signatures).
         </li>
         <li>
-          <span className="font-semibold">4.</span> Redeeming a token grants a VPN session with no
-          link back to the payment.
+          <span className="font-semibold">4.</span> Redeeming a token grants VPN access. The token
+          carries no link back to the payment, and redemptions are recorded without your IP address.
         </li>
       </ol>
 
@@ -178,8 +178,12 @@ export default function Pay() {
         )}
       </section>
 
-      <p className="mt-8 text-center text-xs text-gray-400">
-        No account. No logs that can deanonymize you. See the docs for the threat model.
+      <p className="mt-8 rounded-lg border bg-white p-4 text-xs text-gray-600 shadow-sm">
+        <span className="font-semibold">Limits.</span> No account or email is needed to pay. The token
+        is unlinkable, but timing and IP addresses are not: if you buy and connect from the same
+        network, or connect right after paying, the operator can guess the link. The VPN server can
+        see where your traffic goes, as any VPN operator can. See docs/payments.md for the full
+        threat model.
       </p>
     </main>
   );

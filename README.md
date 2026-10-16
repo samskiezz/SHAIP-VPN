@@ -7,8 +7,10 @@ composition is defined in-house; only standard RustCrypto / Go stdlib primitives
 are used as building blocks (ML-KEM-768, ML-DSA-65, X25519, Ed25519,
 ChaCha20-Poly1305, HKDF/HMAC-SHA256, Argon2id).
 
-> Built for defensive use: protecting our own company's traffic and
-> infrastructure from traffic analysis, DPI, and a future quantum adversary.
+> Built for defensive use. The aims: a VPN whose key exchange holds up against a
+> future quantum computer, whose traffic is hard to fingerprint, and whose app
+> tells its users the truth about what it protects. See
+> [What it protects, and what it doesn't](#what-it-protects-and-what-it-doesnt).
 
 ## Status — what actually runs today
 
@@ -16,32 +18,65 @@ ChaCha20-Poly1305, HKDF/HMAC-SHA256, Argon2id).
 |-----------|----------|-------|-------------|
 | `pqanon` client lib (`wire`, `handshake`, `obf`, `transport`, `mix`, `routing`, `kdf`) | Rust | **Working** | 25 unit tests |
 | Full hybrid handshake (client **and** server sides) | Rust | **Working** | handshake + tunnel tests |
-| `pqanon` CLI (`keygen`, `selftest`, `run`, `probe`, `enroll`, `crl`) | Rust | **Working** | `pqanon selftest` + battery E2E stages |
-| `pqanon::client` facade + `pqanon-ffi` C ABI for native shells | Rust + C | **Working** | loopback tests vs real `pqanond`; C program linked static + dynamic ([docs/client-api.md](docs/client-api.md)) |
-| `pqanond` tunnel daemon (UDP handshake responder + echo) | Rust | **Working** | `tests/tunnel.rs` over real UDP |
-| `pqanon-mixd` mix node (peels + forwards onion cells) | Rust | **Working** | mix round-trip tests |
+| **The VPN, end to end**: `pqanon run` (full tunnel: routes, DNS, IPv6 block, optional kill switch, reconnect, rekey) ↔ `pqanond --tun --nat` (NAT, DNS forwarder, per-client addresses, keepalive, anti-spoofing) | Rust | **Working** | 4-namespace lab, 36 checks: traffic and DNS leave only from the server, 16 MiB intact, survives server restart and crash, kill switch holds after a client crash ([scripts/e2e/vpn_lab.sh](scripts/e2e/vpn_lab.sh)) |
+| `pqanon` CLI (`keygen`, `selftest`, `run`, `status`, `disconnect`, `down`, `probe`, `enroll`, `crl`) | Rust | **Working** | `pqanon selftest` + battery E2E stages |
+| `pqanon::supervisor` reconnecting link + `pqanon-ffi` C ABI for native shells | Rust + C | **Working** | restart/crash/hang/rekey test vs real `pqanond`; C and Swift programs against a live server ([docs/client-api.md](docs/client-api.md)) |
+| `pqanond` session core: one session per identity, stable addresses, idempotent handshake retransmits, idle expiry, Close on shutdown | Rust | **Working** | unit tests with real handshakes + the lab |
+| `pqanon-mixd` mix node (peels + forwards onion cells) | Rust | **Working, standalone** | mix round-trip tests. The tunnel does **not** route through mixes yet. |
 | Control plane `PQANON-CP/1` (auth, nodes, connections, CRL) | Go | **Working** | `go test`, live curl |
 | Web UI (dashboard, connections, routing, login) | Next.js/TS | **Working** | `next build`, `tsc` |
-| iOS app: SHAIP v2 design, 10 screens, Live Activity + Dynamic Island (`clients/ios`) | SwiftUI | **Written** (needs an Xcode 26 build) | `SHAIPCore` package: 11 tests, render engines reproduce the design's `shaip-engine.js` op for op ([clients/ios/README.md](clients/ios/README.md)) |
+| iOS app: a Packet Tunnel extension running the Rust core; screens show only measured state and state the limits (`clients/ios`) | SwiftUI + Rust | **Written** (needs an Xcode 26 build) | the app's FFI Swift run against a live `pqanond` on Linux; Rust core clippy-clean for `aarch64-apple-ios`; `SHAIPCore` tests ([clients/ios/README.md](clients/ios/README.md)) |
 | Postgres schema + in-memory fallback | SQL/Go | **Working** | one store contract run against both, incl. real PostgreSQL |
 | Signing-key custody: key files + **PKCS#11 HSM**; persistent daemon identities | Go + Rust | **Working** | real SoftHSM2 token + restart checks ([docs/keys.md](docs/keys.md)) |
 | One-click device enrollment (`/api/enroll`, `pqanon enroll`) + device-cert tunnel admission + CRL revocation | Go + Rust | **Working** | cross-language enroll E2E + handshake tests ([docs/enrollment.md](docs/enrollment.md)) |
 | Node staking: paid bonds, unbonding, permissionless slashing on signed-descriptor equivocation, stake-gated signed directory | Go + Rust | **Working** | store contract (real PostgreSQL) + cross-language stake E2E ([docs/staking.md](docs/staking.md)) |
 | DNSSEC resolver: RSA/ECDSA/Ed25519 RRSIG + chain-of-trust + real IANA root anchors | Rust | **Working** | 19 unit tests + live anchor check |
-| Untraceable payments: Monero + Bitcoin/Lightning + Chaumian e-cash (`buy`/`collect`/`redeem`) | Rust + Go | **Working** | cross-language buy→redeem E2E |
+| Unlinkable-token payments: Monero + Bitcoin/Lightning + Chaumian e-cash (`buy`/`collect`/`redeem`) | Rust + Go | **Working** | cross-language buy→redeem E2E |
 | Live TLS 1.3 decoy (`pqanon-decoy`, `pqanond --decoy`) | Rust | **Working** | openssl/curl + 2 integration tests |
 | Monitoring: Prometheus `/metrics` + Grafana/Alertmanager (`docker compose up`) | Go + Rust | **Working** | metrics tests + live scrape |
 
-Everything above compiles and its tests pass. See **Known limitations** for the
-integration work that remains (TUN plumbing, delay queue, cover-traffic driver).
+Everything above compiles and its tests pass. See **Known limitations** for what
+remains.
 
-## Payments — untraceable by construction
+## What it protects, and what it doesn't
 
-No cards, no fiat, no identity. Access is bought with **Monero** and redeemed
-through **Chaumian e-cash** (RFC 9474 RSA blind signatures), so the operator
-*cannot* link a payment to the VPN usage it funded — not by policy, by
-cryptography. The mint blind-signs your access tokens without ever seeing them;
-a redeemed token carries no link back to the order that paid for it.
+With `pqanon run` (or the iOS app) connected:
+
+- **Your traffic is encrypted to the server.** Every IPv4 packet goes through the
+  tunnel, sealed with ChaCha20-Poly1305 under keys from a hybrid ML-KEM-768 +
+  X25519 handshake. The session key depends on both, so a future quantum
+  computer that breaks X25519 would still have to break ML-KEM-768 to read
+  traffic recorded today. Keys are replaced every 20 minutes.
+- **The server is authenticated.** It must prove it holds the pinned ML-DSA-65
+  and Ed25519 keys, or the client refuses it.
+- **DNS goes through the tunnel**, to the server's resolver, not your network's.
+- **IPv6 is blocked** while connected (the tunnel carries IPv4 only).
+- **With the kill switch**, nothing leaves outside the tunnel, even if the
+  client crashes, until it reconnects or you run `pqanon down`.
+
+What it does **not** do:
+
+- **Hide your traffic from the VPN server.** The server sees where your traffic
+  goes, as any VPN operator does. A VPN moves that visibility away from your
+  local network and ISP; it doesn't remove it.
+- **Defeat traffic analysis.** There is one hop and no mixnet in the data path,
+  so someone watching both sides of the server can match flows by timing.
+- **Hide that you use it.** Data packets are disguised, but the handshake is
+  recognizable to deep packet inspection.
+- **Make you anonymous to websites.** Logins, cookies and browser fingerprinting
+  still identify you.
+- **Filter content.** It does no ad, tracker or malware blocking.
+- **Come audited.** It is pre-audit software (see the end of this file).
+
+## Payments — the token is unlinkable to the payment
+
+No cards, no fiat, no identity. Access is bought with **Monero** (or Bitcoin) and
+redeemed through **Chaumian e-cash** (RFC 9474 RSA blind signatures). The mint
+blind-signs your access tokens without ever seeing them, so a redeemed token
+carries nothing that links it to the order that paid for it, and redemptions
+are recorded without an IP address. That covers the token only. Timing and
+network addresses can still suggest a link, for example if you buy and connect
+from the same network. A Bitcoin payment is public on-chain.
 
 ```bash
 pqanon plans   --server <cp-url>                 # day / week / month / quarter, priced in XMR
@@ -50,7 +85,8 @@ pqanon collect --order <id>  --server <cp-url>   # unblinds tokens once the paym
 pqanon redeem  --plan month  --server <cp-url>   # → a VPN access grant, unlinkable to payment
 ```
 
-Full design, crypto choices, and threat model: **[docs/payments.md](docs/payments.md)**.
+Full design, crypto choices, and threat model, including those limits:
+**[docs/payments.md](docs/payments.md)**.
 
 ## Layout
 
@@ -61,8 +97,8 @@ control-plane/  Go REST API (PQANON-CP/1): auth, nodes, connections, CRL
 db/             PostgreSQL schema (§15)
 web-ui/         Next.js dashboard
 clients/ios/    SwiftUI iOS app (SHAIP v2 design), SHAIPCore package, design reference
-examples/       Example server.toml / client.toml
-scripts/        dpi-smoke.sh, run-local.sh
+examples/       client.toml (CLI and iOS app) and pqanond.service (a production server unit)
+scripts/        test-all.sh (the battery), e2e/vpn_lab.sh (the 4-namespace VPN lab), dpi-smoke.sh, run-local.sh
 ```
 
 ## Quick start
@@ -83,11 +119,19 @@ make build           # release binaries + control plane + web build
 ./target/release/pqanond --identity /var/lib/pqanon/pqanond.id --print-public
 #  → identity_id / server_ml_dsa_pub / server_ed_pub: paste into the client's [server]
 
-# 4. Run the control plane + daemons locally
+# 4. A real VPN. On the server (Linux, root): TUN, NAT out of eth0, DNS forwarder
+./target/release/pqanond --identity /var/lib/pqanon/pqanond.id --listen 0.0.0.0:443 \
+    --tun pqanon0 --nat eth0
+#    On the client: put the server's address and --print-public pins in a client.toml
+sudo ./target/release/pqanon run --config client.toml            # add --kill-switch to fail closed
+./target/release/pqanon status                                   # state, RTT, counters
+./target/release/pqanon disconnect                               # routes and DNS restored
+
+# 5. Run the control plane + daemons locally
 ./scripts/run-local.sh
 curl localhost:8080/health
 
-# 5. Or bring up the full stack in containers
+# 6. Or bring up the full stack in containers
 docker compose up --build
 #  web UI → http://localhost:3000   control plane → http://localhost:8080
 ```
@@ -111,15 +155,21 @@ cd web-ui && npm install && npm run dev   # http://localhost:3000
   wire bytes).
 - **PQANON/1 envelope** — 22-byte header bound as AEAD associated data; any
   tamper with `epoch/conn_id/seq/type/length` breaks authentication. Nonces are
-  deterministic (`epoch||seq`) and never repeat within an epoch; directional
-  keys separate the two directions.
+  deterministic (`epoch||seq`); a session refuses to seal past
+  `REJECT_AFTER_SEQ` rather than wrap, and clients rekey with a fresh handshake
+  long before (every 20 minutes or 2³⁰ packets). Directional keys separate the
+  two directions.
 - **PQANON-OBF/1 obfuscation** — per-epoch morph key XORs + Fisher-Yates
   permutes the header, a random prefix and length-shaping padding hide size and
   structure; identical plaintext yields different wire bytes and the `PQAN`
-  magic never appears on the wire.
+  magic never appears in session traffic. Handshake messages are not morphed
+  yet (see limitations).
+- **Session control** — keepalive PING/PONG (the RTT clients show) and Close,
+  sealed and padded like data, so they look like any other small packet.
 - **PQANON-MIX/1 mixnet** — fixed-size 2048-byte onion cells; each hop peels one
   X25519 + ChaCha20-Poly1305 layer and learns only the next hop. Verified by a
-  5-hop wrap → peel → deliver round-trip.
+  5-hop wrap → peel → deliver round-trip. Standalone: the tunnel doesn't use it
+  yet.
 - **PQANON-UDP/1 transport** — anti-replay sliding window, EWMA RTT/RTO, and a
   custom BBR-inspired congestion controller (all unit-tested).
 
@@ -146,28 +196,30 @@ remove functionality — they correct or complete it:
 6. **Next.js bumped to a patched 14.2.x** (the pinned version had a published
    advisory) and wired to the control plane with login/token handling.
 
-## Known limitations (the remaining integration work, per §19)
+## Known limitations
 
-These are deliberately not yet wired; the library primitives they build on are
-done and tested:
-
-- Both ends forward IP. The server's TUN path is proven end to end: the battery
-  sends ICMP through the tunnel and gets the server kernel's real echo replies.
-  `pqanon run` pumps a TUN device through the same `pqanon::client` facade, and
-  TUN I/O itself is proven by `tun-test`. What is not automated is a full
-  client-TUN ↔ server-TUN run on one host, which needs two network namespaces.
-- Handshake messages are sent once, with no retransmission: a lost datagram
-  means a timeout and a reconnect. Idempotent SERVER_HELLO caching is the
-  intended fix.
-- Handshake messages are currently plain-framed (not morphed): the morph key
-  derives from `ss_mix`, which doesn't exist until the handshake completes. A
-  bootstrap morph key (from the pinned server key) is the intended fix.
-  CLIENT_FINISH's *contents* are AEAD-sealed, but its frame, like the hellos',
-  is still recognizable to DPI.
-- Large (~7 KB) handshake messages need UDP fragmentation for real paths.
-- Not yet implemented: the stateless cookie/anti-probing path (§10), the mix
-  delay queue + Bloom replay filter (§10.5), the cover-traffic rate controller
-  (§9.4), rekey driver (§6.5), and connection migration (§8.6).
+- **No mixnet in the data path.** `pqanon-mixd` peels and forwards onion cells,
+  but the tunnel goes straight to one server, and `pqanon run --route anon`
+  refuses rather than pretending. The cover-traffic rate controller (§9.4) and
+  the mix delay queue (§10.5) aren't wired in either.
+- **Handshakes are recognizable.** Handshake messages are plain-framed: the
+  morph key derives from `ss_mix`, which doesn't exist until the handshake
+  completes. A bootstrap morph key (from the pinned server key) is the intended
+  fix. CLIENT_FINISH's *contents* are AEAD-sealed, but its frame, like the
+  hellos', is visible to DPI.
+- **Large handshake messages** (~6 KB, from the ML-DSA-65 signatures) rely on IP
+  fragmentation on real paths.
+- **No stateless cookie yet** (§10). A spoofed CLIENT_HELLO costs the server a
+  handshake computation and gets a reply about four times its size. Half-open
+  handshakes are capped and expire, and the UDP decoy never answers with more
+  bytes than it received, but address validation before the expensive work is
+  still to do.
+- **IPv4 inside the tunnel only.** IPv6 is blocked while connected, not carried.
+- **Roaming is a reconnect.** A client whose address changes renegotiates (at once
+  on iOS, after the dead-peer timeout on Linux). It keeps its tunnel address, so
+  connections usually survive, but there is no seamless connection migration (§8.6).
+- **Single-threaded data path on the server** (about 450 Mbit/s through the lab on
+  one core).
 
 **This is pre-audit software.** Do not place real high-risk traffic on it until
 the integration work above is complete and it has had an external review.

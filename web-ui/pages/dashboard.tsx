@@ -6,8 +6,7 @@ import { api, getToken } from "@/lib/api";
 type Stats = {
   active_connections: number;
   bandwidth_mb: number;
-  latency_ms: number;
-  mixnet_status: string;
+  nodes_online: number;
 };
 
 export default function Dashboard() {
@@ -31,13 +30,16 @@ export default function Dashboard() {
         {err && <div className="text-red-600">Error: {err}</div>}
         {!stats && !err && <div className="text-gray-500">Loading…</div>}
         {stats && (
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
             <Card label="Active connections" value={stats.active_connections} />
             <Card label="Bandwidth (MB)" value={stats.bandwidth_mb} />
-            <Card label="Latency (ms)" value={stats.latency_ms} />
-            <Card label="Mixnet" value={stats.mixnet_status} />
+            <Card label="Nodes registered online" value={stats.nodes_online} />
           </div>
         )}
+        <p className="max-w-2xl text-sm text-gray-500">
+          The tunnel connects straight to one VPN server. Mix nodes can register and be listed in the
+          directory, but traffic does not route through them yet, so there is no mixnet protection.
+        </p>
       </div>
     </div>
   );

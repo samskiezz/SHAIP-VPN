@@ -82,6 +82,12 @@ struct Cli {
     #[arg(long, default_value_t = 10)]
     handshake_timeout_secs: u64,
 
+    /// Log client IP addresses and identity/device ids as they are. By
+    /// default they appear only as per-run pseudonyms, so logs can't be used
+    /// to tell who was connected. For debugging.
+    #[arg(long)]
+    log_clients: bool,
+
     /// Also run a live TLS 1.3 decoy on this TCP address (e.g. 0.0.0.0:443). A
     /// prober that scans the TCP port completes a real HTTPS handshake and sees
     /// an ordinary website; PQANON stays on the UDP port. TCP and UDP are
@@ -338,7 +344,8 @@ async fn main() -> Result<()> {
         }
         None => {
             tracing::info!(listen = %socket.local_addr()?, "pqanond listening (echo mode)");
-            serve(socket, Core::new(gate, Forwarding::Echo, limits)?, None).await
+            let core = Core::new(gate, Forwarding::Echo, limits)?.with_client_logging(cli.log_clients);
+            serve(socket, core, None).await
         }
     }
 }
@@ -396,7 +403,11 @@ async fn tun_mode(cli: &Cli, socket: Arc<UdpSocket>, gate: Gate, limits: Limits,
             allow_private_destinations: cli.allow_private_destinations,
         }),
         limits,
-    )?;
+    )?
+    .with_client_logging(cli.log_clients);
+    if cli.log_clients {
+        tracing::warn!("--log-clients: client IP addresses and ids are written to the logs");
+    }
     tracing::info!(listen = %socket.local_addr()?, "pqanond listening (TUN mode)");
     serve(socket, core, Some(tun)).await
     // `_nat` drops here: forwarding and masquerade are removed.

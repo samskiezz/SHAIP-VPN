@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -49,12 +50,12 @@ func pubKeyFromPEM(t *testing.T, pemStr string) *rsa.PublicKey {
 	return k.(*rsa.PublicKey)
 }
 
-// TestUntraceablePaymentFlow walks the whole e-cash purchase: fetch the plan key,
+// TestUnlinkablePaymentFlow walks the whole e-cash purchase: fetch the plan key,
 // blind a nonce, open an order, pay (dev settle), collect the blind signature,
 // unblind, and redeem it for an access grant — then prove the token can't be
 // spent twice. This is the same protocol the Rust client speaks; the live E2E
 // proves cross-language interop.
-func TestUntraceablePaymentFlow(t *testing.T) {
+func TestUnlinkablePaymentFlow(t *testing.T) {
 	srv, h := newPayServer(t)
 
 	// 1. Denominations + the month plan's public key.
@@ -174,6 +175,21 @@ func TestUntraceablePaymentFlow(t *testing.T) {
 	// The grant is a real, verifiable access credential.
 	if _, err := srv.tokens.Verify(grant.Grant); err != nil {
 		t.Fatalf("access grant must verify: %v", err)
+	}
+	// The redemption is recorded without a user or the caller's IP address
+	// (httptest requests come from 192.0.2.1).
+	entries, _ := srv.store.ListAudit(context.Background(), "", 100)
+	found := false
+	for _, e := range entries {
+		if e.Action == "token.redeem" {
+			found = true
+			if e.IP != "" || e.UserID != "" {
+				t.Fatalf("an anonymous redemption must not record who made it: %+v", e)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("no token.redeem audit entry")
 	}
 
 	// 8. Double-spend is refused.

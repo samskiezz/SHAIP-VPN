@@ -159,7 +159,7 @@ cp_e2e() {
   [ "$bad" -eq 0 ]
 }
 
-# --- Untraceable payments: real Rust client ↔ real Go mint (cross-language) ---
+# --- Unlinkable-token payments: real Rust client ↔ real Go mint (cross-language) ---
 pay_e2e() {
   cargo build --release -q -p pqanon-client --bin pqanon || return 1
   ( cd control-plane && go build -o bin/control-plane . ) || return 1
@@ -431,9 +431,9 @@ else
   skip  "control-plane: live sign-up E2E"    "needs python3 + openssl"
 fi
 if command -v openssl >/dev/null; then
-  stage "pay: untraceable buy→redeem (x-lang)" pay_e2e
+  stage "pay: unlinkable-token buy→redeem (x-lang)" pay_e2e
 else
-  skip  "pay: untraceable buy→redeem (x-lang)" "needs openssl"
+  skip  "pay: unlinkable-token buy→redeem (x-lang)" "needs openssl"
 fi
 if command -v python3 >/dev/null; then
   stage "enroll: one-click enrollment + revocation (x-lang)" enroll_e2e

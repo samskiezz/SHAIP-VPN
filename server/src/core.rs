@@ -17,6 +17,12 @@
 //! - **Lifecycle.** PINGs are answered with PONGs; a session silent for the
 //!   session timeout, or one that sends `Close`, is ended; half-open
 //!   handshakes expire; on shutdown every client is told `Close`.
+//! - **Logs don't identify clients.** Client IP addresses and identity /
+//!   device ids appear in logs only as per-run pseudonyms (a keyed hash with a
+//!   key that never leaves the process), so lines about one client can be
+//!   correlated within a run but not tied to a person or across restarts.
+//!   `with_client_logging(true)` (pqanond `--log-clients`) logs them as is,
+//!   for debugging.
 
 use crate::pool::Pool;
 use pqanon::client::{SessionInfo, MTU, TUNNEL_MTU};
@@ -28,6 +34,7 @@ use pqanon::obf::Obfuscator;
 use pqanon::transport::Session;
 use pqanon::wire::{Envelope, MsgType};
 use std::collections::HashMap;
+use std::hash::BuildHasher;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::{Duration, Instant};
 
@@ -149,6 +156,9 @@ pub struct Core {
     by_identity: HashMap<[u8; 16], SocketAddr>,
     routes: HashMap<Ipv4Addr, SocketAddr>,
     stats: CoreStats,
+    log_clients: bool,
+    /// Randomly keyed (per process) hasher for log pseudonyms.
+    pseudonym_key: std::collections::hash_map::RandomState,
 }
 
 fn hex16(b: [u8; 16]) -> String {
@@ -187,7 +197,35 @@ impl Core {
             by_identity: HashMap::new(),
             routes: HashMap::new(),
             stats: CoreStats::default(),
+            log_clients: false,
+            pseudonym_key: std::collections::hash_map::RandomState::new(),
         })
+    }
+
+    /// Log client addresses and ids as they are (debugging) instead of as
+    /// per-run pseudonyms.
+    pub fn with_client_logging(mut self, on: bool) -> Self {
+        self.log_clients = on;
+        self
+    }
+
+    /// How a client's address appears in logs. Only the IP is hashed, so a
+    /// client that changes ports keeps its pseudonym.
+    fn who(&self, addr: &SocketAddr) -> String {
+        if self.log_clients {
+            addr.to_string()
+        } else {
+            format!("client-{:08x}", self.pseudonym_key.hash_one(addr.ip()) as u32)
+        }
+    }
+
+    /// How an identity or device id appears in logs.
+    fn ident(&self, id: [u8; 16]) -> String {
+        if self.log_clients {
+            hex16(id)
+        } else {
+            format!("id-{:08x}", self.pseudonym_key.hash_one(id) as u32)
+        }
     }
 
     pub fn stats(&self) -> CoreStats {
@@ -271,7 +309,7 @@ impl Core {
             }
         }
         if self.pending.len() >= self.limits.max_pending && !self.pending.contains_key(&src) {
-            tracing::warn!(%src, "too many half-open handshakes; dropping CLIENT_HELLO");
+            tracing::warn!(src = %self.who(&src), "too many half-open handshakes; dropping CLIENT_HELLO");
             return Vec::new();
         }
         let mut hs = self.gate.handshake(env.conn_id);
@@ -280,7 +318,7 @@ impl Core {
             Err(e) => {
                 self.stats.handshakes_failed += 1;
                 metrics::HANDSHAKES_FAILED.inc();
-                tracing::debug!(%src, error = %e, "CLIENT_HELLO rejected");
+                tracing::debug!(src = %self.who(&src), error = %e, "CLIENT_HELLO rejected");
                 return Vec::new();
             }
         };
@@ -293,7 +331,7 @@ impl Core {
                 created: now,
             },
         );
-        tracing::debug!(%src, "CLIENT_HELLO ok; sent SERVER_HELLO");
+        tracing::debug!(src = %self.who(&src), "CLIENT_HELLO ok; sent SERVER_HELLO");
         vec![Out::Udp(server_hello, src)]
     }
 
@@ -306,7 +344,7 @@ impl Core {
             Err(e) => {
                 self.stats.handshakes_failed += 1;
                 metrics::HANDSHAKES_FAILED.inc();
-                tracing::info!(%src, error = %e, "handshake refused");
+                tracing::info!(src = %self.who(&src), error = %e, "handshake refused");
                 return Vec::new();
             }
         };
@@ -322,7 +360,7 @@ impl Core {
             Some(pool) => match pool.lease(est.peer_id) {
                 Some(ip) => Some(ip),
                 None => {
-                    tracing::warn!(%src, "tunnel address pool exhausted; refusing the session");
+                    tracing::warn!(src = %self.who(&src), "tunnel address pool exhausted; refusing the session");
                     return Vec::new();
                 }
             },
@@ -373,8 +411,8 @@ impl Core {
         self.stats.handshakes_ok += 1;
         metrics::HANDSHAKES_OK.inc();
         metrics::SESSIONS_ESTABLISHED.inc();
-        tracing::info!(%src, conn_id = format!("{:#018x}", est.conn_id), client = %hex16(est.peer_id),
-            device = %device.map(hex16).unwrap_or_else(|| "-".into()), assigned = ?assigned, "session established");
+        tracing::info!(src = %self.who(&src), client = %self.ident(est.peer_id),
+            device = %device.map(|d| self.ident(d)).unwrap_or_else(|| "-".into()), assigned = ?assigned, "session established");
         vec![Out::Udp(ack, src)]
     }
 
@@ -494,7 +532,8 @@ impl Core {
         }
         self.stats.ended += 1;
         metrics::SESSIONS_ENDED.inc();
-        tracing::info!(%addr, client = %hex16(p.identity), device = %p.device.map(hex16).unwrap_or_else(|| "-".into()),
+        tracing::info!(src = %self.who(&addr), client = %self.ident(p.identity),
+            device = %p.device.map(|d| self.ident(d)).unwrap_or_else(|| "-".into()),
             reason = ?why, lasted_s = now.saturating_duration_since(p.created).as_secs(), "session ended");
     }
 
@@ -691,6 +730,23 @@ mod tests {
             let close = c.seal(MsgType::Close, Vec::new()).unwrap();
             assert!(core.on_datagram(addr, &close, Instant::now()).is_empty());
             assert_eq!(core.sessions(), 0);
+        });
+    }
+
+    #[test]
+    fn logs_name_clients_by_pseudonym_unless_asked() {
+        big_stack(|| {
+            let core = tun_core(&Identity::generate());
+            let a: SocketAddr = "198.51.100.7:40000".parse().unwrap();
+            let b: SocketAddr = "198.51.100.7:40001".parse().unwrap();
+            let who = core.who(&a);
+            assert!(who.starts_with("client-") && !who.contains("198.51"), "{who}");
+            assert_eq!(who, core.who(&b), "same IP, other port: same pseudonym");
+            assert!(!core.ident([7; 16]).contains("0707"));
+            // Another run (another key) gives another pseudonym.
+            assert_ne!(who, tun_core(&Identity::generate()).who(&a));
+            let open = tun_core(&Identity::generate()).with_client_logging(true);
+            assert_eq!(open.who(&a), "198.51.100.7:40000");
         });
     }
 
