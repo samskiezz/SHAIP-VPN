@@ -13,6 +13,10 @@ path = "src/bin/pqanond.rs"
 name = "pqanon-mixd"
 path = "src/bin/pqanon-mixd.rs"
 
+[[bin]]
+name = "pqanon-decoy"
+path = "src/bin/pqanon-decoy.rs"
+
 [dependencies]
 pqanon             = { path = "../client", package = "pqanon-client" }
 tokio              = { version = "1", features = ["full"] }

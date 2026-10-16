@@ -40,6 +40,13 @@ struct Cli {
     /// This server's tunnel IP (CIDR) when `--tun` is set.
     #[arg(long, default_value = "10.77.0.1/24")]
     tun_addr: String,
+
+    /// Also run a live TLS 1.3 decoy on this TCP address (e.g. 0.0.0.0:443). A
+    /// prober that scans the TCP port completes a real HTTPS handshake and sees
+    /// an ordinary website; PQANON stays on the UDP port. TCP and UDP are
+    /// independent, so the decoy may share the tunnel's port number.
+    #[arg(long)]
+    decoy: Option<String>,
 }
 
 enum PeerState {
@@ -67,6 +74,28 @@ async fn main() -> Result<()> {
 
     let socket = Arc::new(UdpSocket::bind(&cli.listen).await?);
     tracing::info!(listen = %socket.local_addr()?, "pqanond listening");
+
+    // Optional co-located TLS decoy on the TCP port.
+    if let Some(decoy_addr) = cli.decoy.clone() {
+        let addr: SocketAddr = decoy_addr
+            .parse()
+            .map_err(|e| anyhow::anyhow!("bad --decoy address {decoy_addr:?}: {e}"))?;
+        let cfg = pqanon::decoy::DecoyConfig {
+            listen: addr,
+            ..Default::default()
+        };
+        match pqanon::decoy::TlsDecoy::new(cfg) {
+            Ok(decoy) => {
+                tracing::info!(fp = %decoy.cert_fingerprint(), %addr, "TLS decoy starting");
+                tokio::spawn(async move {
+                    if let Err(e) = decoy.run().await {
+                        tracing::error!(err = %e, "decoy failed");
+                    }
+                });
+            }
+            Err(e) => tracing::error!(err = %e, "decoy could not start"),
+        }
+    }
 
     match cli.tun.clone() {
         Some(name) => {
