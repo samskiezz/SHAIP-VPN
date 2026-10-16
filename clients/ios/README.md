@@ -175,7 +175,7 @@ These limits are shown on the Protection screen:
   network and your ISP, not from whoever runs the server.
 - It is one hop with no mixnet, so someone watching both sides of the server can match traffic by
   timing.
-- Data packets are disguised, but the handshake that starts a session can be recognized by deep
-  packet inspection.
+- To your network every packet is random bytes, but sizes and timing can still suggest an
+  encrypted tunnel, and anyone who has this server's config can recognize its handshakes.
 - It does no ad, tracker or malware filtering.
 - It has not yet had an independent security audit.

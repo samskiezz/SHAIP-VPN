@@ -1,44 +1,81 @@
-//! PQANON-OBF/1 — header morphing, length shaping, timing jitter (§9).
+//! PQANON-OBF/2 — what goes on the wire (§9).
 //!
-//! Goal: after morphing, no fixed bytes (not even the `PQAN` magic) ever appear
-//! on the wire, and two packets with identical plaintext produce different wire
-//! bytes. This module implements the reversible transforms; the timing jitter
-//! buffer and cover-traffic scheduler live in [`crate::transport`].
+//! Goal: to anyone without the keys, every datagram is indistinguishable from
+//! random bytes: no magic, no fixed header bytes, no byte that repeats across
+//! a flow's packets. There are two layers, one per phase of a connection.
 //!
-//! Wire layout produced by [`Obfuscator::morph`]:
+//! **Session layer** ([`Obfuscator`]), for everything after the handshake. A
+//! sealed datagram is `header(22) || ciphertext+tag`; the ciphertext is already
+//! pseudorandom, so only the header needs hiding. It is masked the way QUIC
+//! protects its headers (RFC 9001 §5.4.4): a 16-byte sample of the ciphertext
+//! selects a ChaCha20 keystream under a per-session key, and the header is
+//! XORed with it. Every packet's ciphertext differs, so every packet's mask
+//! differs. Random padding then brings the datagram to a shaped size:
 //!
 //! ```text
-//! byte 0            : (prefix_len << 4) | random_low_nibble
-//! bytes 1..1+P      : P = prefix_len random bytes
-//! next 2 bytes      : real datagram length (big-endian) XOR morph_key[0..2]
-//! next T bytes      : datagram, header permuted+XORed, then random padding to T
+//! header ⊕ ChaCha20(k_hp, sample) || ciphertext+tag || random padding
 //! ```
+//!
+//! **Boot layer** ([`BootKey`]), for the handshake, before any session key
+//! exists. Each handshake message is split into fragments, and each fragment
+//! travels in its own datagram, sealed with ChaCha20-Poly1305 under a key
+//! derived from the server's pinned public keys, with a random nonce:
+//!
+//! ```text
+//! nonce(12) || AEAD(k_boot, nonce, msg_id(4) || index(1) || count(1) || len(2) || chunk || zeros)
+//! ```
+//!
+//! Every boot datagram is exactly [`BOOT_DATAGRAM`] bytes, small enough to
+//! cross any path without IP fragmentation (handshake messages carry ML-DSA
+//! signatures and run to ~6 KB, which many networks would drop as fragments).
+//! A datagram that does not open under `k_boot` is not ours; the server stays
+//! silent, as most UDP services do.
+//!
+//! What this does not hide: packet sizes and timing (shaped, not removed), and
+//! the handshake from anyone who holds the server's public keys, i.e. anyone
+//! with a client config for that server.
 
-use crate::wire::HEADER_LEN;
+use crate::handshake::PeerPublic;
+use crate::wire::{HEADER_LEN, MAGIC, TAG_LEN, VERSION};
+use chacha20::cipher::{KeyIvInit, StreamCipher, StreamCipherSeek};
+use chacha20::ChaCha20;
+use chacha20poly1305::{
+    aead::{Aead, KeyInit},
+    ChaCha20Poly1305, Key, Nonce,
+};
 use hkdf::Hkdf;
-use rand::RngCore;
+use rand::{Rng, RngCore};
 use sha2::Sha256;
 
 /// 16 target sizes, shaped to resemble the size distribution of HTTPS/TLS 1.3
-/// on port 443. Shipped as a static default (§9.2); refreshable at runtime.
+/// on port 443 (§9.2). A sealed datagram is padded up to the first size that
+/// holds it, plus 0–15 random bytes.
 pub const PADDING_TABLE: [u16; 16] = [
     128, 192, 256, 320, 384, 448, 512, 640, 768, 896, 1024, 1152, 1280, 1408, 1536, 2048,
 ];
 
+/// Random bytes added on top of a size bucket, so sizes don't sit on 16 values.
+pub const SIZE_JITTER: usize = 15;
+
+/// Bytes of ciphertext sampled for the header mask.
+const SAMPLE_LEN: usize = 16;
+
+/// Session-layer obfuscation: header protection and length shaping.
 pub struct Obfuscator {
-    morph_key: [u8; 64],
+    hp_key: [u8; 32],
     padding_table: [u16; 16],
 }
 
 impl Obfuscator {
-    /// Derive the per-epoch morph key: `HKDF(ss_mix, info = "morph-{epoch}", 64)`.
+    /// The header-protection key: `HKDF(ss_mix, info = "PQANON-OBF/2 hp {epoch}")`.
+    /// Both ends of a session derive it; nobody else can.
     pub fn new(ss_mix: &[u8; 32], epoch: u16) -> Self {
         let hk = Hkdf::<Sha256>::new(None, ss_mix);
-        let mut key = [0u8; 64];
-        hk.expand(format!("morph-{epoch}").as_bytes(), &mut key)
-            .expect("64 bytes within HKDF bound");
+        let mut hp_key = [0u8; 32];
+        hk.expand(format!("PQANON-OBF/2 hp {epoch}").as_bytes(), &mut hp_key)
+            .expect("32 bytes within HKDF bound");
         Self {
-            morph_key: key,
+            hp_key,
             padding_table: PADDING_TABLE,
         }
     }
@@ -48,207 +85,392 @@ impl Obfuscator {
         self.padding_table = table;
     }
 
-    /// Pad, permute, XOR, and prepend a random prefix. Returns the on-wire bytes.
-    pub fn morph(&self, datagram: &[u8]) -> Vec<u8> {
-        let real_len = datagram.len();
-        let target = self.pick_size(real_len);
-
-        // Permute + XOR the first HEADER_LEN bytes of the datagram.
-        let mut body = datagram.to_vec();
-        let perm = self.header_permutation();
-        permute_header(&mut body, &perm, &self.morph_key);
-
-        // Pad the body up to the shaped target with random bytes.
-        let mut pad = vec![0u8; target.saturating_sub(real_len)];
+    /// Mask the header of a sealed datagram (`header || ciphertext+tag`) and
+    /// pad it. Returns the on-wire bytes.
+    pub fn morph(&self, sealed: &[u8]) -> anyhow::Result<Vec<u8>> {
+        if sealed.len() < HEADER_LEN + SAMPLE_LEN {
+            anyhow::bail!("too short to morph: a sealed datagram has at least a header and a tag");
+        }
+        let mut out = Vec::with_capacity(self.pick_size(sealed.len()) + SIZE_JITTER);
+        out.extend_from_slice(sealed);
+        let mask = self.mask(&sealed[HEADER_LEN..HEADER_LEN + SAMPLE_LEN]);
+        for (b, m) in out[..HEADER_LEN].iter_mut().zip(mask) {
+            *b ^= m;
+        }
+        let target = self.pick_size(sealed.len()) + rand::rngs::OsRng.gen_range(0..=SIZE_JITTER);
+        let mut pad = vec![0u8; target - sealed.len()];
         rand::rngs::OsRng.fill_bytes(&mut pad);
-        body.extend_from_slice(&pad);
-
-        // Random prefix (0..=15 bytes).
-        let mut nibble = [0u8; 1];
-        rand::rngs::OsRng.fill_bytes(&mut nibble);
-        let prefix_len = (nibble[0] & 0x0F) as usize;
-        let mut prefix = vec![0u8; prefix_len];
-        rand::rngs::OsRng.fill_bytes(&mut prefix);
-
-        // Obfuscated 2-byte real-length field.
-        let len_field = (real_len as u16).to_be_bytes();
-        let len_obf = [
-            len_field[0] ^ self.morph_key[0],
-            len_field[1] ^ self.morph_key[1],
-        ];
-
-        let mut out = Vec::with_capacity(1 + prefix_len + 2 + body.len());
-        // High nibble = prefix_len; low nibble = random noise (ignored on read).
-        out.push(((prefix_len as u8) << 4) | (nibble[0] >> 4));
-        out.extend_from_slice(&prefix);
-        out.extend_from_slice(&len_obf);
-        out.extend_from_slice(&body);
-        out
+        out.extend_from_slice(&pad);
+        Ok(out)
     }
 
-    /// Reverse [`Obfuscator::morph`].
+    /// Reverse [`Obfuscator::morph`]: unmask the header and drop the padding.
+    /// Fails cheaply on anything that isn't this session's (the AEAD that
+    /// follows is the real check).
     pub fn demorph(&self, packet: &[u8]) -> anyhow::Result<Vec<u8>> {
-        if packet.is_empty() {
-            anyhow::bail!("empty packet");
+        if packet.len() < HEADER_LEN + SAMPLE_LEN {
+            anyhow::bail!("short packet");
         }
-        let prefix_len = (packet[0] >> 4) as usize;
-        let len_at = 1 + prefix_len;
-        if packet.len() < len_at + 2 {
-            anyhow::bail!("truncated (length field)");
+        let mut header = [0u8; HEADER_LEN];
+        header.copy_from_slice(&packet[..HEADER_LEN]);
+        let mask = self.mask(&packet[HEADER_LEN..HEADER_LEN + SAMPLE_LEN]);
+        for (b, m) in header.iter_mut().zip(mask) {
+            *b ^= m;
         }
-        let real_len = u16::from_be_bytes([
-            packet[len_at] ^ self.morph_key[0],
-            packet[len_at + 1] ^ self.morph_key[1],
-        ]) as usize;
-
-        let body_at = len_at + 2;
-        if packet.len() < body_at + real_len {
+        if header[0..4] != MAGIC || header[4] != VERSION {
+            anyhow::bail!("not this session's packet");
+        }
+        let body_len = u16::from_be_bytes([header[20], header[21]]) as usize + TAG_LEN;
+        if packet.len() < HEADER_LEN + body_len {
             anyhow::bail!("truncated (body shorter than declared length)");
         }
-        let mut body = packet[body_at..body_at + real_len].to_vec();
-        let perm = self.header_permutation();
-        unpermute_header(&mut body, &perm, &self.morph_key);
-        Ok(body)
+        let mut sealed = Vec::with_capacity(HEADER_LEN + body_len);
+        sealed.extend_from_slice(&header);
+        sealed.extend_from_slice(&packet[HEADER_LEN..HEADER_LEN + body_len]);
+        Ok(sealed)
     }
 
-    fn pick_size(&self, real_len: usize) -> usize {
+    /// ChaCha20 header protection after RFC 9001 §5.4.4: the sample's first
+    /// four bytes are the block counter (little-endian), the other twelve the
+    /// nonce. The counter's top bit is cleared so it can never be the final
+    /// block of the 32-bit counter space, which the cipher refuses (an
+    /// attacker-chosen sample of 0xFF bytes would otherwise make it panic).
+    fn mask(&self, sample: &[u8]) -> [u8; HEADER_LEN] {
+        let counter = u32::from_le_bytes(sample[0..4].try_into().unwrap()) & 0x7FFF_FFFF;
+        let mut c = ChaCha20::new(chacha20::Key::from_slice(&self.hp_key), chacha20::Nonce::from_slice(&sample[4..16]));
+        let mut m = [0u8; HEADER_LEN];
+        // Neither call can fail for a counter below 2^31; if one ever did, the
+        // zero mask only makes demorph fail on that packet.
+        if c.try_seek(u64::from(counter) * 64).is_ok() {
+            let _ = c.try_apply_keystream(&mut m);
+        }
+        m
+    }
+
+    fn pick_size(&self, len: usize) -> usize {
         for &s in &self.padding_table {
-            if s as usize >= real_len {
+            if s as usize >= len {
                 return s as usize;
             }
         }
-        real_len.div_ceil(128) * 128
+        len.div_ceil(128) * 128
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Boot layer (handshake messages)
+// ---------------------------------------------------------------------------
+
+/// Size of every handshake datagram's UDP payload: under IPv6's 1280-byte
+/// minimum MTU with headers (1280 − 40 − 8 = 1232), so no path fragments it.
+pub const BOOT_DATAGRAM: usize = 1200;
+const BOOT_NONCE: usize = 12;
+const FRAG_HEADER: usize = 8;
+/// Message bytes carried per handshake datagram.
+pub const BOOT_CHUNK: usize = BOOT_DATAGRAM - BOOT_NONCE - TAG_LEN - FRAG_HEADER;
+/// The most fragments one handshake message may use (a ~9 KB ceiling; the
+/// largest real message, CLIENT_FINISH with a device certificate, needs 6).
+pub const BOOT_MAX_FRAGMENTS: usize = 8;
+
+/// The handshake-layer key, derived from the server's pinned public keys:
+/// `HKDF(salt = "PQANON-OBF/2 boot", ikm = ML-DSA-65 key || Ed25519 key)`.
+/// The client has them from its config; the server from its identity.
+#[derive(Clone)]
+pub struct BootKey {
+    key: [u8; 32],
+}
+
+/// One opened handshake datagram.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Fragment {
+    pub msg_id: u32,
+    pub index: u8,
+    pub count: u8,
+    pub chunk: Vec<u8>,
+}
+
+impl BootKey {
+    pub fn for_server(server: &PeerPublic) -> Self {
+        let mut ikm = server.pq_bytes();
+        ikm.extend_from_slice(&server.ed_bytes());
+        let hk = Hkdf::<Sha256>::new(Some(b"PQANON-OBF/2 boot"), &ikm);
+        let mut key = [0u8; 32];
+        hk.expand(b"handshake datagrams", &mut key)
+            .expect("32 bytes within HKDF bound");
+        Self { key }
     }
 
-    /// Deterministic Fisher-Yates permutation of the `HEADER_LEN` header byte
-    /// positions, seeded from `morph_key[24..32]` (§9.1 step 3).
-    fn header_permutation(&self) -> [usize; HEADER_LEN] {
-        let mut seed = [0u8; 8];
-        seed.copy_from_slice(&self.morph_key[24..32]);
-        let mut rng = SplitMix64::new(u64::from_le_bytes(seed));
-
-        let mut perm = [0usize; HEADER_LEN];
-        for (i, slot) in perm.iter_mut().enumerate() {
-            *slot = i;
+    /// Split one handshake message into sealed datagrams of exactly
+    /// [`BOOT_DATAGRAM`] bytes, at least `min_datagrams` of them (extra ones
+    /// carry no message bytes: the client pads its hello so the server's
+    /// larger reply stays within the anti-amplification limit).
+    pub fn seal_message(&self, msg: &[u8], min_datagrams: usize) -> anyhow::Result<Vec<Vec<u8>>> {
+        let count = msg.len().div_ceil(BOOT_CHUNK).max(min_datagrams).max(1);
+        if count > BOOT_MAX_FRAGMENTS {
+            anyhow::bail!("handshake message too large ({} bytes)", msg.len());
         }
-        // Fisher-Yates from the back.
-        for i in (1..HEADER_LEN).rev() {
-            let j = (rng.next() % (i as u64 + 1)) as usize;
-            perm.swap(i, j);
+        let msg_id: u32 = rand::random();
+        let cipher = ChaCha20Poly1305::new(Key::from_slice(&self.key));
+        let mut out = Vec::with_capacity(count);
+        for index in 0..count {
+            let chunk = msg.get(index * BOOT_CHUNK..).map_or(&[][..], |rest| &rest[..rest.len().min(BOOT_CHUNK)]);
+            let mut pt = Vec::with_capacity(FRAG_HEADER + BOOT_CHUNK);
+            pt.extend_from_slice(&msg_id.to_be_bytes());
+            pt.push(index as u8);
+            pt.push(count as u8);
+            pt.extend_from_slice(&(chunk.len() as u16).to_be_bytes());
+            pt.extend_from_slice(chunk);
+            pt.resize(FRAG_HEADER + BOOT_CHUNK, 0); // the AEAD hides the padding
+            let mut nonce = [0u8; BOOT_NONCE];
+            rand::rngs::OsRng.fill_bytes(&mut nonce);
+            let ct = cipher
+                .encrypt(Nonce::from_slice(&nonce), pt.as_slice())
+                .map_err(|e| anyhow::anyhow!("aead encrypt: {e}"))?;
+            let mut d = Vec::with_capacity(BOOT_DATAGRAM);
+            d.extend_from_slice(&nonce);
+            d.extend_from_slice(&ct);
+            debug_assert_eq!(d.len(), BOOT_DATAGRAM);
+            out.push(d);
         }
-        perm
+        Ok(out)
     }
-}
 
-/// XOR the first `HEADER_LEN` bytes with `morph_key[2..2+HEADER_LEN]`, then move
-/// byte `i` to position `perm[i]`.
-fn permute_header(buf: &mut [u8], perm: &[usize; HEADER_LEN], key: &[u8; 64]) {
-    let n = HEADER_LEN.min(buf.len());
-    // XOR first (uses key bytes disjoint from the length-field key bytes 0..2).
-    for i in 0..n {
-        buf[i] ^= key[2 + i];
-    }
-    if buf.len() < HEADER_LEN {
-        return; // too short to permute a full header; XOR-only is reversible
-    }
-    let original: [u8; HEADER_LEN] = buf[..HEADER_LEN].try_into().unwrap();
-    for i in 0..HEADER_LEN {
-        buf[perm[i]] = original[i];
-    }
-}
-
-/// Inverse of [`permute_header`].
-fn unpermute_header(buf: &mut [u8], perm: &[usize; HEADER_LEN], key: &[u8; 64]) {
-    if buf.len() >= HEADER_LEN {
-        let permuted: [u8; HEADER_LEN] = buf[..HEADER_LEN].try_into().unwrap();
-        for i in 0..HEADER_LEN {
-            buf[i] = permuted[perm[i]];
+    /// Open one handshake datagram; `None` if it isn't one (wrong size, wrong
+    /// key, tampered, or malformed inside).
+    pub fn open(&self, wire: &[u8]) -> Option<Fragment> {
+        if wire.len() != BOOT_DATAGRAM {
+            return None;
         }
-    }
-    let n = HEADER_LEN.min(buf.len());
-    for i in 0..n {
-        buf[i] ^= key[2 + i];
+        let cipher = ChaCha20Poly1305::new(Key::from_slice(&self.key));
+        let pt = cipher
+            .decrypt(Nonce::from_slice(&wire[..BOOT_NONCE]), &wire[BOOT_NONCE..])
+            .ok()?;
+        let msg_id = u32::from_be_bytes(pt[0..4].try_into().unwrap());
+        let (index, count) = (pt[4], pt[5]);
+        let len = u16::from_be_bytes([pt[6], pt[7]]) as usize;
+        if count == 0 || count as usize > BOOT_MAX_FRAGMENTS || index >= count || len > BOOT_CHUNK {
+            return None;
+        }
+        Some(Fragment {
+            msg_id,
+            index,
+            count,
+            chunk: pt[FRAG_HEADER..FRAG_HEADER + len].to_vec(),
+        })
     }
 }
 
-/// Minimal SplitMix64 PRNG — deterministic, seeded; used only to derive the
-/// header permutation from the morph key. Not used for any secret material.
-struct SplitMix64 {
-    state: u64,
+/// Collects the fragments of one handshake message. A fragment of a different
+/// message (a new `msg_id`) starts over: the sender moved on.
+#[derive(Default)]
+pub struct Reassembly {
+    msg_id: u32,
+    parts: Vec<Option<Vec<u8>>>,
+    /// Datagram bytes received for the current message, duplicates included
+    /// once (what the anti-amplification limit is measured against).
+    received: usize,
 }
 
-impl SplitMix64 {
-    fn new(seed: u64) -> Self {
-        Self { state: seed }
+impl Reassembly {
+    pub fn new() -> Self {
+        Self::default()
     }
-    fn next(&mut self) -> u64 {
-        self.state = self.state.wrapping_add(0x9E37_79B9_7F4A_7C15);
-        let mut z = self.state;
-        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-        z ^ (z >> 31)
+
+    /// Add a fragment; returns the whole message once every fragment is in.
+    pub fn push(&mut self, f: Fragment) -> Option<Vec<u8>> {
+        if self.parts.is_empty() || f.msg_id != self.msg_id || f.count as usize != self.parts.len() {
+            self.msg_id = f.msg_id;
+            self.parts = vec![None; f.count as usize];
+            self.received = 0;
+        }
+        let slot = &mut self.parts[f.index as usize];
+        if slot.is_none() {
+            *slot = Some(f.chunk);
+            self.received += BOOT_DATAGRAM;
+        }
+        if self.parts.iter().all(Option::is_some) {
+            let msg = self.parts.iter().flatten().flatten().copied().collect();
+            self.parts.clear();
+            return Some(msg);
+        }
+        None
+    }
+
+    /// Bytes of distinct datagrams that made up the last completed (or the
+    /// current partial) message.
+    pub fn received(&self) -> usize {
+        self.received
     }
 }
+
+/// The anti-amplification limit: before the client has proved it receives at
+/// its address (by completing the handshake), the server sends at most three
+/// times the bytes it received (the same limit as QUIC, RFC 9000 §8.1).
+pub const AMPLIFICATION_LIMIT: usize = 3;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::handshake::Identity;
+    use crate::transport::Session;
+    use crate::wire::MsgType;
+
+    fn session_pair() -> (Session, Obfuscator) {
+        let s = Session::new(0x0123_4567_89AB_CDEF, [1u8; 32], [2u8; 32], "127.0.0.1:9".parse().unwrap(), true, 1400);
+        (s, Obfuscator::new(&[42u8; 32], 1))
+    }
 
     #[test]
     fn morph_demorph_roundtrip() {
-        let ss = [42u8; 32];
-        let obf = Obfuscator::new(&ss, 1);
-        let original = b"hello pqanon".to_vec();
-        let morphed = obf.morph(&original);
-        let back = obf.demorph(&morphed).unwrap();
-        assert_eq!(back, original);
+        let (mut s, obf) = session_pair();
+        for n in [0usize, 1, 40, 500, 1370] {
+            let sealed = s.seal_data(MsgType::Data, vec![0xA5; n]).unwrap();
+            let wire = obf.morph(&sealed).unwrap();
+            assert_eq!(obf.demorph(&wire).unwrap(), sealed, "payload {n}");
+        }
     }
 
     #[test]
-    fn roundtrip_full_header_packet() {
-        let ss = [1u8; 32];
-        let obf = Obfuscator::new(&ss, 5);
-        // A realistic sealed packet: 22-byte header starting with PQAN magic.
-        let mut pkt = vec![0x50, 0x51, 0x41, 0x4E, 0x01, 0x04];
-        pkt.extend_from_slice(&[0u8; 16]); // rest of header
-        pkt.extend_from_slice(&[0xABu8; 200]); // ciphertext + tag
-        let morphed = obf.morph(&pkt);
-        assert_eq!(obf.demorph(&morphed).unwrap(), pkt);
+    fn another_sessions_key_does_not_demorph() {
+        let (mut s, obf) = session_pair();
+        let wire = obf.morph(&s.seal_data(MsgType::Data, b"x".to_vec()).unwrap()).unwrap();
+        assert!(Obfuscator::new(&[43u8; 32], 1).demorph(&wire).is_err());
+        assert!(Obfuscator::new(&[42u8; 32], 2).demorph(&wire).is_err(), "a different epoch is a different key");
+    }
+
+    /// The point of the layer: across a flow, no byte position holds a fixed
+    /// value. The old morph XORed every header with one key per session, so 16
+    /// of its 22 header bytes were identical in every packet.
+    #[test]
+    fn no_byte_repeats_across_a_flows_packets() {
+        let (mut s, obf) = session_pair();
+        let packets: Vec<Vec<u8>> = (0..64)
+            .map(|_| obf.morph(&s.seal_data(MsgType::Data, vec![0u8; 100]).unwrap()).unwrap())
+            .collect();
+        for pos in 0..128 {
+            let first = packets[0][pos];
+            let same = packets.iter().filter(|p| p[pos] == first).count();
+            assert!(same < 8, "byte {pos} holds the same value in {same} of 64 packets");
+        }
+        assert!(!packets.iter().any(|p| p.windows(4).any(|w| w == MAGIC)), "PQAN magic on the wire");
     }
 
     #[test]
-    fn magic_not_on_wire() {
-        let ss = [7u8; 32];
-        let obf = Obfuscator::new(&ss, 1);
-        let mut pkt = vec![0x50, 0x51, 0x41, 0x4E, 0x01, 0x04];
-        pkt.extend_from_slice(&[0u8; 16]);
-        pkt.extend_from_slice(&[0u8; 100]);
-        let morphed = obf.morph(&pkt);
-        // The cleartext magic must not survive morphing.
-        assert!(
-            !morphed.windows(4).any(|w| w == [0x50, 0x51, 0x41, 0x4E]),
-            "PQAN magic leaked onto the wire"
-        );
+    fn sizes_are_shaped_with_jitter() {
+        let (mut s, obf) = session_pair();
+        let mut seen = std::collections::BTreeSet::new();
+        for _ in 0..300 {
+            // 80 bytes seal to 22 + 80 + 16 = 118, inside the 128 bucket.
+            let wire = obf.morph(&s.seal_data(MsgType::Data, vec![0u8; 80]).unwrap()).unwrap();
+            assert!((128..=128 + SIZE_JITTER).contains(&wire.len()), "{}", wire.len());
+            seen.insert(wire.len());
+        }
+        assert!(seen.len() > 8, "sizes vary within the bucket");
+    }
+
+    /// Any 16 bytes may be the sample (the attacker picks them): none panics.
+    #[test]
+    fn extreme_samples_do_not_panic() {
+        let (_, obf) = session_pair();
+        for fill in [0x00u8, 0x7F, 0x80, 0xFF] {
+            assert!(obf.demorph(&[fill; 200]).is_err());
+        }
+        for _ in 0..2000 {
+            let p: Vec<u8> = (0..64).map(|_| rand::random()).collect();
+            let _ = obf.demorph(&p);
+        }
     }
 
     #[test]
-    fn length_shaped_to_table() {
-        let ss = [3u8; 32];
-        let obf = Obfuscator::new(&ss, 1);
-        // 100-byte datagram → body padded to the 128 bucket.
-        let morphed = obf.morph(&[0u8; 100]);
-        // 1 (nibble) + prefix (0..15) + 2 (len) + 128 (body) .
-        let body = morphed.len() - 1 - 2 - (morphed[0] >> 4) as usize;
-        assert_eq!(body, 128);
+    fn short_or_truncated_packets_are_refused() {
+        let (mut s, obf) = session_pair();
+        assert!(obf.morph(&[0u8; HEADER_LEN + SAMPLE_LEN - 1]).is_err());
+        assert!(obf.demorph(&[]).is_err());
+        let wire = obf.morph(&s.seal_data(MsgType::Data, vec![1u8; 300]).unwrap()).unwrap();
+        assert!(obf.demorph(&wire[..HEADER_LEN + 200]).is_err());
+    }
+
+    fn boot() -> BootKey {
+        BootKey::for_server(&Identity::generate().public())
     }
 
     #[test]
-    fn different_each_time() {
-        let ss = [9u8; 32];
-        let obf = Obfuscator::new(&ss, 1);
-        let a = obf.morph(b"same input");
-        let b = obf.morph(b"same input");
-        // Random prefix + padding make identical plaintext differ on the wire.
-        assert_ne!(a, b);
+    fn handshake_messages_split_into_small_datagrams_and_reassemble() {
+        let k = boot();
+        for len in [0usize, 1, BOOT_CHUNK, BOOT_CHUNK + 1, 6000] {
+            let msg: Vec<u8> = (0..len).map(|i| i as u8).collect();
+            let datagrams = k.seal_message(&msg, 1).unwrap();
+            assert_eq!(datagrams.len(), len.div_ceil(BOOT_CHUNK).max(1));
+            assert!(datagrams.iter().all(|d| d.len() == BOOT_DATAGRAM));
+            // Delivered out of order, with a duplicate.
+            let mut r = Reassembly::new();
+            let mut done = None;
+            for d in datagrams.iter().rev().chain(datagrams.first()) {
+                if let Some(m) = r.push(k.open(d).unwrap()) {
+                    done = Some(m);
+                }
+            }
+            assert_eq!(done.unwrap(), msg, "len {len}");
+        }
+    }
+
+    #[test]
+    fn padding_datagrams_raise_the_count() {
+        let k = boot();
+        let d = k.seal_message(b"short", 3).unwrap();
+        assert_eq!(d.len(), 3);
+        let mut r = Reassembly::new();
+        let got: Vec<_> = d.iter().filter_map(|x| r.push(k.open(x).unwrap())).collect();
+        assert_eq!(got, vec![b"short".to_vec()]);
+        assert_eq!(r.received(), 3 * BOOT_DATAGRAM);
+    }
+
+    #[test]
+    fn boot_datagrams_need_the_servers_keys() {
+        let (a, b) = (boot(), boot());
+        let d = a.seal_message(b"hello", 1).unwrap();
+        assert!(b.open(&d[0]).is_none(), "another server's key");
+        let mut t = d[0].clone();
+        t[600] ^= 1;
+        assert!(a.open(&t).is_none(), "tampered");
+        assert!(a.open(&d[0][..BOOT_DATAGRAM - 1]).is_none(), "wrong size");
+        assert!(a.open(&[0u8; BOOT_DATAGRAM]).is_none(), "zeros");
+    }
+
+    #[test]
+    fn boot_datagrams_look_random() {
+        let k = boot();
+        let msg = vec![0u8; 3000]; // all zeros inside: the worst case
+        let mut counts = [0u32; 256];
+        let mut total = 0u32;
+        for _ in 0..40 {
+            for d in k.seal_message(&msg, 1).unwrap() {
+                for &b in &d {
+                    counts[b as usize] += 1;
+                }
+                total += d.len() as u32;
+            }
+        }
+        // Chi-square against uniform, 255 degrees of freedom: a uniform source
+        // stays under ~330 with overwhelming probability.
+        let expect = total as f64 / 256.0;
+        let chi: f64 = counts.iter().map(|&c| (c as f64 - expect).powi(2) / expect).sum();
+        assert!(chi < 400.0, "chi-square {chi:.0}");
+    }
+
+    #[test]
+    fn too_large_a_message_is_refused() {
+        assert!(boot().seal_message(&vec![0u8; BOOT_CHUNK * BOOT_MAX_FRAGMENTS + 1], 1).is_err());
+    }
+
+    #[test]
+    fn a_new_message_restarts_reassembly() {
+        let k = boot();
+        let first = k.seal_message(&vec![1u8; 2000], 1).unwrap();
+        let second = k.seal_message(&vec![2u8; 2000], 1).unwrap();
+        let mut r = Reassembly::new();
+        assert!(r.push(k.open(&first[0]).unwrap()).is_none());
+        assert!(r.push(k.open(&second[0]).unwrap()).is_none());
+        assert_eq!(r.push(k.open(&second[1]).unwrap()), Some(vec![2u8; 2000]));
     }
 }

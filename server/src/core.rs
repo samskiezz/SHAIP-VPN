@@ -10,6 +10,11 @@
 //! - **Retransmissions are idempotent.** A repeated CLIENT_HELLO is answered
 //!   with the cached SERVER_HELLO, a repeated CLIENT_FINISH with the cached
 //!   ACK, so a lost datagram never forks the handshake.
+//! - **Nothing to see on the wire** (PQANON-OBF/2, `pqanon::obf`). Handshake
+//!   messages arrive as fragments sealed under the boot key and are
+//!   reassembled here; session packets have masked headers. A datagram that
+//!   is neither gets no reply at all, and before a client has completed the
+//!   handshake the server never sends it more than three times what it sent.
 //! - **Cryptokey routing.** In TUN mode a client may only send packets from
 //!   its own tunnel address (anything else is spoofing and dropped), and by
 //!   default may not reach other clients or private, link-local, multicast,
@@ -26,12 +31,12 @@
 //!   traffic back, and are forgotten when the session ends.
 
 use crate::pool::Pool;
-use pqanon::client::{SessionInfo, MTU, TUNNEL_MTU};
+use pqanon::client::{SessionInfo, CLIENT_HELLO_DATAGRAMS, MTU, TUNNEL_MTU};
 use pqanon::ctl::{self, Keepalive};
 use pqanon::dataplane::DataPlane;
 use pqanon::handshake::{DevicePolicy, Established, Identity, ServerHandshake};
 use pqanon::metrics;
-use pqanon::obf::Obfuscator;
+use pqanon::obf::{BootKey, Obfuscator, Reassembly, AMPLIFICATION_LIMIT, BOOT_DATAGRAM};
 use pqanon::transport::Session;
 use pqanon::wire::{Envelope, MsgType};
 use std::collections::HashMap;
@@ -111,7 +116,8 @@ pub enum Out {
 struct Pending {
     hs: Box<ServerHandshake>,
     hello: Vec<u8>,
-    server_hello: Vec<u8>,
+    /// SERVER_HELLO's datagrams, resent as they are if the hello is repeated.
+    server_hello: Vec<Vec<u8>>,
     created: Instant,
 }
 
@@ -133,7 +139,9 @@ pub struct CoreStats {
     pub spoofed: u64,
     pub filtered: u64,
     pub keepalives: u64,
-    pub decoys: u64,
+    /// Datagrams that were neither a session's nor a handshake's: scanners,
+    /// probes and noise, dropped without a reply.
+    pub unrecognized: u64,
     pub ended: u64,
     /// CLIENT_HELLOs dropped at the half-open handshake limit.
     pub dropped: u64,
@@ -144,6 +152,10 @@ pub struct Core {
     fwd: Forwarding,
     limits: Limits,
     pool: Option<Pool>,
+    /// Opens handshake datagrams (derived from this server's public keys).
+    boot: BootKey,
+    /// Handshake messages still arriving, by sender, with their last fragment's time.
+    assembling: HashMap<SocketAddr, (Reassembly, Instant)>,
     pending: HashMap<SocketAddr, Pending>,
     peers: HashMap<SocketAddr, Peer>,
     by_identity: HashMap<[u8; 16], SocketAddr>,
@@ -176,6 +188,8 @@ impl Core {
             Forwarding::Echo => None,
         };
         Ok(Core {
+            boot: BootKey::for_server(&gate.identity.public()),
+            assembling: HashMap::new(),
             gate,
             fwd,
             limits,
@@ -234,83 +248,103 @@ impl Core {
 
     fn dispatch(&mut self, src: SocketAddr, pkt: &[u8], now: Instant) -> Vec<Out> {
         if let Some(peer) = self.peers.get_mut(&src) {
-            match peer.dp.open(pkt) {
-                Ok(env) => {
-                    peer.last_rx = now;
-                    return self.on_session_message(src, env, now);
-                }
-                Err(_) => match Envelope::from_plain(pkt) {
-                    // The ACK was lost and the client repeated CLIENT_FINISH.
-                    Ok(env)
-                        if env.msg_type == MsgType::ClientFinish
-                            && env.conn_id == peer.hs_conn_id
-                            && now.saturating_duration_since(peer.created) < self.limits.ack_resend_window =>
-                    {
-                        return vec![Out::Udp(peer.ack.clone(), src)];
-                    }
-                    // A new handshake from this address (the client restarted):
-                    // handled below; the old session stays until it completes.
-                    Ok(env) if matches!(env.msg_type, MsgType::ClientHello | MsgType::ClientFinish) => {}
-                    // Garbage or a replay from a client's address: drop quietly.
-                    _ => return Vec::new(),
-                },
+            if let Ok(env) = peer.dp.open(pkt) {
+                peer.last_rx = now;
+                return self.on_session_message(src, env, now);
+            }
+            // Otherwise a handshake from this address (a lost ACK, or the
+            // client restarted; the old session stays until a new one
+            // completes), or garbage: both handled below.
+        }
+        // A handshake datagram opens under the boot key. Anything else is a
+        // scanner, a probe or noise, and gets no answer at all (§10.2): an
+        // answer would mark this host as a server, and could be aimed at a
+        // spoofed source.
+        let Some(fragment) = self.boot.open(pkt) else {
+            self.stats.unrecognized += 1;
+            return Vec::new();
+        };
+        if !self.assembling.contains_key(&src) && self.assembling.len() >= self.limits.max_pending {
+            self.drop_handshake(now);
+            return Vec::new();
+        }
+        let entry = self.assembling.entry(src).or_insert_with(|| (Reassembly::new(), now));
+        entry.1 = now;
+        let Some(msg) = entry.0.push(fragment) else { return Vec::new() };
+        let received = entry.0.received();
+        self.assembling.remove(&src);
+        let Ok(env) = Envelope::from_plain(&msg) else { return Vec::new() };
+        if let Some(peer) = self.peers.get(&src) {
+            // The ACK was lost and the client repeated CLIENT_FINISH.
+            if env.msg_type == MsgType::ClientFinish
+                && env.conn_id == peer.hs_conn_id
+                && now.saturating_duration_since(peer.created) < self.limits.ack_resend_window
+            {
+                return vec![Out::Udp(peer.ack.clone(), src)];
             }
         }
-        let env = match Envelope::from_plain(pkt) {
-            Ok(env) => env,
-            Err(_) => {
-                // Not our protocol: a scanner or DPI probe. Answer like an
-                // HTTPS server would (§10.2) — but never with more bytes than
-                // arrived, so a spoofed source cannot use us as an amplifier.
-                let decoy = pqanon::tls_decoy::probe_response();
-                if pkt.len() < decoy.len() {
-                    return Vec::new();
-                }
-                self.stats.decoys += 1;
-                return vec![Out::Udp(decoy, src)];
-            }
-        };
         match env.msg_type {
-            MsgType::ClientHello => self.on_client_hello(src, pkt, env, now),
+            MsgType::ClientHello => self.on_client_hello(src, &msg, env, received, now),
             MsgType::ClientFinish => self.on_client_finish(src, env, now),
             _ => Vec::new(),
         }
     }
 
-    fn on_client_hello(&mut self, src: SocketAddr, raw: &[u8], env: Envelope, now: Instant) -> Vec<Out> {
+    /// The half-open handshake limit was hit: count it, and say so at most
+    /// once a minute (an aggregate condition; nothing about any sender).
+    fn drop_handshake(&mut self, now: Instant) {
+        self.stats.dropped += 1;
+        metrics::HANDSHAKES_DROPPED.inc();
+        if self.last_drop_warning.is_none_or(|t| now.saturating_duration_since(t) >= Duration::from_secs(60)) {
+            self.last_drop_warning = Some(now);
+            tracing::warn!(limit = self.limits.max_pending, "half-open handshake limit reached; dropping new CLIENT_HELLOs");
+        }
+    }
+
+    /// `received`: datagram bytes the hello arrived in. Until the client
+    /// completes the handshake its address is unproven (it could be spoofed),
+    /// so the reply may be at most [`AMPLIFICATION_LIMIT`] times that.
+    fn on_client_hello(&mut self, src: SocketAddr, raw: &[u8], env: Envelope, received: usize, now: Instant) -> Vec<Out> {
+        let send = |datagrams: &[Vec<u8>]| datagrams.iter().map(|d| Out::Udp(d.clone(), src)).collect::<Vec<_>>();
+        if received < CLIENT_HELLO_DATAGRAMS * BOOT_DATAGRAM {
+            // Not padded as every client pads it: refused before any work.
+            self.stats.handshakes_failed += 1;
+            metrics::HANDSHAKES_FAILED.inc();
+            return Vec::new();
+        }
         if let Some(p) = self.pending.get(&src) {
             if p.hello == raw {
-                return vec![Out::Udp(p.server_hello.clone(), src)]; // a retransmission
+                return send(&p.server_hello); // a retransmission
             }
         }
         if self.pending.len() >= self.limits.max_pending && !self.pending.contains_key(&src) {
-            self.stats.dropped += 1;
-            metrics::HANDSHAKES_DROPPED.inc();
-            if self.last_drop_warning.is_none_or(|t| now.saturating_duration_since(t) >= Duration::from_secs(60)) {
-                self.last_drop_warning = Some(now);
-                tracing::warn!(limit = self.limits.max_pending, "half-open handshake limit reached; dropping new CLIENT_HELLOs");
-            }
+            self.drop_handshake(now);
             return Vec::new();
         }
         let mut hs = self.gate.handshake(env.conn_id);
-        let server_hello = match hs.recv_client_hello(&env, true).and_then(|_| hs.server_hello()) {
-            Ok(sh) => sh.to_plain(),
-            Err(_) => {
+        let server_hello = match hs
+            .recv_client_hello(&env, true)
+            .and_then(|_| hs.server_hello())
+            .and_then(|sh| self.boot.seal_message(&sh.to_plain(), 1))
+        {
+            Ok(d) if d.iter().map(Vec::len).sum::<usize>() <= AMPLIFICATION_LIMIT * received => d,
+            _ => {
                 self.stats.handshakes_failed += 1;
                 metrics::HANDSHAKES_FAILED.inc();
                 return Vec::new();
             }
         };
+        let out = send(&server_hello);
         self.pending.insert(
             src,
             Pending {
                 hs: Box::new(hs),
                 hello: raw.to_vec(),
-                server_hello: server_hello.clone(),
+                server_hello,
                 created: now,
             },
         );
-        vec![Out::Udp(server_hello, src)]
+        out
     }
 
     fn on_client_finish(&mut self, src: SocketAddr, env: Envelope, now: Instant) -> Vec<Out> {
@@ -471,6 +505,8 @@ impl Core {
         let hs_timeout = self.limits.handshake_timeout;
         self.pending
             .retain(|_, p| now.saturating_duration_since(p.created) < hs_timeout);
+        self.assembling
+            .retain(|_, (_, last)| now.saturating_duration_since(*last) < hs_timeout);
         let silent: Vec<SocketAddr> = self
             .peers
             .iter()
@@ -558,21 +594,46 @@ mod tests {
         }
     }
 
+    /// Send one handshake message as a client does: sealed under the server's
+    /// boot key, datagram by datagram. Returns everything the core answered.
+    fn send_hs(core: &mut Core, server_pub: &PeerPublic, src: SocketAddr, env: &Envelope, min: usize, now: Instant) -> Vec<Out> {
+        let datagrams = BootKey::for_server(server_pub).seal_message(&env.to_plain(), min).unwrap();
+        datagrams.iter().flat_map(|d| core.on_datagram(src, d, now)).collect()
+    }
+
+    /// Reassemble the handshake message the core answered with.
+    fn recv_hs(server_pub: &PeerPublic, out: &[Out]) -> Envelope {
+        let boot = BootKey::for_server(server_pub);
+        let mut r = Reassembly::new();
+        let mut msg = None;
+        for o in out {
+            let Out::Udp(d, _) = o else { panic!("{o:?}") };
+            assert_eq!(d.len(), BOOT_DATAGRAM, "every handshake datagram is {BOOT_DATAGRAM} bytes");
+            msg = r.push(boot.open(d).expect("a boot datagram")).or(msg);
+        }
+        Envelope::from_plain(&msg.expect("a whole message")).unwrap()
+    }
+
+    fn udp_bytes(out: &[Out]) -> usize {
+        out.iter().map(|o| if let Out::Udp(d, _) = o { d.len() } else { 0 }).sum()
+    }
+
     /// Run a client handshake against `core` from `src`; returns the client's
     /// data plane and the session info the ACK carried.
     fn connect(core: &mut Core, server_pub: PeerPublic, client: Identity, src: SocketAddr) -> (DataPlane, SessionInfo) {
         let now = Instant::now();
-        let mut hs = ClientHandshake::new(client, server_pub, rand::random());
-        let hello = hs.client_hello([0u8; 32]).unwrap().to_plain();
-        let out = core.on_datagram(src, &hello, now);
-        // A retransmitted hello gets the very same SERVER_HELLO.
-        assert_eq!(core.on_datagram(src, &hello, now), out);
-        hs.recv_server_hello(&Envelope::from_plain(udp(&out)).unwrap()).unwrap();
+        let mut hs = ClientHandshake::new(client, server_pub.clone(), rand::random());
+        let hello = hs.client_hello([0u8; 32]).unwrap();
+        let out = send_hs(core, &server_pub, src, &hello, CLIENT_HELLO_DATAGRAMS, now);
+        // The reply stays within the anti-amplification limit.
+        assert!(udp_bytes(&out) <= AMPLIFICATION_LIMIT * CLIENT_HELLO_DATAGRAMS * BOOT_DATAGRAM, "{} bytes back", udp_bytes(&out));
+        // A retransmitted hello gets the very same SERVER_HELLO datagrams.
+        assert_eq!(send_hs(core, &server_pub, src, &hello, CLIENT_HELLO_DATAGRAMS, now), out);
+        hs.recv_server_hello(&recv_hs(&server_pub, &out)).unwrap();
         let (finish, est) = hs.client_finish().unwrap();
-        let finish = finish.to_plain();
-        let ack = core.on_datagram(src, &finish, now);
+        let ack = send_hs(core, &server_pub, src, &finish, 1, now);
         // A retransmitted finish gets the cached ACK back.
-        assert_eq!(core.on_datagram(src, &finish, now), ack);
+        assert_eq!(send_hs(core, &server_pub, src, &finish, 1, now), ack);
         let mut dp = DataPlane::new(
             Session::new(est.conn_id, est.k_c2s, est.k_s2c, src, true, MTU),
             Obfuscator::new(&est.ss_mix, 1),
@@ -666,8 +727,8 @@ mod tests {
             let t0 = Instant::now();
             // A half-open handshake from elsewhere.
             let mut hs = ClientHandshake::new(Identity::generate(), server.public(), 9);
-            let hello = hs.client_hello([0u8; 32]).unwrap().to_plain();
-            core.on_datagram("198.51.100.3:5000".parse().unwrap(), &hello, t0);
+            let hello = hs.client_hello([0u8; 32]).unwrap();
+            send_hs(&mut core, &server.public(), "198.51.100.3:5000".parse().unwrap(), &hello, CLIENT_HELLO_DATAGRAMS, t0);
             assert_eq!(core.pending(), 1);
             core.on_tick(t0 + Duration::from_secs(11));
             assert_eq!(core.pending(), 0, "half-open handshake expired");
@@ -675,15 +736,10 @@ mod tests {
             // The session goes silent past the timeout.
             core.on_tick(t0 + Duration::from_secs(181));
             assert_eq!(core.sessions(), 0);
-            // Its datagrams now come from an unknown sender: they look like a
-            // probe and get the decoy answer, never a tunnel reply.
+            // Its datagrams now come from an unknown sender and get no answer.
             let w = c.outbound(&[0x45; 28]).unwrap();
-            let out = core.on_datagram(addr, &w, t0);
-            assert!(matches!(&out[..], [Out::Udp(_, to)] if *to == addr));
-            assert_eq!(core.stats().decoys, 1);
-            // A probe smaller than the decoy gets nothing (no amplification).
-            assert!(core.on_datagram(addr, &[0x16, 0x03, 0x01], t0).is_empty());
-            assert_eq!(core.stats().decoys, 1);
+            assert!(core.on_datagram(addr, &w, t0).is_empty());
+            assert_eq!(core.stats().unrecognized, 1);
         });
     }
 
@@ -759,18 +815,19 @@ mod tests {
                 core.on_datagram(a2_addr, &close, now);
                 // A refused handshake (tampered CLIENT_FINISH), the half-open
                 // limit, a probe, a timeout, and shutdown.
-                let mut hs = ClientHandshake::new(Identity::generate(), server.public(), 7);
-                let hello = hs.client_hello([0u8; 32]).unwrap().to_plain();
-                let sh = core.on_datagram(mallory, &hello, now);
-                hs.recv_server_hello(&Envelope::from_plain(udp(&sh)).unwrap()).unwrap();
+                let sp = server.public();
+                let mut hs = ClientHandshake::new(Identity::generate(), sp.clone(), 7);
+                let hello = hs.client_hello([0u8; 32]).unwrap();
+                let sh = send_hs(&mut core, &sp, mallory, &hello, CLIENT_HELLO_DATAGRAMS, now);
+                hs.recv_server_hello(&recv_hs(&sp, &sh)).unwrap();
                 let (mut fin, _) = hs.client_finish().unwrap();
                 let last = fin.payload.len() - 1;
                 fin.payload[last] ^= 1;
-                core.on_datagram(mallory, &fin.to_plain(), now);
-                let mut h1 = ClientHandshake::new(Identity::generate(), server.public(), 8);
-                core.on_datagram(mallory, &h1.client_hello([0u8; 32]).unwrap().to_plain(), now);
-                let mut h2 = ClientHandshake::new(Identity::generate(), server.public(), 9);
-                core.on_datagram(a_addr, &h2.client_hello([0u8; 32]).unwrap().to_plain(), now);
+                send_hs(&mut core, &sp, mallory, &fin, 1, now);
+                let mut h1 = ClientHandshake::new(Identity::generate(), sp.clone(), 8);
+                send_hs(&mut core, &sp, mallory, &h1.client_hello([0u8; 32]).unwrap(), CLIENT_HELLO_DATAGRAMS, now);
+                let mut h2 = ClientHandshake::new(Identity::generate(), sp.clone(), 9);
+                send_hs(&mut core, &sp, a_addr, &h2.client_hello([0u8; 32]).unwrap(), CLIENT_HELLO_DATAGRAMS, now);
                 assert_eq!(core.stats().dropped, 1, "the second half-open handshake is dropped");
                 core.on_datagram(mallory, &[0x16; 600], now);
                 core.on_tick(now + Duration::from_secs(11)); // the half-open one expires
@@ -787,6 +844,74 @@ mod tests {
             // The one thing reported is the aggregate condition, without a client.
             assert!(text.contains("half-open handshake limit reached"), "{text}");
             assert_eq!(text.lines().count(), 1, "nothing else is logged:\n{text}");
+        });
+    }
+
+    /// Probes, scanners and noise get silence, whatever they send and from
+    /// wherever: no decoy reply, no error, nothing that marks a server here.
+    #[test]
+    fn anything_unrecognized_gets_no_reply() {
+        big_stack(|| {
+            let server = Identity::generate();
+            let mut core = tun_core(&server);
+            let addr: SocketAddr = "198.51.100.4:4000".parse().unwrap();
+            let _ = connect(&mut core, server.public(), Identity::generate(), addr);
+            let now = Instant::now();
+            let mut probes: Vec<Vec<u8>> = vec![vec![], vec![0x16, 0x03, 0x01], vec![0u8; BOOT_DATAGRAM], vec![0xFF; 1400]];
+            for n in [1usize, 37, 200, BOOT_DATAGRAM, 1500] {
+                probes.push((0..n).map(|_| rand::random::<u8>()).collect());
+            }
+            // A hello sealed for some other server.
+            let other = Identity::generate().public();
+            let mut hs = ClientHandshake::new(Identity::generate(), other.clone(), 1);
+            probes.extend(BootKey::for_server(&other).seal_message(&hs.client_hello([0u8; 32]).unwrap().to_plain(), 2).unwrap());
+            let stranger: SocketAddr = "203.0.113.9:9".parse().unwrap();
+            for p in &probes {
+                assert!(core.on_datagram(stranger, p, now).is_empty(), "a {}-byte probe from a stranger was answered", p.len());
+                assert!(core.on_datagram(addr, p, now).is_empty(), "a {}-byte probe from a client's address was answered", p.len());
+            }
+            assert_eq!(core.stats().unrecognized, 2 * probes.len() as u64);
+            assert_eq!(core.pending(), 0);
+        });
+    }
+
+    /// A CLIENT_HELLO that isn't padded to two datagrams is refused before the
+    /// server does any work, so a spoofed small hello can't buy a big reply.
+    #[test]
+    fn an_unpadded_hello_gets_no_reply() {
+        big_stack(|| {
+            let server = Identity::generate();
+            let mut core = tun_core(&server);
+            let src: SocketAddr = "198.51.100.5:5".parse().unwrap();
+            // A real hello, cut to fit one datagram (an attacker's would be).
+            let mut hs = ClientHandshake::new(Identity::generate(), server.public(), 3);
+            let mut hello = hs.client_hello([0u8; 32]).unwrap();
+            hello.payload.truncate(pqanon::obf::BOOT_CHUNK - 22);
+            let out = send_hs(&mut core, &server.public(), src, &hello, 1, Instant::now());
+            assert!(out.is_empty());
+            assert_eq!((core.stats().handshakes_failed, core.pending()), (1, 0));
+        });
+    }
+
+    /// A handshake message whose last fragment never comes is forgotten.
+    #[test]
+    fn partial_handshake_messages_expire() {
+        big_stack(|| {
+            let server = Identity::generate();
+            let mut core = tun_core(&server);
+            let src: SocketAddr = "198.51.100.6:6".parse().unwrap();
+            let mut hs = ClientHandshake::new(Identity::generate(), server.public(), 4);
+            let d = BootKey::for_server(&server.public())
+                .seal_message(&hs.client_hello([0u8; 32]).unwrap().to_plain(), CLIENT_HELLO_DATAGRAMS)
+                .unwrap();
+            let t0 = Instant::now();
+            assert!(core.on_datagram(src, &d[0], t0).is_empty());
+            assert_eq!(core.assembling.len(), 1);
+            core.on_tick(t0 + Duration::from_secs(11));
+            assert!(core.assembling.is_empty());
+            // The rest alone is not a message.
+            assert!(core.on_datagram(src, &d[1], t0 + Duration::from_secs(11)).is_empty());
+            assert_eq!(core.pending(), 0);
         });
     }
 

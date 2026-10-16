@@ -159,14 +159,17 @@ async fn send_and_recv_run_concurrently() {
 #[tokio::test]
 async fn a_different_servers_pins_are_refused() {
     let d = start(&[]);
-    // Valid keys — but another server's: the SERVER_HELLO signatures fail.
+    // Valid keys, but another server's: the hello is sealed under that
+    // server's boot key, so this server can't open it and stays silent. (Were
+    // it answered, the SERVER_HELLO signatures would fail the pin check; see
+    // handshake.rs.)
     let other = Identity::generate().public();
-    let err = Tunnel::connect(config(&d, other, Duration::from_secs(5)))
+    let err = Tunnel::connect(config(&d, other, Duration::from_secs(3)))
         .await
         .err()
         .expect("must refuse")
         .to_string();
-    assert!(err.contains("signature invalid"), "{err}");
+    assert!(err.contains("no SERVER_HELLO") && err.contains("not that server's"), "{err}");
 }
 
 #[tokio::test]

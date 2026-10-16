@@ -307,15 +307,34 @@ fn session_keys() -> (([u8; 32], [u8; 32], [u8; 32]), ([u8; 32], [u8; 32], [u8; 
 #[test]
 fn obfuscation_roundtrips_for_realistic_datagram_sizes() {
     let obf = Obfuscator::new(&[0x5Au8; 32], 9);
+    let mut session = pqanon::transport::Session::new(7, [3u8; 32], [4u8; 32], "127.0.0.1:9".parse().unwrap(), true, 1400);
     let mut rng = Rng::new(0x2024_1015);
     for _ in 0..20_000 {
-        // Sealed datagrams are HEADER(22)+payload+TAG(16); cover that size band.
-        let len = 38 + rng.len_to(1400);
-        let datagram: Vec<u8> = (0..len).map(|_| rng.byte()).collect();
-        let wire = obf.morph(&datagram);
+        // Real sealed datagrams (HEADER(22) + payload + TAG(16)) across the
+        // payload band a tunnel carries.
+        let len = rng.len_to(1370);
+        let payload: Vec<u8> = (0..len).map(|_| rng.byte()).collect();
+        let datagram = session.seal_data(MsgType::Data, payload).unwrap();
+        let wire = obf.morph(&datagram).unwrap();
         let back = obf
             .demorph(&wire)
             .expect("demorph of our own morph must succeed");
-        assert_eq!(back, datagram, "obfuscation roundtrip lost data at len {len}");
+        assert_eq!(back, datagram, "obfuscation roundtrip lost data at payload {len}");
+    }
+}
+
+#[test]
+fn fuzz_boot_layer_never_panics() {
+    use pqanon::obf::{BootKey, Reassembly, BOOT_DATAGRAM};
+    let boot = BootKey::for_server(&pqanon::handshake::Identity::generate().public());
+    let mut rng = Rng::new(0x0B0F_2026);
+    let mut r = Reassembly::new();
+    for i in 0..FUZZ_ITERS {
+        let input = rng.bytes(if i % 2 == 0 { BOOT_DATAGRAM } else { 1400 });
+        no_panic!("BootKey::open", &input, {
+            if let Some(f) = boot.open(&input) {
+                let _ = r.push(f);
+            }
+        });
     }
 }

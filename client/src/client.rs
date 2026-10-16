@@ -24,7 +24,7 @@
 use crate::ctl::{self, Keepalive};
 use crate::dataplane::DataPlane;
 use crate::handshake::{ClientHandshake, Identity, PeerPublic};
-use crate::obf::Obfuscator;
+use crate::obf::{BootKey, Obfuscator, Reassembly, AMPLIFICATION_LIMIT, BOOT_DATAGRAM};
 use crate::transport::{Session, REKEY_AFTER_SEQ};
 use crate::wire::{Envelope, MsgType};
 use anyhow::{anyhow, bail, Context, Result};
@@ -38,15 +38,21 @@ pub const MTU: usize = 1400;
 
 /// The largest inner IP packet whose sealed and morphed datagram still crosses
 /// a 1500-byte path unfragmented. The morph pads a sealed datagram up to the
-/// next size in [`crate::obf::PADDING_TABLE`] and adds at most 18 bytes, so the
-/// biggest bucket that fits is 1408 (1408 + 18 = 1426 bytes of UDP payload, under
-/// both IPv4's 1472 and IPv6's 1452), less the 38-byte envelope overhead.
+/// next size in [`crate::obf::PADDING_TABLE`] plus at most
+/// [`crate::obf::SIZE_JITTER`] (15) bytes, so the biggest bucket that fits is
+/// 1408 (1408 + 15 = 1423 bytes of UDP payload, under both IPv4's 1472 and
+/// IPv6's 1452), less the 38-byte envelope overhead.
 pub const TUNNEL_MTU: u16 = 1370;
 
 const RECV_BUF: usize = 65_536;
 /// First handshake retransmission; doubles up to [`HS_RETRANSMIT_MAX`].
 const HS_RETRANSMIT_FIRST: Duration = Duration::from_millis(1000);
 const HS_RETRANSMIT_MAX: Duration = Duration::from_millis(4000);
+/// CLIENT_HELLO is padded to this many handshake datagrams, so the server's
+/// reply (SERVER_HELLO carries an ML-DSA-65 signature and fills five) stays
+/// within [`AMPLIFICATION_LIMIT`] times what the client sent.
+pub const CLIENT_HELLO_DATAGRAMS: usize = 2;
+const _: () = assert!(AMPLIFICATION_LIMIT * CLIENT_HELLO_DATAGRAMS * BOOT_DATAGRAM >= 5 * BOOT_DATAGRAM);
 
 /// What [`Tunnel::connect`] needs.
 #[derive(Clone)]
@@ -231,18 +237,30 @@ impl Tunnel {
         let deadline = Instant::now() + cfg.handshake_timeout;
         let mut buf = vec![0u8; RECV_BUF];
 
-        // PQANON-HS/1. The server is authenticated against its pinned keys
-        // while processing SERVER_HELLO.
+        // PQANON-HS/1 over the OBF/2 boot layer: each message is split into
+        // small datagrams sealed under a key from the server's pinned public
+        // keys. The server is authenticated against those keys while
+        // processing SERVER_HELLO.
+        let boot = BootKey::for_server(&cfg.server_pub);
         let mut hs = ClientHandshake::new(cfg.identity, cfg.server_pub, rand::random());
         if let Some(cert) = cfg.device_cert {
             hs.set_device_cert(cert);
         }
-        let hello = hs.client_hello([0u8; 32])?.to_plain();
+        let hello = boot.seal_message(&hs.client_hello([0u8; 32])?.to_plain(), CLIENT_HELLO_DATAGRAMS)?;
+        let mut reassembly = Reassembly::new();
         let shello = exchange(&sock, &hello, &mut buf, deadline, |b| {
-            Envelope::from_plain(b).ok().filter(|e| e.msg_type == MsgType::ServerHello)
+            let msg = reassembly.push(boot.open(b)?)?;
+            Envelope::from_plain(&msg).ok().filter(|e| e.msg_type == MsgType::ServerHello)
         })
         .await
-        .map_err(|_| anyhow!("no SERVER_HELLO from {server} within {:?}", cfg.handshake_timeout))?;
+        .map_err(|_| {
+            anyhow!(
+                "no SERVER_HELLO from {server} within {:?}: the server is unreachable, or the server \
+                 keys in this config are not that server's (a server stays silent to a handshake \
+                 sealed for another server's keys)",
+                cfg.handshake_timeout
+            )
+        })?;
         hs.recv_server_hello(&shello)?;
         let (finish, est) = hs.client_finish()?;
 
@@ -252,7 +270,7 @@ impl Tunnel {
             Session::new(est.conn_id, est.k_c2s, est.k_s2c, server, true, MTU),
             Obfuscator::new(&est.ss_mix, 1),
         );
-        let finish = finish.to_plain();
+        let finish = boot.seal_message(&finish.to_plain(), 1)?;
         let info = exchange(&sock, &finish, &mut buf, deadline, |b| {
             let env = dp.open(b).ok().filter(|e| e.msg_type == MsgType::Ack)?;
             Some(SessionInfo::decode(&env.payload))
@@ -425,18 +443,21 @@ impl Tunnel {
     }
 }
 
-/// Send `msg` and wait for a datagram `accept` recognizes, retransmitting with
-/// backoff (1 s, 2 s, 4 s, 4 s, …) until `deadline`.
+/// Send a handshake message's datagrams and wait until `accept` recognizes
+/// what comes back, retransmitting them all with backoff (1 s, 2 s, 4 s, 4 s,
+/// …) until `deadline`.
 async fn exchange<T>(
     sock: &UdpSocket,
-    msg: &[u8],
+    datagrams: &[Vec<u8>],
     buf: &mut [u8],
     deadline: Instant,
     mut accept: impl FnMut(&[u8]) -> Option<T>,
 ) -> Result<T> {
     let mut wait = HS_RETRANSMIT_FIRST;
     loop {
-        sock.send(msg).await?;
+        for d in datagrams {
+            sock.send(d).await?;
+        }
         let resend_at = (Instant::now() + wait).min(deadline);
         loop {
             let left = resend_at.saturating_duration_since(Instant::now());
@@ -504,7 +525,7 @@ mod tests {
     fn tunnel_mtu_fits_a_1500_byte_path() {
         let obf = Obfuscator::new(&[7u8; 32], 1);
         let mut s = Session::new(1, [1u8; 32], [2u8; 32], "127.0.0.1:9".parse().unwrap(), true, MTU);
-        let wire_len = |s: &mut Session, n: usize| obf.morph(&s.seal_data(MsgType::Data, vec![0u8; n]).unwrap()).len();
+        let wire_len = |s: &mut Session, n: usize| obf.morph(&s.seal_data(MsgType::Data, vec![0u8; n]).unwrap()).unwrap().len();
         for _ in 0..200 {
             assert!(wire_len(&mut s, TUNNEL_MTU as usize) <= 1500 - 40 - 8, "fits IPv6 (and so IPv4)");
         }

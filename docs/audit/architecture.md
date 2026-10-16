@@ -59,10 +59,20 @@ keys.
 - A DATA packet is framed as an `Envelope` (`client/src/wire.rs`) and sealed
   with the directional key under a deterministic nonce
   (`epoch(2) || seq(4) || zeros`), the 22-byte header as AAD.
-- The sealed bytes are then **obfuscated** (`client/src/obf.rs`): header XOR
-  morph + Fisher–Yates field permutation + length shaping. Invariant: the
-  `PQAN` magic never appears on the wire (asserted in `selftest` and in the
-  live UDP integration test `server/tests/tunnel.rs`).
+- The sealed bytes then pass through **PQANON-OBF/2** (`client/src/obf.rs`):
+  the 22-byte header is XORed with a ChaCha20 keystream selected by a 16-byte
+  sample of the ciphertext under a per-session key (after RFC 9001 §5.4.4),
+  and the datagram is padded to a shaped size plus 0–15 random bytes. Every
+  packet's mask differs, so no header byte repeats across a flow.
+- Handshake messages travel in the OBF/2 **boot layer**: split into fragments,
+  each sealed with ChaCha20-Poly1305 (random nonce) under a key derived from the
+  server's pinned public keys, in a datagram of exactly 1200 bytes. The server
+  reassembles them (bounded in count, size and time), refuses an unpadded
+  CLIENT_HELLO before any work, sends at most 3× what it received until the
+  handshake completes, and answers nothing it can't open.
+- Checked on the wire by the netns lab (`scripts/e2e/vpn_lab.sh` with
+  `lab_wirecap.py` on the ISP's link): no IP fragments, no `PQAN` magic, and no
+  byte position whose most common value exceeds 3% of a flow's packets.
 
 ### Mix path (PQANON-MIX/1)
 
@@ -119,9 +129,11 @@ settings; it has no request logger and stores no IP address
   each verified byte-for-byte against IANA's published trust-anchor file). The
   validating stub resolver sets the DNSSEC-OK bit, parses the wire response, and
   **drops `Bogus` answers** instead of returning them.
-- **TLS 1.3 decoy** (`client/src/tls_decoy.rs`): a per-connection randomized,
-  well-formed ServerHello, **wired into `pqanond`** as the response to any
-  unrecognized (probe/DPI) datagram — no static fingerprint.
+- **No answer to probes on the UDP port.** `pqanond` replies to nothing it
+  can't open (OBF/2). It used to answer with a randomized TLS ServerHello
+  record, but no real HTTPS server replies to stray UDP with a TLS record, so
+  that reply was itself a fingerprint; it was removed. The live TLS decoy on
+  TCP (`client/src/decoy.rs`) is unchanged.
 - **Globally-scheduled mix cover** (`client/src/mix_cover.rs`
   `GlobalCoverScheduler`, wired into `pqanon-mixd --cover-peer`): one node-wide
   Poisson emission process, independent of client count/activity, so the

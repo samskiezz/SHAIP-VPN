@@ -584,7 +584,7 @@ fn selftest() -> Result<()> {
     // Obfuscate on the wire, then de-obfuscate on the far side.
     let obf_tx = Obfuscator::new(&client_est.ss_mix, 1);
     let obf_rx = Obfuscator::new(&server_est.ss_mix, 1);
-    let wire = obf_tx.morph(&sealed);
+    let wire = obf_tx.morph(&sealed)?;
     anyhow::ensure!(
         !wire.windows(4).any(|w| w == [0x50, 0x51, 0x41, 0x4E]),
         "PQAN magic leaked onto the wire"

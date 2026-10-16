@@ -42,7 +42,7 @@ impl DataPlane {
     /// session ACK travel exactly like DATA).
     pub fn seal(&mut self, msg_type: MsgType, payload: Vec<u8>) -> anyhow::Result<Vec<u8>> {
         let sealed = self.session.seal_data(msg_type, payload)?;
-        Ok(self.obf.morph(&sealed))
+        self.obf.morph(&sealed)
     }
 
     /// Demorph + open a datagram of any type.

@@ -80,8 +80,12 @@ What it does **not** do:
   local network and ISP; it doesn't remove it.
 - **Defeat traffic analysis.** There is one hop and no mixnet in the data path,
   so someone watching both sides of the server can match flows by timing.
-- **Hide that you use it.** Data packets are disguised, but the handshake is
-  recognizable to deep packet inspection.
+- **Hide that you use it from everyone.** To anyone without your server's
+  public keys, every packet is random bytes: no fixed header, no protocol
+  magic, no handshake to match. But sizes and timing are shaped, not hidden, so
+  traffic analysis can still suggest an encrypted tunnel; a network that blocks
+  UDP it can't identify blocks this too; and anyone who has the server's public
+  keys (every client config for it carries them) can recognize its handshakes.
 - **Make you anonymous to websites.** Logins, cookies and browser fingerprinting
   still identify you.
 - **Filter content.** It does no ad, tracker or malware blocking.
@@ -205,11 +209,16 @@ clients/ios/preview/build.sh   # → clients/ios/preview/dist/index.html
   `REJECT_AFTER_SEQ` rather than wrap, and clients rekey with a fresh handshake
   long before (every 20 minutes or 2³⁰ packets). Directional keys separate the
   two directions.
-- **PQANON-OBF/1 obfuscation** — per-epoch morph key XORs + Fisher-Yates
-  permutes the header, a random prefix and length-shaping padding hide size and
-  structure; identical plaintext yields different wire bytes and the `PQAN`
-  magic never appears in session traffic. Handshake messages are not morphed
-  yet (see limitations).
+- **PQANON-OBF/2 wire layer** (`client/src/obf.rs`) — every datagram is random
+  bytes to anyone without the keys. Session packets: the 22-byte header is
+  masked with a ChaCha20 keystream chosen by a sample of the ciphertext under a
+  per-session key (QUIC's header protection, RFC 9001 §5.4), then padded to a
+  shaped size plus random jitter. Handshake messages: split into fragments, each
+  sealed with ChaCha20-Poly1305 under a key derived from the server's pinned
+  public keys, in its own 1200-byte datagram, so nothing depends on IP
+  fragmentation. The server never answers a datagram it can't open. The netns
+  lab checks the real wire: no IP fragments, no protocol magic, and no byte
+  position holding a fixed value across a flow's packets.
 - **Session control** — keepalive PING/PONG (the RTT clients show) and Close,
   sealed and padded like data, so they look like any other small packet.
 - **PQANON-MIX/1 mixnet** — fixed-size 2048-byte onion cells; each hop peels one
@@ -228,6 +237,9 @@ remove functionality — they correct or complete it:
    length scheme. Rewritten to a correct, reversible morph/demorph with an
    explicit 2-byte length field, header XOR **and** the Fisher-Yates header
    permutation the doc describes. Round-trip + "magic-not-on-wire" tested.
+   That design (OBF/1) has since been replaced by OBF/2: its header XOR used
+   one key per session, so 16 of the 22 header bytes were identical in every
+   packet of a flow, and the first byte said where they started.
 2. **Server-side handshake implemented.** The doc gave only the client half;
    `ServerHandshake` (and the client's `recv`/`finish`) now complete a real,
    mutually-authenticated handshake that both sides can run.
@@ -248,18 +260,19 @@ remove functionality — they correct or complete it:
   but the tunnel goes straight to one server, and `pqanon run --route anon`
   refuses rather than pretending. The cover-traffic rate controller (§9.4) and
   the mix delay queue (§10.5) aren't wired in either.
-- **Handshakes are recognizable.** Handshake messages are plain-framed: the
-  morph key derives from `ss_mix`, which doesn't exist until the handshake
-  completes. A bootstrap morph key (from the pinned server key) is the intended
-  fix. CLIENT_FINISH's *contents* are AEAD-sealed, but its frame, like the
-  hellos', is visible to DPI.
-- **Large handshake messages** (~6 KB, from the ML-DSA-65 signatures) rely on IP
-  fragmentation on real paths.
-- **No stateless cookie yet** (§10). A spoofed CLIENT_HELLO costs the server a
-  handshake computation and gets a reply about four times its size. Half-open
-  handshakes are capped and expire, and the UDP decoy never answers with more
-  bytes than it received, but address validation before the expensive work is
-  still to do.
+- **Recognizable to anyone with the server's keys.** Handshakes are sealed
+  under a key derived from the server's public keys, which every client config
+  for that server carries, so a censor who obtains one can recognize that
+  server's handshakes. Without the keys the packets are random bytes, but their
+  sizes and timing are shaped, not hidden, and "UDP that parses as nothing" is
+  itself a signal that some networks block.
+- **Handshake cost under attack.** Before a client has proved its address, the
+  server sends it at most three times what it received (every CLIENT_HELLO is
+  padded to two datagrams for this), and it never answers a datagram it can't
+  open, so it can't be used as an amplifier. But a CLIENT_HELLO from someone
+  who has the server's keys still costs the server a signature: half-open
+  handshakes are capped and expire, and a stateless retry cookie for use under
+  load (§10) is still to do.
 - **IPv4 inside the tunnel only.** IPv6 is blocked while connected, not carried.
 - **Roaming is a reconnect.** A client whose address changes renegotiates (at once
   on iOS, after the dead-peer timeout on Linux). It keeps its tunnel address, so

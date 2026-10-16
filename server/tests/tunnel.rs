@@ -1,15 +1,37 @@
 //! End-to-end tunnel test over real UDP loopback sockets: full PQANON-HS/1
-//! handshake (plain-framed), then a morphed DATA packet echoed back.
+//! handshake over the OBF/2 boot layer (every message split into sealed
+//! 1200-byte datagrams), then a morphed DATA packet echoed back.
 //!
 //! ML-DSA-65 key generation and signing use large stack frames, so this test
 //! runs on a dedicated thread with a generous stack (the default 2 MB test-
 //! harness thread stack is too small for both handshake sides concurrently).
 
 use pqanon::handshake::{ClientHandshake, Identity, ServerHandshake};
-use pqanon::obf::Obfuscator;
+use pqanon::client::CLIENT_HELLO_DATAGRAMS;
+use pqanon::obf::{BootKey, Obfuscator, Reassembly, BOOT_DATAGRAM};
 use pqanon::transport::Session;
 use pqanon::wire::{Envelope, MsgType};
+use std::net::SocketAddr;
 use tokio::net::UdpSocket;
+
+async fn send_msg(sock: &UdpSocket, boot: &BootKey, env: &Envelope, min: usize, to: SocketAddr) {
+    for d in boot.seal_message(&env.to_plain(), min).unwrap() {
+        assert_eq!(d.len(), BOOT_DATAGRAM);
+        assert!(!d.windows(4).any(|w| w == b"PQAN"), "magic on the wire");
+        sock.send_to(&d, to).await.unwrap();
+    }
+}
+
+async fn recv_msg(sock: &UdpSocket, boot: &BootKey) -> (Envelope, SocketAddr) {
+    let mut buf = vec![0u8; 65536];
+    let mut r = Reassembly::new();
+    loop {
+        let (n, from) = sock.recv_from(&mut buf).await.unwrap();
+        if let Some(msg) = r.push(boot.open(&buf[..n]).expect("a boot datagram")) {
+            return (Envelope::from_plain(&msg).unwrap(), from);
+        }
+    }
+}
 
 #[test]
 fn tunnel_handshake_and_data_over_udp() {
@@ -37,26 +59,24 @@ async fn run() {
     let client_id = Identity::generate();
     let server_pub = server_id.public();
     let authorized = vec![client_id.identity_id()];
+    let boot = BootKey::for_server(&server_pub);
+    let server_boot = BootKey::for_server(&server_id.public());
 
     let server = async move {
         let mut buf = vec![0u8; 65536];
+        let boot = server_boot;
 
-        // 1. CLIENT_HELLO (plain).
-        let (n, caddr) = server_sock.recv_from(&mut buf).await.unwrap();
-        let hello = Envelope::from_plain(&buf[..n]).unwrap();
+        // 1. CLIENT_HELLO.
+        let (hello, caddr) = recv_msg(&server_sock, &boot).await;
         let mut hs = ServerHandshake::new(server_id, authorized, hello.conn_id);
         hs.recv_client_hello(&hello, true).unwrap();
 
-        // 2. SERVER_HELLO (plain).
+        // 2. SERVER_HELLO.
         let shello = hs.server_hello().unwrap();
-        server_sock
-            .send_to(&shello.to_plain(), caddr)
-            .await
-            .unwrap();
+        send_msg(&server_sock, &boot, &shello, 1, caddr).await;
 
-        // 3. CLIENT_FINISH (plain).
-        let (n, _) = server_sock.recv_from(&mut buf).await.unwrap();
-        let finish = Envelope::from_plain(&buf[..n]).unwrap();
+        // 3. CLIENT_FINISH.
+        let (finish, _) = recv_msg(&server_sock, &boot).await;
         let est = hs.recv_client_finish(&finish).unwrap();
 
         // 4. One morphed DATA packet, echoed back morphed.
@@ -68,7 +88,7 @@ async fn run() {
         assert_eq!(env.msg_type, MsgType::Data);
         let reply = session.seal_data(MsgType::Data, env.payload).unwrap();
         server_sock
-            .send_to(&obf.morph(&reply), caddr)
+            .send_to(&obf.morph(&reply).unwrap(), caddr)
             .await
             .unwrap();
     };
@@ -78,21 +98,14 @@ async fn run() {
         let mut client = ClientHandshake::new(client_id, server_pub, hs_conn_id);
 
         let hello = client.client_hello([0u8; 32]).unwrap();
-        client_sock
-            .send_to(&hello.to_plain(), server_addr)
-            .await
-            .unwrap();
+        send_msg(&client_sock, &boot, &hello, CLIENT_HELLO_DATAGRAMS, server_addr).await;
 
         let mut buf = vec![0u8; 65536];
-        let (n, _) = client_sock.recv_from(&mut buf).await.unwrap();
-        let shello = Envelope::from_plain(&buf[..n]).unwrap();
+        let (shello, _) = recv_msg(&client_sock, &boot).await;
         client.recv_server_hello(&shello).unwrap();
 
         let (finish, est) = client.client_finish().unwrap();
-        client_sock
-            .send_to(&finish.to_plain(), server_addr)
-            .await
-            .unwrap();
+        send_msg(&client_sock, &boot, &finish, 1, server_addr).await;
 
         let mut session = Session::new(est.conn_id, est.k_c2s, est.k_s2c, server_addr, true, 1400);
         let obf = Obfuscator::new(&est.ss_mix, 1);
@@ -100,7 +113,7 @@ async fn run() {
             .seal_data(MsgType::Data, b"tunnel payload".to_vec())
             .unwrap();
         client_sock
-            .send_to(&obf.morph(&sealed), server_addr)
+            .send_to(&obf.morph(&sealed).unwrap(), server_addr)
             .await
             .unwrap();
 

@@ -175,5 +175,3 @@ Link a static build with the libraries `cargo rustc -p pqanon-ffi --lib
 - **The native shells themselves.** The iOS app is written but needs Xcode to
   build; Android and Windows shells don't exist yet. Their packet loops are the
   ones above.
-- **Handshake fragmentation.** The ~6 KB handshake messages rely on IP
-  fragmentation; see the README's known limitations.

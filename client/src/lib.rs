@@ -38,7 +38,6 @@ pub mod redact;
 pub mod router;
 pub mod routing;
 pub mod supervisor;
-pub mod tls_decoy;
 pub mod transport;
 pub mod wire;
 

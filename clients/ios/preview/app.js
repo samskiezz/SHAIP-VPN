@@ -243,7 +243,7 @@ function protectionItems() {
 const LIMITS = [
   ['The VPN server sees your destinations', 'This hides your traffic from your local network and internet provider, not from whoever runs the server.'],
   ['One hop, no mixnet', 'Traffic goes straight to one server. Someone who can watch both sides of it could match traffic by timing.'],
-  ['The connection can be recognized', 'Data packets are disguised, but the handshake that starts a session can be identified by deep packet inspection.'],
+  ['It can still look like a VPN', "To your network every packet is random bytes, but their sizes and timing can still suggest an encrypted tunnel, and anyone with this server's config can recognize its handshakes."],
   ['Websites can still recognize you', 'Logins, cookies and browser fingerprinting work the same with or without a VPN.'],
   ['No content filtering', 'There is no ad, tracker or malware blocking.'],
   ['Not independently audited yet', "Don't rely on it where your safety depends on it."],

@@ -1,12 +1,12 @@
 //! Live TLS 1.3 decoy (§10.2 anti-probing).
 //!
-//! `tls_decoy.rs` answers an unknown UDP datagram with a randomized, well-formed
-//! ServerHello. That defeats a passive classifier, but an *active* prober sends
-//! its own ClientHello and expects a ServerHello derived from it — so a canned
-//! blob is detectable. The real defense is to run an actual TLS server on the
-//! host's TCP port: a prober who scans it completes a genuine handshake against
-//! a genuine certificate and is served a genuine web page, while the PQANON
-//! service lives on the UDP port where its bytes parse as no known protocol.
+//! A prober that scans the host's TCP port completes a genuine TLS handshake
+//! against a genuine certificate and is served a genuine web page, while the
+//! PQANON service lives on the UDP port, where every datagram is random bytes
+//! to anyone without the server's keys and anything the server can't open gets
+//! no answer at all (`obf.rs`, PQANON-OBF/2). Canned answers on the UDP port
+//! would be worse than silence: no real HTTPS server replies to stray UDP with
+//! a TLS record, so the reply itself would mark the host.
 //!
 //! No crypto is hand-rolled: rustls (ring provider) does the TLS, rcgen mints a
 //! self-signed certificate on first run, and rustls-pemfile loads a real

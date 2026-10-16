@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # DPI smoke test (§18.4). The client self-test seals a DATA packet, morphs it
-# (PQANON-OBF/1), and asserts the PQAN magic never appears on the wire. This
-# runs that assertion and fails loudly if obfuscation regresses.
+# (PQANON-OBF/2), and asserts the PQAN magic never appears on the wire. This
+# runs that assertion and fails loudly if obfuscation regresses. The full
+# wire checks (no fragments, no fixed bytes across a flow) are in
+# scripts/e2e/vpn_lab.sh.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

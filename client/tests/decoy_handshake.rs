@@ -12,8 +12,10 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio_rustls::TlsConnector;
 
-fn temp_dir() -> std::path::PathBuf {
-    let p = std::env::temp_dir().join(format!("pqanon-decoy-test-{}", std::process::id()));
+/// A directory of the test's own: the tests run in parallel, and sharing one
+/// let a test trust the certificate the other had just replaced.
+fn temp_dir(test: &str) -> std::path::PathBuf {
+    let p = std::env::temp_dir().join(format!("pqanon-decoy-test-{}-{test}", std::process::id()));
     std::fs::create_dir_all(&p).ok();
     p
 }
@@ -42,7 +44,7 @@ fn trusting_connector(cert_path: &std::path::Path) -> Result<TlsConnector> {
 
 #[tokio::test]
 async fn decoy_completes_handshake_and_serves_html() -> Result<()> {
-    let dir = temp_dir();
+    let dir = temp_dir("html");
     let cert_path = dir.join("cert.pem");
     let key_path = dir.join("key.pem");
     let _ = std::fs::remove_file(&cert_path);
@@ -95,7 +97,7 @@ async fn decoy_completes_handshake_and_serves_html() -> Result<()> {
 
 #[tokio::test]
 async fn decoy_returns_404_for_unknown_path() -> Result<()> {
-    let dir = temp_dir();
+    let dir = temp_dir("404");
     let cert_path = dir.join("cert2.pem");
     let key_path = dir.join("key2.pem");
     let _ = std::fs::remove_file(&cert_path);

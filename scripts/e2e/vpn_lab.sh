@@ -20,7 +20,10 @@
 #  3. the client rides out a graceful server restart and a hard server crash,
 #     keeping its tunnel address;
 #  4. a clean disconnect restores routes, resolver and firewall exactly;
-#  5. with --kill-switch, a crashed client leaks nothing until `pqanon down`.
+#  5. with --kill-switch, a crashed client leaks nothing until `pqanon down`;
+#  6. on the ISP's link the VPN is random bytes: no IP fragments, handshakes
+#     in 1200-byte datagrams, no protocol magic, no byte position that holds
+#     a fixed value across a flow's packets.
 #
 # Needs root, /dev/net/tun, iproute2, nftables, curl and python3, and release
 # builds of pqanon and pqanond. Exit status is the number of failed checks.
@@ -116,6 +119,11 @@ metric() { ip netns exec $S curl -s http://127.0.0.1:9100/metrics | sed -n "s/^$
 # NAT (conntrack) entries in the server's kernel for connections from ADDR.
 flows_from() { ip netns exec $S conntrack -L --orig-src "$1" 2>/dev/null | grep -c . ; }
 
+# What the ISP sees, from the first handshake through the restarts below.
+ip netns exec $R python3 -I "$H/lab_wirecap.py" rc 192.168.77.2 198.51.100.2 443 "$W/wire.json" & CAP_PID=$!; PIDS+=($CAP_PID)
+sleep 0.3
+wire() { python3 -I -c 'import json,sys; v=json.load(open(sys.argv[1])); [v:=v[k] for k in sys.argv[2:]]; print(v)' "$W/wire.json" "$@"; }
+
 check "pqanond starts (TUN + NAT + DNS forwarder)" start_server 1
 check "pqanon run connects" start_client 1
 waitfor "$W/status" "^rtt_ms=[0-9]" 50
@@ -155,6 +163,19 @@ kill -9 $SRV_PID; wait $SRV_PID 2>/dev/null
 check "pqanond restarts after a crash" start_server 3
 check "the client reconnected after a server crash" waitfor "$W/client.1.log" "tunnel up again \(reconnect #2\)" 300
 check "traffic flows again" [ "$(get http://vpn-4.test:8080/)" = "caller=198.51.100.2" ]
+
+echo "  -- what the ISP's link carried (three handshakes, 16 MiB and more)"
+kill -TERM "$CAP_PID"; for _ in $(seq 50); do [ -s "$W/wire.json" ] && break; sleep 0.1; done
+echo "     $(cat "$W/wire.json" 2>/dev/null)"
+check "no IP fragments crossed the ISP" [ "$(wire ip_fragments)" = 0 ]
+check "every datagram fits a 1500-byte path (at most 1452 bytes)" [ "$(wire max_datagram)" -le 1452 ]
+check "three handshakes went in 1200-byte datagrams, both ways" \
+  python3 -I -c 'import json,sys; b=json.load(open(sys.argv[1]))["boot_datagrams"]; sys.exit(not (b["c2s"] >= 9 and b["s2c"] >= 6))' "$W/wire.json"
+check "no datagram carries the protocol magic" [ "$(wire magic_hits)" = 0 ]
+check "no byte position holds a fixed value across the client's packets" \
+  python3 -I -c 'import json,sys; v=json.load(open(sys.argv[1])); n=v["data_packets"]["c2s"]; s=v["max_position_share"]["c2s"]; sys.exit(not (n >= 1000 and s < 0.03))' "$W/wire.json"
+check "no byte position holds a fixed value across the server's packets" \
+  python3 -I -c 'import json,sys; v=json.load(open(sys.argv[1])); n=v["data_packets"]["s2c"]; s=v["max_position_share"]["s2c"]; sys.exit(not (n >= 1000 and s < 0.03))' "$W/wire.json"
 check "the web host never saw the client's own address while connected" bash -c \
   "! tail -n +$((MARK+1)) '$W/http.log' | grep -q '^192.168.77.2 '"
 check "the server's kernel holds NAT state for the client's open connections" [ "$(flows_from "$TUNIP")" -gt 0 ]
