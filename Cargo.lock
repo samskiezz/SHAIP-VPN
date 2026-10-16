@@ -1342,6 +1342,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "pqanon-ffi"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "pqanon-client",
+ "tokio",
+]
+
+[[package]]
 name = "pqanon-server"
 version = "0.1.0"
 dependencies = [

@@ -15,6 +15,7 @@
 //! and necessarily uses libc.
 
 pub mod bloom;
+pub mod client;
 pub mod crl;
 pub mod dataplane;
 pub mod decoy;
@@ -24,6 +25,7 @@ pub mod enroll_client;
 pub mod enrollment;
 pub mod handshake;
 pub mod i18n;
+pub mod icmp;
 pub mod ipparse;
 pub mod kdf;
 pub mod keystore;

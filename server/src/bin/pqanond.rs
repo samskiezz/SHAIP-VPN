@@ -15,6 +15,7 @@
 
 use anyhow::Result;
 use clap::Parser;
+use pqanon::client::SessionInfo;
 use pqanon::handshake::{DevicePolicy, Established, Identity, ServerHandshake};
 use pqanon::obf::Obfuscator;
 use pqanon::transport::Session;
@@ -348,8 +349,12 @@ async fn handle(
             };
             tracing::info!(%src, conn_id = format!("{:#018x}", est.conn_id),
                 client = %hex16(est.peer_id), device = %device_label(&est), "session established");
-            let session = Session::new(est.conn_id, est.k_c2s, est.k_s2c, src, false, 1400);
+            let mut session = Session::new(est.conn_id, est.k_c2s, est.k_s2c, src, false, 1400);
             let obf = Obfuscator::new(&est.ss_mix, 1);
+            // Confirm the session: a sealed ACK proves we derived the same keys
+            // and admitted this client. Echo mode assigns no tunnel address.
+            let ack = session.seal_data(MsgType::Ack, SessionInfo::default().encode())?;
+            socket.send_to(&obf.morph(&ack), src).await?;
             peers.insert(
                 src,
                 PeerState::Established {
@@ -372,6 +377,9 @@ struct TunState {
     peers: HashMap<SocketAddr, PeerState>,
     router: pqanon::router::Router,
     conn_addr: HashMap<u64, SocketAddr>,
+    /// This server's tunnel address and prefix (sent to clients in the ACK).
+    gateway: std::net::Ipv4Addr,
+    prefix_len: u8,
 }
 
 #[cfg(target_os = "linux")]
@@ -394,6 +402,8 @@ async fn run_with_tun(
         peers: HashMap::new(),
         router: pqanon::router::Router::new(),
         conn_addr: HashMap::new(),
+        gateway: ip,
+        prefix_len: prefix,
     }));
 
     // TUN read task: route each kernel packet to its client session by dst IP.
@@ -501,8 +511,16 @@ async fn handle_tun(
             };
             let assigned = st.router.allocate_v4(est.conn_id);
             st.conn_addr.insert(est.conn_id, src);
-            let session = Session::new(est.conn_id, est.k_c2s, est.k_s2c, src, false, 1400);
+            let mut session = Session::new(est.conn_id, est.k_c2s, est.k_s2c, src, false, 1400);
             let obf = Obfuscator::new(&est.ss_mix, 1);
+            // Confirm the session and tell the client the address it was given
+            // (and its gateway), so its TUN matches what we route by.
+            let info = SessionInfo {
+                assigned_v4: assigned,
+                prefix_len: st.prefix_len,
+                gateway_v4: Some(st.gateway),
+            };
+            let ack = obf.morph(&session.seal_data(MsgType::Ack, info.encode())?);
             st.peers.insert(
                 src,
                 PeerState::Established {
@@ -510,6 +528,8 @@ async fn handle_tun(
                     obf: Box::new(obf),
                 },
             );
+            drop(st); // don't hold the lock across the send
+            socket.send_to(&ack, src).await?;
             pqanon::metrics::HANDSHAKES_OK.inc();
             pqanon::metrics::SESSIONS_ESTABLISHED.inc();
             tracing::info!(%src, conn_id = format!("{:#018x}", est.conn_id),

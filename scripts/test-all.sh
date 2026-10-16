@@ -247,6 +247,82 @@ enroll_e2e() {
   [ "$bad" -eq 0 ]
 }
 
+# --- The client facade + C ABI against a live, device-bound pqanond ---
+tunnel_e2e() {
+  cargo build --release -q -p pqanon-client --bin pqanon -p pqanon-server -p pqanon-ffi || return 1
+  ( cd control-plane && go build -o bin/control-plane . ) || return 1
+  local BIN=control-plane/bin/control-plane CLI=./target/release/pqanon D=./target/release/pqanond
+  local B=http://127.0.0.1:8093 KD W ok=0 bad=0 CP=0 SRV=0
+  KD=$(mktemp -d); W=$(mktemp -d)
+  pass() { ok=$((ok+1)); }; fail() { echo "  ✗ $1"; bad=$((bad+1)); }
+  j() { python3 -c "import sys,json;print(json.load(sys.stdin)$1)" 2>/dev/null; }
+  stop() { [ "$1" != 0 ] && { kill "$1" 2>/dev/null; wait "$1" 2>/dev/null; }; return 0; }
+  up() { for _ in $(seq 50); do grep -q "listening" "$1" 2>/dev/null && return 0; sleep 0.1; done; return 1; }
+  mkcfg() { # <name> <port> <identity> [<cert>]
+    { echo '[client]'; echo "identity = \"$3\""; [ -n "${4:-}" ] && echo "device_cert = \"$4\""
+      echo '[server]'; echo "address = \"127.0.0.1:$2\""
+      echo "server_ml_dsa_pub = \"$PQ\""; echo "server_ed_pub = \"$ED\""; } > "$W/$1.toml"
+  }
+
+  # The C program, compiled against the header and linked with the static library.
+  cc -std=c11 -Wall -Wextra -Werror -O2 -Iffi/include ffi/tests/smoke.c target/release/libpqanon_ffi.a \
+     -lgcc_s -lutil -lrt -lpthread -lm -ldl -lc -o "$W/smoke" && pass || fail "C smoke test did not compile/link"
+
+  KEY_DIR="$KD" LISTEN_ADDR=:8093 "$BIN" >/tmp/tunnel_cp.log 2>&1 & CP=$!
+  curl -fsS --retry 40 --retry-delay 1 --retry-connrefused "$B/health" >/dev/null || { stop $CP; rm -rf "$KD" "$W"; return 1; }
+  local KEYS AUTH CA CRLPUB TOK URL DEV PQ ED OUT
+  KEYS=$(curl -s "$B/api/enroll/keys")
+  AUTH=$(echo "$KEYS" | j "['enroll_authority_pub']"); CA=$(echo "$KEYS" | j "['device_ca_pub']"); CRLPUB=$(echo "$KEYS" | j "['crl_pub']")
+  curl -s -X POST "$B/api/auth/register" -H 'Content-Type: application/json' -d '{"email":"tun@x.co","password":"password123"}' >/dev/null
+  TOK=$(curl -s -X POST "$B/api/auth/login" -H 'Content-Type: application/json' -d '{"email":"tun@x.co","password":"password123"}' | j "['token']")
+  URL=$(curl -s -X POST "$B/api/enroll/issue" -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' -d '{}' | j "['url']")
+  $CLI enroll "$URL" --server "$B" --authority-key "$AUTH" --ca-key "$CA" --identity "$W/dev.id" --name e2e >/dev/null 2>&1 && pass || fail "enroll"
+  DEV=$(curl -s "$B/api/devices" -H "Authorization: Bearer $TOK" | j "[0]['id']")
+
+  # A device-bound pqanond: admits only certificates from this CA, refuses CRL-listed devices.
+  $D --identity "$W/srv.id" --print-public > "$W/pins" 2>/dev/null
+  PQ=$(sed -n 's/^server_ml_dsa_pub *= *"\(.*\)"/\1/p' "$W/pins"); ED=$(sed -n 's/^server_ed_pub *= *"\(.*\)"/\1/p' "$W/pins")
+  $D --identity "$W/srv.id" --listen 127.0.0.1:47201 --device-ca "$CA" --crl-url "$B/api/crl" --crl-pub "$CRLPUB" \
+     --crl-refresh-secs 1 >/tmp/tunnel_srv.log 2>&1 & SRV=$!
+  up /tmp/tunnel_srv.log || fail "device-bound pqanond did not start"
+  mkcfg enrolled 47201 "$W/dev.id" "$W/dev.id.cert"
+  mkcfg stranger 47201 "$W/stranger.id"
+
+  # 1. The enrolled device is admitted and packets flow (Rust facade).
+  $CLI probe --config "$W/enrolled.toml" --count 3 2>/dev/null | grep -q "probe OK: 3/3" && pass || fail "enrolled device not admitted"
+  # 2. The same through the C ABI (also verifies the enrollment link locally).
+  OUT=$("$W/smoke" 127.0.0.1:47201 "$PQ" "$ED" "$W/dev.id" "$W/dev.id.cert" "$URL" "$AUTH" 2>&1 || true)
+  echo "$OUT" | grep -q "FFI OK" && pass || fail "C ABI: $OUT"
+  # 3. An unenrolled identity is not admitted.
+  OUT=$($CLI probe --config "$W/stranger.toml" --count 1 --timeout-ms 1500 2>&1 || true)
+  echo "$OUT" | grep -q "did not confirm the session" && pass || fail "unenrolled identity admitted: $OUT"
+  # 4. Revoke the device: once pqanond refreshes the signed CRL, it is refused.
+  curl -s -X DELETE "$B/api/devices/$DEV" -H "Authorization: Bearer $TOK" >/dev/null
+  sleep 2.5
+  OUT=$($CLI probe --config "$W/enrolled.toml" --count 1 --timeout-ms 1500 2>&1 || true)
+  echo "$OUT" | grep -q "did not confirm the session" && pass || fail "revoked device still admitted: $OUT"
+  stop $SRV; SRV=0
+
+  # 5. TUN mode: the server's kernel answers ICMP sent through the tunnel.
+  if [ "$(id -u)" = "0" ] && [ -e /dev/net/tun ]; then
+    $D --identity "$W/srv.id" --listen 127.0.0.1:47202 --tun pqanon-e2e0 --tun-addr 10.77.0.1/24 \
+       >/tmp/tunnel_tun.log 2>&1 & SRV=$!
+    up /tmp/tunnel_tun.log || fail "TUN-mode pqanond did not start"
+    mkcfg tun 47202 "$W/tun.id"
+    OUT=$($CLI probe --config "$W/tun.toml" --count 3 2>/dev/null || true)
+    if echo "$OUT" | grep -q "assigned 10.77.0." && echo "$OUT" | grep -q "probe OK: 3/3" \
+       && [ "$(echo "$OUT" | grep -c "ICMP echo reply from the server's kernel")" = 3 ]; then pass
+    else fail "TUN-mode kernel ICMP: $OUT"; fi
+    stop $SRV; SRV=0
+  else
+    echo "  (TUN-mode kernel ICMP check skipped: needs root + /dev/net/tun)"
+  fi
+
+  stop $CP; rm -rf "$KD" "$W"
+  echo "  tunnel E2E: $ok checks passed, $bad failed"
+  [ "$bad" -eq 0 ]
+}
+
 echo "PQ-ANON master test battery — $(date -u +%FT%TZ)"
 
 stage "rust: build (workspace)"              rust_build
@@ -288,6 +364,11 @@ if command -v python3 >/dev/null; then
   stage "enroll: one-click enrollment + revocation (x-lang)" enroll_e2e
 else
   skip  "enroll: one-click enrollment + revocation (x-lang)" "needs python3"
+fi
+if command -v python3 >/dev/null && command -v cc >/dev/null; then
+  stage "tunnel: client facade + C ABI vs device-bound pqanond" tunnel_e2e
+else
+  skip  "tunnel: client facade + C ABI vs device-bound pqanond" "needs python3 + a C compiler"
 fi
 
 printf '\n════════════════════════════════════════════════════════\n SUMMARY\n────────────────────────────────────────────────────────\n'

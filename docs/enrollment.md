@@ -185,14 +185,14 @@ visible in the bytes on the wire.
   device list, revocation, revocation visible in the Rust-verified CRL, and the
   CRL refused under the wrong pin.
 
+- Battery stage `tunnel` runs admission over the real network: a device enrolled
+  through the Go control plane is admitted by a live device-bound `pqanond`, via
+  both `pqanon probe` and the C ABI. An unenrolled identity is refused. After
+  revocation the same device is refused once the daemon refreshes its CRL. See
+  [client-api.md](client-api.md).
+
 ## Not done here
 
-- **Network end-to-end of tunnel admission.** Device admission is tested
-  in-process, through the real handshake state machines. `pqanond`'s CRL startup
-  has been checked by hand: it refuses to start when the CRL is unreachable and
-  loads it when healthy. A battery stage that connects a real client to a live
-  `pqanond` (admitted, then revoked and refused) needs a userspace client, and
-  lands with the `pqanon::client` facade.
 - **Native deep-link handlers** (iOS/macOS/Windows/Android/Linux registration of
   the `pqanon://` scheme) and **QR scanning** are per-OS and cannot be compiled,
   signed, or tested in this Linux container. Link parsing and verification are

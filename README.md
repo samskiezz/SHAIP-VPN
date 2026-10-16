@@ -16,7 +16,8 @@ ChaCha20-Poly1305, HKDF/HMAC-SHA256, Argon2id).
 |-----------|----------|-------|-------------|
 | `pqanon` client lib (`wire`, `handshake`, `obf`, `transport`, `mix`, `routing`, `kdf`) | Rust | **Working** | 25 unit tests |
 | Full hybrid handshake (client **and** server sides) | Rust | **Working** | handshake + tunnel tests |
-| `pqanon` CLI (`keygen`, `selftest`, `run`) | Rust | **Working** | `pqanon selftest` |
+| `pqanon` CLI (`keygen`, `selftest`, `run`, `probe`, `enroll`, `crl`) | Rust | **Working** | `pqanon selftest` + battery E2E stages |
+| `pqanon::client` facade + `pqanon-ffi` C ABI for native shells | Rust + C | **Working** | loopback tests vs real `pqanond`; C program linked static + dynamic ([docs/client-api.md](docs/client-api.md)) |
 | `pqanond` tunnel daemon (UDP handshake responder + echo) | Rust | **Working** | `tests/tunnel.rs` over real UDP |
 | `pqanon-mixd` mix node (peels + forwards onion cells) | Rust | **Working** | mix round-trip tests |
 | Control plane `PQANON-CP/1` (auth, nodes, connections, CRL) | Go | **Working** | `go test`, live curl |
@@ -147,8 +148,14 @@ remove functionality — they correct or complete it:
 These are deliberately not yet wired; the library primitives they build on are
 done and tested:
 
-- TUN read/write loop on both ends; `pqanon run` binds transport but does not yet
-  forward IP.
+- Both ends forward IP. The server's TUN path is proven end to end: the battery
+  sends ICMP through the tunnel and gets the server kernel's real echo replies.
+  `pqanon run` pumps a TUN device through the same `pqanon::client` facade, and
+  TUN I/O itself is proven by `tun-test`. What is not automated is a full
+  client-TUN ↔ server-TUN run on one host, which needs two network namespaces.
+- Handshake messages are sent once, with no retransmission: a lost datagram
+  means a timeout and a reconnect. Idempotent SERVER_HELLO caching is the
+  intended fix.
 - Handshake messages are currently plain-framed (not morphed): the morph key
   derives from `ss_mix`, which doesn't exist until the handshake completes. A
   bootstrap morph key (from the pinned server key) is the intended fix.

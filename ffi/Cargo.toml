@@ -1,0 +1,16 @@
+[package]
+name = "pqanon-ffi"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "C ABI over pqanon::client for native PQ-ANON front ends (include/pqanon.h)"
+
+[lib]
+name = "pqanon_ffi"
+# staticlib for iOS/macOS shells, cdylib for Android (JNI) and Windows, rlib for Rust tests.
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[dependencies]
+pqanon = { path = "../client", package = "pqanon-client" }
+tokio  = { version = "1", features = ["rt-multi-thread", "net", "time", "macros"] }
+hex    = "0.4"

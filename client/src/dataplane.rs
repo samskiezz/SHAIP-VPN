@@ -24,20 +24,31 @@ impl DataPlane {
 
     /// IP packet read from TUN → sealed + morphed wire datagram to send.
     pub fn outbound(&mut self, ip_packet: &[u8]) -> anyhow::Result<Vec<u8>> {
-        let sealed = self.session.seal_data(MsgType::Data, ip_packet.to_vec())?;
-        Ok(self.obf.morph(&sealed))
+        self.seal(MsgType::Data, ip_packet.to_vec())
     }
 
     /// Wire datagram received → IP packet to write to TUN. Returns `None` for a
     /// cover or control packet (nothing to deliver), and errors on a replayed or
     /// malformed datagram.
     pub fn inbound(&mut self, wire: &[u8]) -> anyhow::Result<Option<Vec<u8>>> {
-        let sealed = self.obf.demorph(wire)?;
-        let env = self.session.open_data(&sealed)?;
+        let env = self.open(wire)?;
         match env.msg_type {
             MsgType::Data => Ok(Some(env.payload)),
             _ => Ok(None), // cover / control: not delivered to the TUN device
         }
+    }
+
+    /// Seal + morph a message of any type (control messages such as the
+    /// session ACK travel exactly like DATA).
+    pub fn seal(&mut self, msg_type: MsgType, payload: Vec<u8>) -> anyhow::Result<Vec<u8>> {
+        let sealed = self.session.seal_data(msg_type, payload)?;
+        Ok(self.obf.morph(&sealed))
+    }
+
+    /// Demorph + open a datagram of any type.
+    pub fn open(&mut self, wire: &[u8]) -> anyhow::Result<crate::wire::Envelope> {
+        let sealed = self.obf.demorph(wire)?;
+        self.session.open_data(&sealed)
     }
 
     /// The peer's current UDP address (where outbound datagrams go).
