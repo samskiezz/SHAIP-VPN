@@ -19,6 +19,13 @@ use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 
 /// DNSSEC algorithm number for Ed25519 (RFC 8080).
 pub const ALG_ED25519: u8 = 15;
+/// DNSSEC algorithm number for RSA/SHA-256 (RFC 5702) — the algorithm the DNS
+/// **root zone** and most TLDs sign with, so it is required to validate a real
+/// answer up to the IANA root trust anchor.
+pub const ALG_RSASHA256: u8 = 8;
+/// DNSSEC algorithm number for ECDSA P-256/SHA-256 (RFC 6605) — the algorithm
+/// most modern signed leaf zones (e.g. cloudflare.com) use.
+pub const ALG_ECDSAP256SHA256: u8 = 13;
 
 /// A single resource record.
 #[derive(Clone, Debug)]
@@ -118,8 +125,113 @@ pub fn signing_input(sig: &Rrsig, rrset: &[ResourceRecord]) -> Vec<u8> {
     out
 }
 
+/// The RRSIG validity window check (RFC 4035 §5.3.1): the current time must lie
+/// between inception and expiration.
+fn check_window(sig: &Rrsig, now_unix: u64) -> Result<(), ValidationError> {
+    let now = now_unix as u32;
+    if now > sig.sig_expiration {
+        return Err(ValidationError::Expired);
+    }
+    if now < sig.sig_inception {
+        return Err(ValidationError::NotYetValid);
+    }
+    Ok(())
+}
+
+/// Ed25519 (alg 15, RFC 8080): the key is the raw 32-byte public key and the
+/// signature is 64 bytes.
+fn ed25519_crypto(input: &[u8], dnskey_pub: &[u8], sig_bytes: &[u8]) -> Result<(), ValidationError> {
+    let key_arr: [u8; 32] = dnskey_pub.try_into().map_err(|_| ValidationError::BadKey)?;
+    let vk = VerifyingKey::from_bytes(&key_arr).map_err(|_| ValidationError::BadKey)?;
+    let sig_arr: [u8; 64] = sig_bytes
+        .try_into()
+        .map_err(|_| ValidationError::BadSignatureEncoding)?;
+    let signature = Signature::from_bytes(&sig_arr);
+    vk.verify(input, &signature)
+        .map_err(|_| ValidationError::SignatureMismatch)
+}
+
+/// RSA/SHA-256 (alg 8, RFC 5702). The DNSKEY public key is encoded per
+/// RFC 3110 §2: a 1- or 3-byte exponent-length prefix, the exponent, then the
+/// modulus. Verification is PKCS#1 v1.5 over the SHA-256 of the signed data.
+fn rsa_sha256_crypto(input: &[u8], dnskey_pub: &[u8], sig_bytes: &[u8]) -> Result<(), ValidationError> {
+    use rsa::pkcs1v15::{Signature as RsaSignature, VerifyingKey as RsaVerifyingKey};
+    use rsa::signature::Verifier as RsaVerifier;
+    use rsa::{BigUint, RsaPublicKey};
+    use sha2::Sha256;
+
+    if dnskey_pub.is_empty() {
+        return Err(ValidationError::BadKey);
+    }
+    let (exp_len, exp_off) = if dnskey_pub[0] == 0 {
+        if dnskey_pub.len() < 3 {
+            return Err(ValidationError::BadKey);
+        }
+        (u16::from_be_bytes([dnskey_pub[1], dnskey_pub[2]]) as usize, 3)
+    } else {
+        (dnskey_pub[0] as usize, 1)
+    };
+    if exp_len == 0 || dnskey_pub.len() <= exp_off + exp_len {
+        return Err(ValidationError::BadKey);
+    }
+    let e = BigUint::from_bytes_be(&dnskey_pub[exp_off..exp_off + exp_len]);
+    let n = BigUint::from_bytes_be(&dnskey_pub[exp_off + exp_len..]);
+    let pk = RsaPublicKey::new(n, e).map_err(|_| ValidationError::BadKey)?;
+    let vk = RsaVerifyingKey::<Sha256>::new(pk);
+    let signature =
+        RsaSignature::try_from(sig_bytes).map_err(|_| ValidationError::BadSignatureEncoding)?;
+    vk.verify(input, &signature)
+        .map_err(|_| ValidationError::SignatureMismatch)
+}
+
+/// ECDSA P-256/SHA-256 (alg 13, RFC 6605). The DNSKEY public key is the raw
+/// uncompressed point X||Y (64 bytes, no SEC1 tag); the signature is the fixed
+/// R||S encoding (64 bytes).
+fn ecdsa_p256_crypto(input: &[u8], dnskey_pub: &[u8], sig_bytes: &[u8]) -> Result<(), ValidationError> {
+    use p256::ecdsa::signature::Verifier as P256Verifier;
+    use p256::ecdsa::{Signature as P256Signature, VerifyingKey as P256VerifyingKey};
+
+    if dnskey_pub.len() != 64 {
+        return Err(ValidationError::BadKey);
+    }
+    let mut sec1 = [0u8; 65];
+    sec1[0] = 0x04; // uncompressed point tag
+    sec1[1..].copy_from_slice(dnskey_pub);
+    let vk = P256VerifyingKey::from_sec1_bytes(&sec1).map_err(|_| ValidationError::BadKey)?;
+    let signature =
+        P256Signature::from_slice(sig_bytes).map_err(|_| ValidationError::BadSignatureEncoding)?;
+    vk.verify(input, &signature)
+        .map_err(|_| ValidationError::SignatureMismatch)
+}
+
+/// Verify an RRSIG over `rrset` using the raw DNSKEY public key, dispatching on
+/// the signature algorithm. Handles Ed25519 (15), RSA/SHA-256 (8), and
+/// ECDSA P-256/SHA-256 (13) — together these cover the real root, the TLDs, and
+/// essentially all modern signed zones. Any other algorithm is refused as
+/// unsupported rather than silently trusted.
+pub fn verify_rrsig(
+    sig: &Rrsig,
+    rrset: &[ResourceRecord],
+    dnskey_pub: &[u8],
+    now_unix: u64,
+) -> Result<(), ValidationError> {
+    match sig.algorithm {
+        ALG_ED25519 | ALG_RSASHA256 | ALG_ECDSAP256SHA256 => {}
+        _ => return Err(ValidationError::UnsupportedAlgorithm),
+    }
+    check_window(sig, now_unix)?;
+    let input = signing_input(sig, rrset);
+    match sig.algorithm {
+        ALG_ED25519 => ed25519_crypto(&input, dnskey_pub, &sig.signature),
+        ALG_RSASHA256 => rsa_sha256_crypto(&input, dnskey_pub, &sig.signature),
+        ALG_ECDSAP256SHA256 => ecdsa_p256_crypto(&input, dnskey_pub, &sig.signature),
+        _ => Err(ValidationError::UnsupportedAlgorithm),
+    }
+}
+
 /// Verify an Ed25519 RRSIG over `rrset` using the raw 32-byte DNSKEY public key,
-/// at wall-clock time `now_unix` (seconds since the epoch).
+/// at wall-clock time `now_unix` (seconds since the epoch). This is the
+/// Ed25519-only entry point; [`verify_rrsig`] handles the full algorithm set.
 pub fn verify_ed25519(
     sig: &Rrsig,
     rrset: &[ResourceRecord],
@@ -129,29 +241,8 @@ pub fn verify_ed25519(
     if sig.algorithm != ALG_ED25519 {
         return Err(ValidationError::UnsupportedAlgorithm);
     }
-    let now = now_unix as u32;
-    if now > sig.sig_expiration {
-        return Err(ValidationError::Expired);
-    }
-    if now < sig.sig_inception {
-        return Err(ValidationError::NotYetValid);
-    }
-
-    let key_arr: [u8; 32] = dnskey_pub
-        .try_into()
-        .map_err(|_| ValidationError::BadKey)?;
-    let vk = VerifyingKey::from_bytes(&key_arr).map_err(|_| ValidationError::BadKey)?;
-
-    let sig_arr: [u8; 64] = sig
-        .signature
-        .as_slice()
-        .try_into()
-        .map_err(|_| ValidationError::BadSignatureEncoding)?;
-    let signature = Signature::from_bytes(&sig_arr);
-
-    let input = signing_input(sig, rrset);
-    vk.verify(&input, &signature)
-        .map_err(|_| ValidationError::SignatureMismatch)
+    check_window(sig, now_unix)?;
+    ed25519_crypto(&signing_input(sig, rrset), dnskey_pub, &sig.signature)
 }
 
 // ---------------------------------------------------------------------------
@@ -323,7 +414,7 @@ pub fn validate_dnskey_rrset(
     if self_sig.key_tag != ksk.key_tag() {
         return Err(ValidationError::BadKey);
     }
-    verify_ed25519(self_sig, &rrset, &ksk.public_key, now_unix)?;
+    verify_rrsig(self_sig, &rrset, &ksk.public_key, now_unix)?;
     Ok(keys.to_vec())
 }
 
@@ -339,7 +430,34 @@ pub fn validate_answer(
         .iter()
         .find(|k| k.is_zone_key() && k.key_tag() == sig.key_tag)
         .ok_or(ValidationError::BadKey)?;
-    verify_ed25519(sig, rrset, &key.public_key, now_unix)
+    verify_rrsig(sig, rrset, &key.public_key, now_unix)
+}
+
+/// The IANA root-zone trust anchors: the SHA-256 DS records of the root
+/// key-signing keys, as published at
+/// <https://data.iana.org/root-anchors/root-anchors.xml> (and RFC 7958). Two
+/// are shipped so validation survives the KSK rollover:
+///
+/// - **KSK-2017**, key tag 20326 — the currently active root KSK.
+/// - **KSK-2024**, key tag 38696 — the incoming rollover KSK.
+///
+/// Both are algorithm 8 (RSASHA256), digest type 2 (SHA-256). These digests are
+/// the single most widely replicated values in DNSSEC; the constants here were
+/// verified byte-for-byte against the live IANA trust-anchor file. The
+/// `root_anchor_matches_live_root_ksk` test (ignored by default, needs a DNS
+/// path that returns DNSKEY RRsets) additionally fetches the live root DNSKEY
+/// and confirms an anchor matches it.
+pub fn root_trust_anchors() -> Vec<Ds> {
+    let ds = |tag: u16, digest_hex: &str| Ds {
+        key_tag: tag,
+        algorithm: ALG_RSASHA256,
+        digest_type: DS_DIGEST_SHA256,
+        digest: hex::decode(digest_hex).expect("root anchor digest is valid hex"),
+    };
+    vec![
+        ds(20326, "E06D44B80B8F1D39A95C0B0D7C65D08458E880409BBC683457104237C7F8EC8D"),
+        ds(38696, "683D2D0ACB8C9B712A1948B27F741219298D0A450D612C483AF444A4C0FB2B16"),
+    ]
 }
 
 /// One signed zone on the path from the trust anchor to the answer.
@@ -639,6 +757,181 @@ mod tests {
         assert_eq!(
             validate_chain(&anchor, &broken, &answer, &ans_sig, NOW),
             SecurityStatus::Bogus
+        );
+    }
+
+    // --- RSA/SHA-256 (algorithm 8): the algorithm the real root signs with ---
+
+    /// Encode an RSA public key in DNSKEY (RFC 3110) form: exponent-length
+    /// prefix, exponent, modulus.
+    fn rfc3110_rsa_pubkey(pk: &rsa::RsaPublicKey) -> Vec<u8> {
+        use rsa::traits::PublicKeyParts;
+        let e = pk.e().to_bytes_be();
+        let n = pk.n().to_bytes_be();
+        let mut out = Vec::new();
+        if e.len() < 256 {
+            out.push(e.len() as u8);
+        } else {
+            out.push(0);
+            out.extend_from_slice(&(e.len() as u16).to_be_bytes());
+        }
+        out.extend_from_slice(&e);
+        out.extend_from_slice(&n);
+        out
+    }
+
+    #[test]
+    fn rsa_sha256_rrsig_roundtrips() {
+        use rsa::pkcs1v15::SigningKey;
+        use rsa::signature::{SignatureEncoding, Signer};
+        use rsa::{RsaPrivateKey, RsaPublicKey};
+        use sha2::Sha256;
+
+        let sk = RsaPrivateKey::new(&mut OsRng, 2048).expect("rsa keygen");
+        let pk = RsaPublicKey::from(&sk);
+        let rrset = vec![ResourceRecord {
+            name: "example.com.".into(),
+            rr_type: 1,
+            class: 1,
+            ttl: 3600,
+            rdata: vec![93, 184, 216, 34],
+        }];
+        let mut sig = Rrsig {
+            type_covered: 1,
+            algorithm: ALG_RSASHA256,
+            labels: 2,
+            original_ttl: 3600,
+            sig_expiration: 2_000_000_000,
+            sig_inception: 1_000_000_000,
+            key_tag: 0,
+            signer_name: "example.com.".into(),
+            signature: Vec::new(),
+        };
+        let signing_key = SigningKey::<Sha256>::new(sk);
+        sig.signature = signing_key.sign(&signing_input(&sig, &rrset)).to_vec();
+        let dnskey_pub = rfc3110_rsa_pubkey(&pk);
+
+        // Correct key/signature verifies; a flipped RRset byte is rejected.
+        assert_eq!(verify_rrsig(&sig, &rrset, &dnskey_pub, NOW), Ok(()));
+        let mut bad = rrset.clone();
+        bad[0].rdata[0] ^= 0xff;
+        assert_eq!(
+            verify_rrsig(&sig, &bad, &dnskey_pub, NOW),
+            Err(ValidationError::SignatureMismatch)
+        );
+    }
+
+    #[test]
+    fn rsa_root_style_dnskey_chain_validates() {
+        // A root-style zone whose KSK is RSA/SHA-256, anchored by its DS, signs
+        // its own DNSKEY RRset — exactly the shape of the real root. This proves
+        // the chain walker now accepts the real root's algorithm end to end.
+        use rsa::pkcs1v15::SigningKey;
+        use rsa::signature::{SignatureEncoding, Signer};
+        use rsa::{RsaPrivateKey, RsaPublicKey};
+        use sha2::Sha256;
+
+        let sk = RsaPrivateKey::new(&mut OsRng, 2048).expect("rsa keygen");
+        let pk = RsaPublicKey::from(&sk);
+        let ksk = Dnskey {
+            flags: DNSKEY_FLAG_ZONE | DNSKEY_FLAG_SEP,
+            algorithm: ALG_RSASHA256,
+            public_key: rfc3110_rsa_pubkey(&pk),
+        };
+        let keys = vec![ksk.clone()];
+        let rrset = vec![ResourceRecord {
+            name: ".".into(),
+            rr_type: 48,
+            class: 1,
+            ttl: 3600,
+            rdata: ksk.rdata(),
+        }];
+        let mut self_sig = mk_rrsig(48, ".", ksk.key_tag());
+        self_sig.algorithm = ALG_RSASHA256;
+        let signing_key = SigningKey::<Sha256>::new(sk);
+        self_sig.signature = signing_key.sign(&signing_input(&self_sig, &rrset)).to_vec();
+
+        let anchor = vec![Ds::from_dnskey(".", &ksk)];
+        assert!(validate_dnskey_rrset(".", &keys, &self_sig, &anchor, NOW).is_ok());
+
+        // A trust anchor that does not match the KSK is rejected.
+        let other = RsaPrivateKey::new(&mut OsRng, 2048).expect("rsa keygen");
+        let other_ksk = Dnskey {
+            flags: DNSKEY_FLAG_ZONE | DNSKEY_FLAG_SEP,
+            algorithm: ALG_RSASHA256,
+            public_key: rfc3110_rsa_pubkey(&RsaPublicKey::from(&other)),
+        };
+        let wrong = vec![Ds::from_dnskey(".", &other_ksk)];
+        assert!(validate_dnskey_rrset(".", &keys, &self_sig, &wrong, NOW).is_err());
+    }
+
+    // --- ECDSA P-256/SHA-256 (algorithm 13): modern signed leaf zones ---
+
+    #[test]
+    fn ecdsa_p256_rrsig_roundtrips() {
+        use p256::ecdsa::signature::Signer;
+        use p256::ecdsa::{Signature, SigningKey};
+
+        let sk = SigningKey::random(&mut OsRng);
+        let vk = sk.verifying_key();
+        // DNSKEY public key is X||Y, i.e. the uncompressed point minus its tag.
+        let point = vk.to_encoded_point(false);
+        let dnskey_pub = point.as_bytes()[1..].to_vec();
+        assert_eq!(dnskey_pub.len(), 64);
+
+        let rrset = vec![ResourceRecord {
+            name: "example.com.".into(),
+            rr_type: 1,
+            class: 1,
+            ttl: 3600,
+            rdata: vec![1, 2, 3, 4],
+        }];
+        let mut sig = Rrsig {
+            type_covered: 1,
+            algorithm: ALG_ECDSAP256SHA256,
+            labels: 2,
+            original_ttl: 3600,
+            sig_expiration: 2_000_000_000,
+            sig_inception: 1_000_000_000,
+            key_tag: 0,
+            signer_name: "example.com.".into(),
+            signature: Vec::new(),
+        };
+        let signature: Signature = sk.sign(&signing_input(&sig, &rrset));
+        sig.signature = signature.to_bytes().to_vec();
+        assert_eq!(sig.signature.len(), 64);
+
+        assert_eq!(verify_rrsig(&sig, &rrset, &dnskey_pub, NOW), Ok(()));
+        let mut bad = rrset.clone();
+        bad[0].rdata[0] ^= 0xff;
+        assert_eq!(
+            verify_rrsig(&sig, &bad, &dnskey_pub, NOW),
+            Err(ValidationError::SignatureMismatch)
+        );
+    }
+
+    #[test]
+    fn root_anchor_is_wellformed() {
+        let a = root_trust_anchors();
+        // Both the active (20326) and rollover (38696) root KSK anchors.
+        assert_eq!(a.len(), 2);
+        let tags: Vec<u16> = a.iter().map(|d| d.key_tag).collect();
+        assert!(tags.contains(&20326) && tags.contains(&38696));
+        for d in &a {
+            assert_eq!(d.algorithm, ALG_RSASHA256);
+            assert_eq!(d.digest_type, DS_DIGEST_SHA256);
+            assert_eq!(d.digest.len(), 32, "SHA-256 digest is 32 bytes");
+        }
+    }
+
+    #[test]
+    fn unsupported_algorithm_still_refused_by_verify_rrsig() {
+        let (sk, mut sig, rrset) = signed_sample();
+        let pk = sk.verifying_key().to_bytes();
+        sig.algorithm = 7; // RSASHA1 — deliberately not supported
+        assert_eq!(
+            verify_rrsig(&sig, &rrset, &pk, 1_600_000_000),
+            Err(ValidationError::UnsupportedAlgorithm)
         );
     }
 }

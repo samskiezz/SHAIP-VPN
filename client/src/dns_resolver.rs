@@ -629,4 +629,53 @@ mod tests {
         assert_eq!(ans2.security, SecurityStatus::Bogus);
         assert!(ans2.addrs.is_empty());
     }
+
+    /// LIVE: fetch the real root-zone DNSKEY RRset from 1.1.1.1 and prove the
+    /// shipped [`root_trust_anchors`](crate::dnssec::root_trust_anchors) digest
+    /// is the genuine live root KSK — i.e. the anchor is real, not fabricated —
+    /// and that the RSA/SHA-256 verifier validates the root's self-signature.
+    /// Ignored by default because it needs outbound DNS; run with
+    /// `cargo test --lib -- --ignored dns_resolver`.
+    #[tokio::test]
+    #[ignore]
+    async fn root_anchor_matches_live_root_ksk() {
+        use crate::dnssec::{root_trust_anchors, validate_dnskey_rrset, Dnskey};
+
+        let transport = UdpDnsTransport::new("1.1.1.1:53".parse().unwrap());
+        let query = build_query(0x7a7a, ".", TYPE_DNSKEY);
+        let raw = transport.query(&query).await.expect("live DNS query");
+        let msg = DnsMessage::parse(&raw).expect("parse root DNSKEY response");
+        assert_eq!(msg.rcode, 0, "root DNSKEY query rcode");
+
+        // Parse the DNSKEY RRset and its self-RRSIG from the answer section.
+        let keys: Vec<Dnskey> = msg
+            .answers
+            .iter()
+            .filter(|r| r.rr_type == TYPE_DNSKEY)
+            .map(|r| Dnskey::from_rdata(&r.rdata).expect("DNSKEY rdata"))
+            .collect();
+        assert!(!keys.is_empty(), "root published no DNSKEYs");
+        let self_sig = covering_rrsig(&msg.answers, TYPE_DNSKEY)
+            .expect("root DNSKEY RRset carries an RRSIG");
+
+        // The shipped anchor must match one of the live root KSKs by digest.
+        let anchor = root_trust_anchors();
+        let matched = keys
+            .iter()
+            .any(|k| anchor.iter().any(|ds| ds.matches(".", k)));
+        assert!(
+            matched,
+            "shipped root anchor (tag 20326) does not match any live root KSK"
+        );
+
+        // And the full DNSKEY-RRset validation (DS match + RSA self-signature)
+        // must succeed against the shipped anchor — proving the RSA verifier
+        // handles the real root key.
+        let now = now_unix();
+        let validated = validate_dnskey_rrset(".", &keys, &self_sig, &anchor, now);
+        assert!(
+            validated.is_ok(),
+            "root DNSKEY RRset failed to validate against shipped anchor: {validated:?}"
+        );
+    }
 }

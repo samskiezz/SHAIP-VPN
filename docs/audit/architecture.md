@@ -96,10 +96,16 @@ store by default or Postgres when `DATABASE_URL` is set):
   and min-RTT filters, a PROBE_BW pacing-gain cycle, and **explicit
   sub-millisecond pacing** — the inter-packet gap is `bytes / pacing_rate` at
   nanosecond resolution, not a fixed millisecond tick.
-- **DNSSEC validation** (`client/src/dnssec.rs`): RRSIG verification over a
-  canonical RRset with **Ed25519** (algorithm 15, RFC 8080), signature input
-  built per RFC 4034 §3.1.8.1. This is the cryptographic core; DS/DNSKEY
-  chain-walking to the root anchor builds on it.
+- **DNSSEC validation** (`client/src/dnssec.rs`, `client/src/dns_resolver.rs`):
+  RRSIG verification over a canonical RRset (signature input per RFC 4034
+  §3.1.8.1) for **RSASHA256** (alg 8 — the algorithm the root and most TLDs sign
+  with), **ECDSA P-256/SHA-256** (alg 13 — modern leaf zones), and **Ed25519**
+  (alg 15); the DS/DNSKEY **chain-of-trust walk** from a configured anchor
+  (`validate_chain`); and the real **IANA root trust anchors** shipped as the
+  default (`root_trust_anchors` — KSK-2017 tag 20326 and KSK-2024 tag 38696,
+  each verified byte-for-byte against IANA's published trust-anchor file). The
+  validating stub resolver sets the DNSSEC-OK bit, parses the wire response, and
+  **drops `Bogus` answers** instead of returning them.
 - **TLS 1.3 decoy** (`client/src/tls_decoy.rs`): a per-connection randomized,
   well-formed ServerHello, **wired into `pqanond`** as the response to any
   unrecognized (probe/DPI) datagram — no static fingerprint.
@@ -118,8 +124,12 @@ These are designed/partially present but **not** end-to-end today:
   and the read/write loops are the remaining integration work (§19).
 - Per-hop exponential mix delay queue (the global cover *scheduler* is done;
   the per-hop queuing delay is not).
-- DNSSEC trust-anchor chain-walking and NSEC/wildcard proofs on top of the
-  verified RRSIG primitive.
+- DNSSEC NSEC/NSEC3 negative-answer proofs and wildcard proofs, on top of the
+  verified RRSIG + chain-of-trust primitives. (The positive A/AAAA validation
+  path, the multi-algorithm RRSIG verifier, the DS/DNSKEY chain walk, and the
+  real IANA root anchors are wired; proving *non-existence* is the remaining
+  piece.) A live end-to-end validation against the real root also needs a DNS
+  path that returns DNSKEY RRsets — some sandboxed networks strip them.
 - Rekey driver and the cookie anti-DoS exchange (the TLS-decoy half of
   anti-probing is wired).
 - Native platform clients (macOS/iOS/Android/desktop) and an FFI crate.

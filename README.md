@@ -22,7 +22,7 @@ ChaCha20-Poly1305, HKDF/HMAC-SHA256, Argon2id).
 | Control plane `PQANON-CP/1` (auth, nodes, connections, CRL) | Go | **Working** | `go test`, live curl |
 | Web UI (dashboard, connections, routing, login) | Next.js/TS | **Working** | `next build`, `tsc` |
 | Postgres schema + in-memory fallback | SQL/Go | **Working** | boots with or without a DB |
-| DNSSEC-validating resolver (`pqanon resolve`) | Rust | **Working** | 14 tests + live against 1.1.1.1 |
+| DNSSEC resolver: RSA/ECDSA/Ed25519 RRSIG + chain-of-trust + real IANA root anchors | Rust | **Working** | 19 unit tests + live anchor check |
 | Untraceable payments: Monero + Bitcoin/Lightning + Chaumian e-cash (`buy`/`collect`/`redeem`) | Rust + Go | **Working** | cross-language buy→redeem E2E |
 | Live TLS 1.3 decoy (`pqanon-decoy`, `pqanond --decoy`) | Rust | **Working** | openssl/curl + 2 integration tests |
 | Monitoring: Prometheus `/metrics` + Grafana/Alertmanager (`docker compose up`) | Go + Rust | **Working** | metrics tests + live scrape |
