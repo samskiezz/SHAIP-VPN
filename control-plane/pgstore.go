@@ -46,21 +46,27 @@ func NewPgStore(ctx context.Context, url string) (*PgStore, error) {
 func (s *PgStore) Close() { s.pool.Close() }
 
 func (s *PgStore) CreateUser(ctx context.Context, u *User) error {
-	_, err := s.pool.Exec(ctx,
-		`INSERT INTO users (email, password_hash, identity_id, ml_dsa_pub, ed_pub)
-		 VALUES ($1, $2, $3, $4, $5)`,
-		u.Email, u.PasswordHash, u.IdentityID, u.MlDsaPub, u.EdPub)
+	if u.Role == "" {
+		u.Role = "user"
+	}
+	u.CreatedAt = day(time.Now())
+	err := s.pool.QueryRow(ctx,
+		`INSERT INTO users (account_number, password_hash, role, created_at)
+		 VALUES ($1, $2, $3, $4) RETURNING id`,
+		u.AccountNumber, u.PasswordHash, u.Role, u.CreatedAt).Scan(&u.ID)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		return ErrAccountNumberTaken
+	}
 	return err
 }
 
-func (s *PgStore) GetUserByEmail(ctx context.Context, email string) (*User, error) {
+const userColumns = `id, account_number, password_hash, COALESCE(role,'user'), created_at`
+
+func scanUser(row pgx.Row) (*User, error) {
 	var u User
-	err := s.pool.QueryRow(ctx,
-		`SELECT id, email, password_hash, identity_id, ml_dsa_pub, ed_pub,
-		        COALESCE(role,'user'), created_at
-		 FROM users WHERE email = $1`, email).
-		Scan(&u.ID, &u.Email, &u.PasswordHash, &u.IdentityID, &u.MlDsaPub, &u.EdPub, &u.Role, &u.CreatedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
+	err := row.Scan(&u.ID, &u.AccountNumber, &u.PasswordHash, &u.Role, &u.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) || isBadUUID(err) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
@@ -69,90 +75,19 @@ func (s *PgStore) GetUserByEmail(ctx context.Context, email string) (*User, erro
 	return &u, nil
 }
 
+func (s *PgStore) GetUserByAccount(ctx context.Context, number string) (*User, error) {
+	return scanUser(s.pool.QueryRow(ctx,
+		`SELECT `+userColumns+` FROM users WHERE account_number = $1`, number))
+}
+
 func (s *PgStore) GetUserByID(ctx context.Context, id string) (*User, error) {
-	var u User
-	err := s.pool.QueryRow(ctx,
-		`SELECT id, email, password_hash, identity_id, ml_dsa_pub, ed_pub,
-		        COALESCE(role,'user'), created_at
-		 FROM users WHERE id = $1`, id).
-		Scan(&u.ID, &u.Email, &u.PasswordHash, &u.IdentityID, &u.MlDsaPub, &u.EdPub, &u.Role, &u.CreatedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	return &u, nil
+	return scanUser(s.pool.QueryRow(ctx, `SELECT `+userColumns+` FROM users WHERE id = $1`, id))
 }
 
 func (s *PgStore) CountUsers(ctx context.Context) (int, error) {
 	var n int
 	err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM users`).Scan(&n)
 	return n, err
-}
-
-func (s *PgStore) ListRoutingRules(ctx context.Context, userID string) ([]RoutingRule, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT id, user_id, domain, route, priority
-		 FROM routing_rules WHERE user_id = $1
-		 ORDER BY priority DESC, domain`, userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	out := make([]RoutingRule, 0)
-	for rows.Next() {
-		var r RoutingRule
-		if err := rows.Scan(&r.ID, &r.UserID, &r.Domain, &r.Route, &r.Priority); err != nil {
-			return nil, err
-		}
-		out = append(out, r)
-	}
-	return out, rows.Err()
-}
-
-func (s *PgStore) CreateRoutingRule(ctx context.Context, r *RoutingRule) error {
-	return s.pool.QueryRow(ctx,
-		`INSERT INTO routing_rules (user_id, domain, route, priority)
-		 VALUES ($1, $2, $3, $4) RETURNING id`,
-		r.UserID, r.Domain, r.Route, r.Priority).Scan(&r.ID)
-}
-
-func (s *PgStore) DeleteRoutingRule(ctx context.Context, id, userID string) error {
-	tag, err := s.pool.Exec(ctx,
-		`DELETE FROM routing_rules WHERE id = $1 AND user_id = $2`, id, userID)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotFound
-	}
-	return nil
-}
-
-func (s *PgStore) GetSettings(ctx context.Context, userID string) ([]byte, error) {
-	var raw []byte
-	err := s.pool.QueryRow(ctx,
-		`SELECT settings FROM user_settings WHERE user_id = $1`, userID).Scan(&raw)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	return raw, nil
-}
-
-func (s *PgStore) SetSettings(ctx context.Context, userID string, raw []byte) error {
-	// Pass as text so Postgres parses it into the JSONB column.
-	_, err := s.pool.Exec(ctx,
-		`INSERT INTO user_settings (user_id, settings, updated_at)
-		 VALUES ($1, $2, NOW())
-		 ON CONFLICT (user_id) DO UPDATE
-		 SET settings = EXCLUDED.settings, updated_at = NOW()`,
-		userID, string(raw))
-	return err
 }
 
 // nodeColumns is the node projection shared by every node query.
@@ -238,48 +173,6 @@ func (s *PgStore) DeleteNode(ctx context.Context, id string) error {
 	return nil
 }
 
-func (s *PgStore) ListActiveConnections(ctx context.Context) ([]Connection, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT id, user_id, node_id, route, bytes_in, bytes_out, started_at, ended_at
-		 FROM connections WHERE ended_at IS NULL ORDER BY started_at DESC`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var out []Connection
-	for rows.Next() {
-		var c Connection
-		var ended *time.Time
-		if err := rows.Scan(&c.ID, &c.UserID, &c.NodeID, &c.Route,
-			&c.BytesIn, &c.BytesOut, &c.StartedAt, &ended); err != nil {
-			return nil, err
-		}
-		c.EndedAt = ended
-		out = append(out, c)
-	}
-	return out, rows.Err()
-}
-
-func (s *PgStore) CountActiveConnections(ctx context.Context) (int, error) {
-	var n int
-	err := s.pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM connections WHERE ended_at IS NULL`).Scan(&n)
-	return n, err
-}
-
-func (s *PgStore) EndConnection(ctx context.Context, id string) error {
-	tag, err := s.pool.Exec(ctx,
-		`UPDATE connections SET ended_at = NOW() WHERE id = $1 AND ended_at IS NULL`, id)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotFound
-	}
-	return nil
-}
-
 func (s *PgStore) GetNode(ctx context.Context, id string) (*Node, error) {
 	n, err := scanNode(s.pool.QueryRow(ctx, `SELECT `+nodeColumns+` FROM nodes WHERE id = $1`, id))
 	if errors.Is(err, pgx.ErrNoRows) || isBadUUID(err) {
@@ -300,28 +193,12 @@ func isFKViolation(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == "23503"
 }
 
-func (s *PgStore) GetConnection(ctx context.Context, id string) (*Connection, error) {
-	var c Connection
-	var ended *time.Time
-	err := s.pool.QueryRow(ctx,
-		`SELECT id, user_id, node_id, route, bytes_in, bytes_out, started_at, ended_at
-		 FROM connections WHERE id = $1`, id).
-		Scan(&c.ID, &c.UserID, &c.NodeID, &c.Route, &c.BytesIn, &c.BytesOut, &c.StartedAt, &ended)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	c.EndedAt = ended
-	return &c, nil
-}
-
 func (s *PgStore) CreateAPIKey(ctx context.Context, k *APIKey) error {
+	k.CreatedAt = day(time.Now())
 	return s.pool.QueryRow(ctx,
-		`INSERT INTO api_keys (user_id, name, key_prefix, key_hash)
-		 VALUES ($1, $2, $3, $4) RETURNING id, created_at`,
-		k.UserID, k.Name, k.Prefix, k.KeyHash).Scan(&k.ID, &k.CreatedAt)
+		`INSERT INTO api_keys (user_id, name, key_prefix, key_hash, created_at)
+		 VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+		k.UserID, k.Name, k.Prefix, k.KeyHash, k.CreatedAt).Scan(&k.ID)
 }
 
 func (s *PgStore) ListAPIKeys(ctx context.Context, userID string) ([]APIKey, error) {
@@ -360,35 +237,34 @@ func (s *PgStore) AppendAudit(ctx context.Context, e *AuditEntry) error {
 	if e.UserID != "" {
 		uid = e.UserID
 	}
+	e.At = day(time.Now())
 	return s.pool.QueryRow(ctx,
-		`INSERT INTO audit_log (user_id, action, detail, ip)
-		 VALUES ($1, $2, $3, $4) RETURNING id, at`,
-		uid, e.Action, e.Detail, e.IP).Scan(&e.ID, &e.At)
+		`INSERT INTO audit_log (user_id, action, detail, at)
+		 VALUES ($1, $2, $3, $4) RETURNING id`,
+		uid, e.Action, e.Detail, e.At).Scan(&e.ID)
 }
 
 func (s *PgStore) ListAudit(ctx context.Context, userID string, limit int) ([]AuditEntry, error) {
 	if limit <= 0 || limit > 1000 {
 		limit = 100
 	}
-	var rows pgx.Rows
-	var err error
+	out := make([]AuditEntry, 0)
 	if userID == "" {
-		rows, err = s.pool.Query(ctx,
-			`SELECT id, COALESCE(user_id::text,''), action, COALESCE(detail,''), COALESCE(ip,''), at
-			 FROM audit_log ORDER BY at DESC LIMIT $1`, limit)
-	} else {
-		rows, err = s.pool.Query(ctx,
-			`SELECT id, COALESCE(user_id::text,''), action, COALESCE(detail,''), COALESCE(ip,''), at
-			 FROM audit_log WHERE user_id = $1 ORDER BY at DESC LIMIT $2`, userID, limit)
+		return out, nil
+	}
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, user_id::text, action, COALESCE(detail,''), at
+		 FROM audit_log WHERE user_id = $1 ORDER BY id DESC LIMIT $2`, userID, limit)
+	if isBadUUID(err) {
+		return out, nil
 	}
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]AuditEntry, 0, limit)
 	for rows.Next() {
 		var e AuditEntry
-		if err := rows.Scan(&e.ID, &e.UserID, &e.Action, &e.Detail, &e.IP, &e.At); err != nil {
+		if err := rows.Scan(&e.ID, &e.UserID, &e.Action, &e.Detail, &e.At); err != nil {
 			return nil, err
 		}
 		out = append(out, e)
@@ -399,14 +275,15 @@ func (s *PgStore) ListAudit(ctx context.Context, userID string, limit int) ([]Au
 func (s *PgStore) CreatePayOrder(ctx context.Context, o *PayOrder) error {
 	bt, _ := json.Marshal(o.BlindedTokens)
 	bs, _ := json.Marshal(o.BlindSigs)
+	coarsenOrder(o, time.Now())
 	return s.pool.QueryRow(ctx,
 		`INSERT INTO pay_orders
 		   (denom, rail, address, meta, amount_atomic, amount_label, uri, status,
-		    blinded_tokens, blind_sigs, expires_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-		 RETURNING id, created_at`,
+		    blinded_tokens, blind_sigs, created_at, paid_at, expires_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+		 RETURNING id`,
 		o.Denom, o.Rail, o.Address, o.Meta, int64(o.AmountAtomic), o.AmountLabel, o.URI,
-		o.Status, string(bt), string(bs), o.ExpiresAt).Scan(&o.ID, &o.CreatedAt)
+		o.Status, string(bt), string(bs), o.CreatedAt, o.PaidAt, o.ExpiresAt).Scan(&o.ID)
 }
 
 func (s *PgStore) GetPayOrder(ctx context.Context, id string) (*PayOrder, error) {
@@ -433,6 +310,10 @@ func (s *PgStore) GetPayOrder(ctx context.Context, id string) (*PayOrder, error)
 
 func (s *PgStore) UpdatePayOrder(ctx context.Context, o *PayOrder) error {
 	bs, _ := json.Marshal(o.BlindSigs)
+	if o.PaidAt != nil {
+		paid := day(*o.PaidAt)
+		o.PaidAt = &paid
+	}
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE pay_orders
 		   SET address = $2, meta = $3, amount_label = $4, uri = $5,
@@ -451,8 +332,8 @@ func (s *PgStore) UpdatePayOrder(ctx context.Context, o *PayOrder) error {
 func (s *PgStore) SpendToken(ctx context.Context, denom, nonceHash string) error {
 	// Atomic double-spend guard: the unique PK makes a second insert a no-op.
 	tag, err := s.pool.Exec(ctx,
-		`INSERT INTO spent_tokens (denom, nonce_hash) VALUES ($1, $2)
-		 ON CONFLICT (denom, nonce_hash) DO NOTHING`, denom, nonceHash)
+		`INSERT INTO spent_tokens (denom, nonce_hash, spent_at) VALUES ($1, $2, $3)
+		 ON CONFLICT (denom, nonce_hash) DO NOTHING`, denom, nonceHash, day(time.Now()))
 	if err != nil {
 		return err
 	}
@@ -485,7 +366,7 @@ func (s *PgStore) CreateEnrollToken(ctx context.Context, t *EnrollToken) error {
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO enroll_tokens (token_id, user_id, issued_at, expires_at)
 		 VALUES ($1, $2, $3, $4)`,
-		t.TokenID, t.UserID, t.IssuedAt, t.ExpiresAt)
+		t.TokenID, t.UserID, day(t.IssuedAt), dayCeil(t.ExpiresAt))
 	return err
 }
 
@@ -519,14 +400,15 @@ func (s *PgStore) ClaimEnrollment(ctx context.Context, tokenID string, now time.
 	case now.After(expires):
 		return ErrTokenExpired
 	}
+	today := day(now)
 	if _, err := tx.Exec(ctx,
-		`UPDATE enroll_tokens SET claimed_at = $2 WHERE token_id = $1`, tokenID, now); err != nil {
+		`UPDATE enroll_tokens SET claimed_at = $2 WHERE token_id = $1`, tokenID, today); err != nil {
 		return err
 	}
-	err = tx.QueryRow(ctx,
-		`INSERT INTO devices (id, user_id, name, ed_pub, token_id, cert_expires)
-		 VALUES ($1, $2, $3, $4, $5, $6) RETURNING created_at`,
-		d.ID, d.UserID, d.Name, d.EdPub, tokenID, d.CertExpires).Scan(&d.CreatedAt)
+	_, err = tx.Exec(ctx,
+		`INSERT INTO devices (id, user_id, name, ed_pub, token_id, cert_expires, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		d.ID, d.UserID, d.Name, d.EdPub, tokenID, d.CertExpires, today)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "devices_ed_pub_key" {
@@ -538,6 +420,7 @@ func (s *PgStore) ClaimEnrollment(ctx context.Context, tokenID string, now time.
 		return err
 	}
 	d.TokenID = tokenID
+	d.CreatedAt = today
 	d.EdPubHex = hex.EncodeToString(d.EdPub)
 	return nil
 }
@@ -550,8 +433,8 @@ func (s *PgStore) ListDevices(ctx context.Context, userID string) ([]Device, err
 
 func (s *PgStore) RevokeDevice(ctx context.Context, id, userID string) error {
 	tag, err := s.pool.Exec(ctx,
-		`UPDATE devices SET revoked_at = COALESCE(revoked_at, NOW())
-		 WHERE id = $1 AND user_id = $2`, id, userID)
+		`UPDATE devices SET revoked_at = COALESCE(revoked_at, $3)
+		 WHERE id = $1 AND user_id = $2`, id, userID, day(time.Now()))
 	if err != nil {
 		return err
 	}

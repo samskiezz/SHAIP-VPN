@@ -6,11 +6,15 @@
 //! 2. loads (or creates) this device's persistent identity;
 //! 3. claims the token, proving possession of the identity's Ed25519 key;
 //! 4. verifies the returned certificate against the **pinned** device-CA key,
-//!    and that it binds exactly this device's key to the token's account,
-//!    before storing it (0600).
+//!    and that it binds exactly this device's key, before storing it (0600).
+//!    The certificate names no account ([`enrollment::WITHHELD_ACCOUNT`]).
 //!
 //! The pins ship with the client build or config. Fetching them from the server
 //! at enrollment time would let whoever answers that request vouch for itself.
+//!
+//! The only description of the device that is sent is a platform label
+//! ([`platform_label`]): never a host name or a device name, which often carry
+//! the owner's name.
 
 use crate::enrollment::{self, DeviceCert, EnrollClaims};
 use anyhow::{anyhow, bail, Context, Result};
@@ -31,6 +35,33 @@ pub fn parse_pin(hexkey: &str, what: &str) -> Result<VerifyingKey> {
         .and_then(|b| b.try_into().ok())
         .ok_or_else(|| anyhow!("{what} must be 64 hex characters (an Ed25519 public key)"))?;
     VerifyingKey::from_bytes(&raw).map_err(|_| anyhow!("{what} is not a valid Ed25519 key"))
+}
+
+/// The platform labels the control plane keeps for a device (see its
+/// `deviceLabel`). Anything else is stored as "device".
+const PLATFORM_LABELS: [&str; 6] = ["iPhone", "iPad", "Android", "Windows", "Linux", "Mac"];
+
+/// Reduce a requested device name to the platform it names ("Alex's iPhone"
+/// → "iPhone"), or "device". The name itself never leaves this machine.
+pub fn platform_label(name: &str) -> &'static str {
+    let name = name.to_lowercase();
+    PLATFORM_LABELS
+        .iter()
+        .find(|l| name.contains(&l.to_lowercase()))
+        .copied()
+        .unwrap_or("device")
+}
+
+/// This machine's platform label (the default device name).
+pub fn this_platform() -> &'static str {
+    match std::env::consts::OS {
+        "linux" => "Linux",
+        "macos" => "Mac",
+        "windows" => "Windows",
+        "android" => "Android",
+        "ios" => "iPhone",
+        _ => "device",
+    }
 }
 
 /// Where the certificate is stored by default: next to the identity file.
@@ -65,7 +96,7 @@ pub fn enroll(
         "token": token,
         "device_pub": hex::encode(device_pub),
         "pop": hex::encode(identity.sign_enrollment_claim(&token)),
-        "name": name,
+        "name": platform_label(name),
     });
     let url = format!("{}/api/enroll/claim", server.trim_end_matches('/'));
     let resp = match ureq::post(&url).send_json(body) {
@@ -89,11 +120,34 @@ pub fn enroll(
     if cert.device_pub != device_pub {
         bail!("the returned certificate binds a different key than this device's");
     }
-    if cert.account != claims.account {
+    // Current control planes withhold the account; an older one names it, and
+    // then it must be the token's.
+    if cert.account != enrollment::WITHHELD_ACCOUNT && cert.account != claims.account {
         bail!("the returned certificate names a different account than the enrollment token");
     }
 
     let cert_path = cert_out.map(Path::to_path_buf).unwrap_or_else(|| default_cert_path(identity_path));
     crate::secure_write::write_private(&cert_path, cert_text.as_bytes())?;
     Ok(Enrolled { claims, cert, cert_path })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_a_platform_label_is_ever_sent() {
+        for (name, want) in [
+            ("Alex's iPhone", "iPhone"),
+            ("johns-macbook-pro", "Mac"),
+            ("Pixel 8 (Android)", "Android"),
+            ("linux", "Linux"),
+            ("DESKTOP-4F2A9", "device"),
+            ("alex-thinkpad", "device"),
+            ("", "device"),
+        ] {
+            assert_eq!(platform_label(name), want, "{name}");
+        }
+        assert!(PLATFORM_LABELS.contains(&this_platform()) || this_platform() == "device");
+    }
 }

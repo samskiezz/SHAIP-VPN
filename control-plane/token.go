@@ -16,11 +16,10 @@ import (
 // Token is a compact EdDSA-signed bearer token: base64url(claims).base64url(sig)
 // where sig = Ed25519(server_key, base64url(claims)). This is the control
 // plane's own auth token (PQANON-CP/1); it is distinct from the tunnel's
-// handshake authentication.
+// handshake authentication. It carries an opaque subject and an expiry, and
+// nothing about the person.
 type Token struct {
 	Subject   string `json:"sub"`
-	Email     string `json:"email"`
-	IssuedAt  int64  `json:"iat"`
 	ExpiresAt int64  `json:"exp"`
 }
 
@@ -68,20 +67,14 @@ func NewTokenSignerWithSeed(ttl time.Duration, seed []byte) (*TokenSigner, error
 
 var b64 = base64.RawURLEncoding
 
-func (t *TokenSigner) Issue(sub, email string) (string, error) {
-	return t.IssueWithTTL(sub, email, t.ttl)
+func (t *TokenSigner) Issue(sub string) (string, error) {
+	return t.IssueUntil(sub, time.Now().Add(t.ttl))
 }
 
-// IssueWithTTL issues a token valid for a custom lifetime — used for paid VPN
-// access grants, whose duration is the purchased plan's, not the default TTL.
-func (t *TokenSigner) IssueWithTTL(sub, email string, ttl time.Duration) (string, error) {
-	now := time.Now()
-	claims := Token{
-		Subject:   sub,
-		Email:     email,
-		IssuedAt:  now.Unix(),
-		ExpiresAt: now.Add(ttl).Unix(),
-	}
+// IssueUntil issues a token valid until exp — used for paid VPN access grants,
+// whose lifetime is the purchased plan's, not the default TTL.
+func (t *TokenSigner) IssueUntil(sub string, exp time.Time) (string, error) {
+	claims := Token{Subject: sub, ExpiresAt: exp.Unix()}
 	payload, err := json.Marshal(claims)
 	if err != nil {
 		return "", err

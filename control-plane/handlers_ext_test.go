@@ -11,11 +11,8 @@ import (
 // adminUser creates an admin account and returns its id + token.
 func adminUser(t *testing.T, srv *Server, store *MemStore) (string, string) {
 	t.Helper()
-	u := &User{Email: "admin@t.co", PasswordHash: "x", IdentityID: "id-admin", Role: "admin"}
-	if err := store.CreateUser(context.Background(), u); err != nil {
-		t.Fatalf("create admin: %v", err)
-	}
-	tok, _ := srv.tokens.Issue(u.ID, u.Email)
+	u := newUser(t, store, "admin")
+	tok, _ := srv.tokens.Issue(u.ID)
 	return u.ID, tok
 }
 
@@ -73,9 +70,8 @@ func TestAPIKeyLifecycle(t *testing.T) {
 func TestAPIKeyUserIsolation(t *testing.T) {
 	srv, h, store := newTestServer(t)
 	_, tokA := authedUser(t, srv, store)
-	ub := &User{Email: "b2@t.co", PasswordHash: "x", IdentityID: "id-b2"}
-	_ = store.CreateUser(context.Background(), ub)
-	tokB, _ := srv.tokens.Issue(ub.ID, ub.Email)
+	ub := newUser(t, store, "")
+	tokB, _ := srv.tokens.Issue(ub.ID)
 
 	rec := do(t, h, "POST", "/api/apikeys", tokA, map[string]any{"name": "a-key"})
 	var created map[string]any
@@ -110,7 +106,7 @@ func TestAdminStatsRoleGate(t *testing.T) {
 	}
 	var s map[string]any
 	_ = json.Unmarshal(rec.Body.Bytes(), &s)
-	for _, k := range []string{"users", "nodes_online", "nodes_total", "connections_active", "bandwidth_gb_live"} {
+	for _, k := range []string{"users", "nodes_online", "nodes_total"} {
 		if _, ok := s[k]; !ok {
 			t.Fatalf("admin stats missing %q: %v", k, s)
 		}
@@ -155,7 +151,7 @@ func TestPublicStatusNoAuth(t *testing.T) {
 	}
 }
 
-func TestNodeAndConnectionDetail(t *testing.T) {
+func TestNodeDetail(t *testing.T) {
 	srv, h, store := newTestServer(t)
 	_, tok := authedUser(t, srv, store)
 
@@ -174,9 +170,5 @@ func TestNodeAndConnectionDetail(t *testing.T) {
 	// Missing node → 404.
 	if rec := do(t, h, "GET", "/api/nodes/does-not-exist", tok, nil); rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 for missing node, got %d", rec.Code)
-	}
-	// Missing connection → 404.
-	if rec := do(t, h, "GET", "/api/connections/nope", tok, nil); rec.Code != http.StatusNotFound {
-		t.Fatalf("expected 404 for missing connection, got %d", rec.Code)
 	}
 }

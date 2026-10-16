@@ -67,10 +67,18 @@ type EnrollClaims struct {
 	OneTime   bool // advisory: the control plane should accept it at most once
 }
 
+// WithheldAccount is the account field of every device certificate the control
+// plane issues. A tunnel server admits a device because its key is certified
+// and not revoked; it never needs to know whose device it is, and if the field
+// named the account, any server (staked nodes are run by third parties) could
+// link one customer's devices to each other. The field stays in the v1 format
+// so certificates issued before this keep verifying.
+const WithheldAccount = "-"
+
 // CertClaims is what a device certificate binds.
 type CertClaims struct {
 	DeviceID  [16]byte
-	Account   string
+	Account   string            // WithheldAccount in certificates the control plane issues
 	DevicePub ed25519.PublicKey // the device's own identity public key (32 bytes)
 	IssuedAt  time.Time
 	ExpiresAt time.Time

@@ -1,5 +1,9 @@
-// Command control-plane implements PQANON-CP/1: the REST API for nodes,
-// sessions, routing, settings, auth, and the signed CRL (§14).
+// Command control-plane implements PQANON-CP/1: the REST API for accounts,
+// devices, nodes, payments, staking, and the signed CRL (§14).
+//
+// It keeps nothing that identifies a customer (docs/privacy-policy.md):
+// accounts are random numbers, requests are not logged, and no address is
+// stored or written to a log.
 //
 // Storage selects automatically: if DATABASE_URL is set it uses Postgres
 // (db/schema.sql), otherwise an in-memory store so the server boots standalone.
@@ -21,6 +25,9 @@ import (
 )
 
 func main() {
+	// Before anything can log: every line passes through the address redactor.
+	log.SetOutput(&redactingWriter{w: os.Stderr})
+
 	addr := envOr("LISTEN_ADDR", ":8080")
 
 	store, label := openStore()
@@ -110,6 +117,18 @@ func main() {
 
 	go srv.watchBonds(context.Background(), time.Duration(atoiOr("STAKE_WATCH_SECS", 30))*time.Second)
 
+	// Metrics get their own listener, private by default: on the public API
+	// anyone could poll the order and redemption counters and watch for the
+	// moment someone pays or redeems.
+	metricsAddr := envOr("METRICS_ADDR", "127.0.0.1:9102")
+	go func() {
+		ms := &http.Server{Addr: metricsAddr, Handler: metricsRoutes(), ReadHeaderTimeout: 5 * time.Second}
+		log.Printf("metrics on %s/metrics", metricsAddr)
+		if err := ms.ListenAndServe(); err != nil {
+			log.Printf("metrics listener stopped: %v", err)
+		}
+	}()
+
 	log.Printf("PQANON-CP/1 control plane listening on %s (store: %s)", addr, label)
 	srvHTTP := &http.Server{
 		Addr:              addr,
@@ -121,11 +140,12 @@ func main() {
 
 // routes builds the HTTP handler. Extracted from main so tests can exercise
 // the real router, middleware stack, and auth group.
+//
+// There is no request logger, and nothing reads the client's address or a
+// forwarding header: a request leaves no record of who made it. (Recoverer
+// prints a panic's value and stack, never the request.)
 func routes(srv *Server, label string) http.Handler {
 	r := chi.NewRouter()
-	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
-	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(30 * time.Second))
 	r.Use(corsMiddleware)
@@ -134,7 +154,6 @@ func routes(srv *Server, label string) http.Handler {
 	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "store": label})
 	})
-	r.Get("/metrics", handleMetrics) // Prometheus scrape target
 
 	r.Route("/api", func(r chi.Router) {
 		r.Post("/auth/register", srv.handleRegister)
@@ -166,19 +185,11 @@ func routes(srv *Server, label string) http.Handler {
 			r.Post("/nodes", srv.handleCreateNode)
 			r.Get("/nodes/{id}", srv.handleGetNode)
 			r.Delete("/nodes/{id}", srv.handleDeleteNode)
-			r.Get("/connections", srv.handleListConnections)
-			r.Get("/connections/{id}", srv.handleGetConnection)
-			r.Delete("/connections/{id}", srv.handleDisconnect)
 			r.Get("/mixnet", srv.handleMixnetStatus)
 			r.Get("/dashboard", srv.handleDashboard)
 			r.Get("/stats", srv.handleStats)
 			r.Get("/admin/stats", srv.handleAdminStats)
 			r.Get("/me", srv.handleMe)
-			r.Get("/routing", srv.handleListRouting)
-			r.Post("/routing", srv.handleCreateRouting)
-			r.Delete("/routing/{id}", srv.handleDeleteRouting)
-			r.Get("/settings", srv.handleGetSettings)
-			r.Put("/settings", srv.handleUpdateSettings)
 			r.Get("/apikeys", srv.handleListAPIKeys)
 			r.Post("/apikeys", srv.handleCreateAPIKey)
 			r.Delete("/apikeys/{id}", srv.handleDeleteAPIKey)
@@ -190,6 +201,13 @@ func routes(srv *Server, label string) http.Handler {
 			r.Post("/stake/{id}/unbond", srv.handleStakeUnbond)
 		})
 	})
+	return r
+}
+
+// metricsRoutes is the metrics listener's handler: /metrics and nothing else.
+func metricsRoutes() http.Handler {
+	r := chi.NewRouter()
+	r.Get("/metrics", handleMetrics) // Prometheus scrape target
 	return r
 }
 

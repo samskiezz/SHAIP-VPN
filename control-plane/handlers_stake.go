@@ -288,7 +288,7 @@ func (s *Server) handleStakeSlash(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = s.store.AppendAudit(r.Context(), &AuditEntry{
-		UserID: n.OwnerID, Action: "stake.slash", Detail: n.ID, IP: r.RemoteAddr,
+		UserID: n.OwnerID, Action: "stake.slash", Detail: n.ID,
 	})
 	mStake.WithLabelValues("slashed").Inc()
 	writeJSON(w, http.StatusOK, map[string]any{

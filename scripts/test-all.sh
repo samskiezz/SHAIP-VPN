@@ -37,6 +37,18 @@ rust_tunsmoke(){ ./target/release/pqanon tun-test; }
 # --- Go ---
 go_all() { ( cd control-plane && go build ./... && go vet ./... && go test ./... ); }
 
+# Accounts are anonymous: register takes only a password and answers with a
+# random account number, which is the login.
+cp_register() { # BASE → prints the new account number
+  curl -s -X POST "$1/api/auth/register" -H 'Content-Type: application/json' -d '{"password":"password123"}' \
+    | python3 -c "import sys,json;print(json.load(sys.stdin)['account_number'])" 2>/dev/null
+}
+cp_login() { # BASE ACCOUNT [PASSWORD] → prints a bearer token
+  curl -s -X POST "$1/api/auth/login" -H 'Content-Type: application/json' \
+    -d "{\"account_number\":\"$2\",\"password\":\"${3:-password123}\"}" \
+    | python3 -c "import sys,json;print(json.load(sys.stdin)['token'])" 2>/dev/null
+}
+
 # --- HSM: control-plane signing keys inside a real PKCS#11 token (SoftHSM2) ---
 SOFTHSM_MODULE=/usr/lib/softhsm/libsofthsm2.so
 hsm_pkcs11() {
@@ -65,9 +77,10 @@ hsm_pkcs11() {
   local PID=$!
   curl -fsS --retry 40 --retry-delay 1 --retry-connrefused "$B/health" >/dev/null || { kill $PID; rm -rf "$D"; unset SOFTHSM2_CONF; return 1; }
   grep -q "signing keys: token=pkcs11:" /tmp/hsm_cp.log && ok=$((ok+1)) || { echo "  ✗ token key not from the HSM"; bad=$((bad+1)); }
-  chk "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/api/auth/register" -H 'Content-Type: application/json' -d '{"email":"hsm@x.co","password":"password123"}')" 201 "register"
-  local TOK CRLPUB
-  TOK=$(curl -s -X POST "$B/api/auth/login" -H 'Content-Type: application/json' -d '{"email":"hsm@x.co","password":"password123"}' | python3 -c "import sys,json;print(json.load(sys.stdin)['token'])" 2>/dev/null)
+  local TOK CRLPUB ACCT
+  ACCT=$(cp_register "$B")
+  [ ${#ACCT} -eq 19 ] && ok=$((ok+1)) || { echo "  ✗ register: no account number"; bad=$((bad+1)); }
+  TOK=$(cp_login "$B" "$ACCT")
   chk "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOK" "$B/api/me")" 200 "HSM-signed token accepted"
   CRLPUB=$(curl -s "$B/api/crl" | python3 -c "import sys,json;print(json.load(sys.stdin)['ed25519_pub'])" 2>/dev/null)
   [ ${#CRLPUB} -eq 64 ] && ok=$((ok+1)) || { echo "  ✗ CRL pub missing"; bad=$((bad+1)); }
@@ -78,9 +91,9 @@ hsm_pkcs11() {
   env "${ENVS[@]}" "$BIN" >/tmp/hsm_cp2.log 2>&1 &
   PID=$!
   curl -fsS --retry 40 --retry-delay 1 --retry-connrefused "$B/health" >/dev/null || { kill $PID; rm -rf "$D"; unset SOFTHSM2_CONF; return 1; }
-  # /api/routing needs only a valid token (the in-memory user table is wiped by
+  # /api/apikeys needs only a valid token (the in-memory user table is wiped by
   # the restart, so /api/me would 404 even though auth passed).
-  chk "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOK" "$B/api/routing")" 200 "token survives restart (HSM key persisted)"
+  chk "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOK" "$B/api/apikeys")" 200 "token survives restart (HSM key persisted)"
   chk "$(curl -s "$B/api/crl" | python3 -c "import sys,json;print(json.load(sys.stdin)['ed25519_pub'])" 2>/dev/null)" "$CRLPUB" "CRL key stable across restart"
   kill $PID 2>/dev/null; wait $PID 2>/dev/null
 
@@ -122,17 +135,22 @@ cp_e2e() {
   curl -fsS --retry 40 --retry-delay 1 --retry-connrefused "$B/health" >/dev/null || { kill $PID; return 1; }
   chk() { if [ "$1" = "$2" ]; then ok=$((ok+1)); else echo "  ✗ $3: got $1 want $2"; bad=$((bad+1)); fi; }
 
-  chk "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/api/auth/register" -H 'Content-Type: application/json' -d '{"email":"e2e@x.co","password":"password123"}')" 201 "register"
-  local TOK; TOK=$(curl -s -X POST "$B/api/auth/login" -H 'Content-Type: application/json' -d '{"email":"e2e@x.co","password":"password123"}' | python3 -c "import sys,json;print(json.load(sys.stdin)['token'])" 2>/dev/null)
+  # Sign-up asks for nothing but a password; an email sent anyway is ignored.
+  local REG ACCT TOK
+  REG=$(curl -s -X POST "$B/api/auth/register" -H 'Content-Type: application/json' -H 'X-Forwarded-For: 198.51.100.88' \
+    -d '{"email":"e2e@example.com","password":"password123"}')
+  ACCT=$(echo "$REG" | python3 -c "import sys,json;print(json.load(sys.stdin)['account_number'])" 2>/dev/null)
+  [ ${#ACCT} -eq 19 ] && ok=$((ok+1)) || { echo "  ✗ register: no account number in $REG"; bad=$((bad+1)); }
+  TOK=$(cp_login "$B" "$ACCT")
   [ -n "$TOK" ] && ok=$((ok+1)) || { echo "  ✗ login: no token"; bad=$((bad+1)); }
-  chk "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/api/auth/login" -H 'Content-Type: application/json' -d '{"email":"e2e@x.co","password":"wrongpass1"}')" 401 "wrong password rejected"
-  chk "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOK" "$B/api/me")" 200 "/api/me"
+  chk "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/api/auth/login" -H 'Content-Type: application/json' -d "{\"account_number\":\"$ACCT\",\"password\":\"wrongpass1\"}")" 401 "wrong password rejected"
+  chk "$(curl -s -H "Authorization: Bearer $TOK" "$B/api/me" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['account_number'], 'email' in d)" 2>/dev/null)" "$ACCT False" "/api/me: the account number, no email"
   chk "$(curl -s -o /dev/null -w '%{http_code}' "$B/api/me")" 401 "unauth rejected"
-  local RID; RID=$(curl -s -X POST "$B/api/routing" -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' -d '{"domain":"*.x.co","route":"anon"}' | python3 -c "import sys,json;print(json.load(sys.stdin)['id'])" 2>/dev/null)
-  [ -n "$RID" ] && ok=$((ok+1)) || { echo "  ✗ routing create"; bad=$((bad+1)); }
-  chk "$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "$B/api/routing/$RID" -H "Authorization: Bearer $TOK")" 200 "routing delete"
-  curl -s -X PUT "$B/api/settings" -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' -d '{"default_route":"anon"}' >/dev/null
-  chk "$(curl -s -H "Authorization: Bearer $TOK" "$B/api/settings" | python3 -c "import sys,json;print(json.load(sys.stdin)['default_route'])" 2>/dev/null)" "anon" "settings persist"
+  # The per-customer record endpoints are gone.
+  for P in connections routing settings; do
+    chk "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOK" "$B/api/$P")" 404 "/api/$P removed"
+  done
+  chk "$(curl -s -o /dev/null -w '%{http_code}' "$B/metrics")" 404 "metrics not on the public API"
 
   # Public status needs no auth.
   chk "$(curl -s "$B/api/public/status" | python3 -c "import sys,json;print(json.load(sys.stdin)['protocol'])" 2>/dev/null)" "PQANON/1" "public status (unauth)"
@@ -147,12 +165,17 @@ cp_e2e() {
   # Admin-only endpoint is forbidden for a normal user.
   chk "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOK" "$B/api/admin/stats")" 403 "admin stats gated"
   kill $PID 2>/dev/null; wait $PID 2>/dev/null
+  # Nothing was logged about any request: not the address (curl came from
+  # 127.0.0.1, and claimed 198.51.100.88), not a path, not the account.
+  if grep -q -E "127\.0\.0\.1|198\.51\.100\.88|/api/|${ACCT// /}" /tmp/cp_e2e.log; then
+    echo "  ✗ the control-plane log names a request:"; grep -E "127\.0\.0\.1|198\.51\.100|/api/" /tmp/cp_e2e.log | head -5; bad=$((bad+1))
+  else ok=$((ok+1)); fi
 
   # Restart with the same key: the old token must still verify.
   TOKEN_SIGNING_KEY="$KEY" LISTEN_ADDR=:8097 "$BIN" >/tmp/cp_e2e2.log 2>&1 &
   PID=$!
   curl -fsS --retry 40 --retry-delay 1 --retry-connrefused "$B/health" >/dev/null || { kill $PID; return 1; }
-  chk "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOK" "$B/api/routing")" 200 "token survives restart"
+  chk "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOK" "$B/api/apikeys")" 200 "token survives restart"
   kill $PID 2>/dev/null; wait $PID 2>/dev/null
 
   echo "  control-plane E2E: $ok checks passed, $bad failed"
@@ -212,8 +235,7 @@ enroll_e2e() {
   AUTH=$(echo "$KEYS" | j "['enroll_authority_pub']"); CA=$(echo "$KEYS" | j "['device_ca_pub']"); CRLPUB=$(echo "$KEYS" | j "['crl_pub']")
   [ ${#AUTH} -eq 64 ] && [ ${#CA} -eq 64 ] && [ ${#CRLPUB} -eq 64 ] && pass || fail "pinned keys"
 
-  curl -s -X POST "$B/api/auth/register" -H 'Content-Type: application/json' -d '{"email":"enroll@x.co","password":"password123"}' >/dev/null
-  TOK=$(curl -s -X POST "$B/api/auth/login" -H 'Content-Type: application/json' -d '{"email":"enroll@x.co","password":"password123"}' | j "['token']")
+  TOK=$(cp_login "$B" "$(cp_register "$B")")
   [ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/api/enroll/issue")" = 401 ] && pass || fail "issue must need auth"
   URL=$(curl -s -X POST "$B/api/enroll/issue" -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' -d '{}' | j "['url']")
   case "$URL" in "pqanon://enroll?t=PQE1."*) pass;; *) fail "deep link: $URL";; esac
@@ -226,9 +248,16 @@ enroll_e2e() {
   echo "$OUT" | grep -q "refusing this enrollment link" && pass || fail "link accepted under the wrong pin: $OUT"
 
   # The real enrollment: certificate verified against the pinned CA, stored 0600.
-  OUT=$($CLI enroll "$URL" --server "$B" --authority-key "$AUTH" --ca-key "$CA" --identity "$W/laptop.id" --name e2e-laptop 2>&1)
-  DEV=$(echo "$OUT" | sed -n 's/^Enrolled device \([0-9a-f]\{32\}\) .*/\1/p')
+  # The device is named after its owner, as OS device names often are: only the
+  # platform label may reach the server.
+  OUT=$($CLI enroll "$URL" --server "$B" --authority-key "$AUTH" --ca-key "$CA" --identity "$W/laptop.id" --name "Alex Example's Linux laptop" 2>&1)
+  DEV=$(echo "$OUT" | sed -n 's/^Enrolled device \([0-9a-f]\{32\}\).*/\1/p')
   [ -n "$DEV" ] && pass || fail "enroll: $OUT"
+  case "$(curl -s "$B/api/devices" -H "Authorization: Bearer $TOK")" in
+    *Alex*|*laptop*) fail "the device name reached the server";;
+    *'"name":"Linux"'*) pass;;
+    *) fail "device not labelled Linux";;
+  esac
   [ "$(stat -c %a "$W/laptop.id.cert" 2>/dev/null)" = 600 ] && pass || fail "certificate not stored 0600"
 
   # One-time: the same link cannot enroll a second device.
@@ -273,8 +302,7 @@ tunnel_e2e() {
   local KEYS AUTH CA CRLPUB TOK URL DEV PQ ED OUT
   KEYS=$(curl -s "$B/api/enroll/keys")
   AUTH=$(echo "$KEYS" | j "['enroll_authority_pub']"); CA=$(echo "$KEYS" | j "['device_ca_pub']"); CRLPUB=$(echo "$KEYS" | j "['crl_pub']")
-  curl -s -X POST "$B/api/auth/register" -H 'Content-Type: application/json' -d '{"email":"tun@x.co","password":"password123"}' >/dev/null
-  TOK=$(curl -s -X POST "$B/api/auth/login" -H 'Content-Type: application/json' -d '{"email":"tun@x.co","password":"password123"}' | j "['token']")
+  TOK=$(cp_login "$B" "$(cp_register "$B")")
   URL=$(curl -s -X POST "$B/api/enroll/issue" -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' -d '{}' | j "['url']")
   $CLI enroll "$URL" --server "$B" --authority-key "$AUTH" --ca-key "$CA" --identity "$W/dev.id" --name e2e >/dev/null 2>&1 && pass || fail "enroll"
   DEV=$(curl -s "$B/api/devices" -H "Authorization: Bearer $TOK" | j "[0]['id']")
@@ -341,11 +369,8 @@ stake_e2e() {
   KEYS=$(curl -s "$B/api/enroll/keys")
   DIRNAME=$(echo "$KEYS" | j "['directory_authority']"); DIRPUB=$(echo "$KEYS" | j "['directory_pub']")
   local H='Content-Type: application/json'
-  for u in op other; do
-    curl -s -X POST "$B/api/auth/register" -H "$H" -d "{\"email\":\"$u@stake.co\",\"password\":\"password123\"}" >/dev/null
-  done
-  TOK=$(curl -s -X POST "$B/api/auth/login" -H "$H" -d '{"email":"op@stake.co","password":"password123"}' | j "['token']")
-  TOK2=$(curl -s -X POST "$B/api/auth/login" -H "$H" -d '{"email":"other@stake.co","password":"password123"}' | j "['token']")
+  TOK=$(cp_login "$B" "$(cp_register "$B")")
+  TOK2=$(cp_login "$B" "$(cp_register "$B")")
   local A="Authorization: Bearer $TOK"
 
   # The node's key is the real pqanond identity's Ed25519 key.

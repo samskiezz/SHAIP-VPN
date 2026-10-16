@@ -31,6 +31,14 @@ const MAGIC_ENROLL: &[u8] = b"PQANON-ENROLL-V1";
 const MAGIC_CERT: &[u8] = b"PQANON-DEVCERT-V1";
 const VERSION: u8 = 1;
 
+/// The account field of every device certificate the control plane issues.
+/// A server admits a device because its key is certified and not revoked; it
+/// never needs to know whose device it is, and a real account id there would
+/// let any server (staked nodes are run by third parties) link one customer's
+/// devices together. Certificates issued before this named the account; they
+/// still verify.
+pub const WITHHELD_ACCOUNT: &str = "-";
+
 /// Clock-skew tolerance (seconds) applied only to the not-yet-valid boundary.
 /// Expiry is strict.
 pub const MAX_CLOCK_SKEW_SECS: i64 = 120;
@@ -81,6 +89,7 @@ pub struct EnrollClaims {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DeviceCert {
     pub device_id: [u8; 16],
+    /// [`WITHHELD_ACCOUNT`] in certificates current control planes issue.
     pub account: String,
     pub device_pub: [u8; 32],
     pub issued_at: i64,

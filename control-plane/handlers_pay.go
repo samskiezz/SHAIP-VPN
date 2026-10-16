@@ -292,21 +292,24 @@ func (s *Server) handleRedeem(w http.ResponseWriter, r *http.Request) {
 	mRedemptions.WithLabelValues(d.ID, "ok").Inc()
 
 	sessionID := newSessionID()
-	ttl := time.Duration(d.DurationDays) * 24 * time.Hour
-	grant, err := s.tokens.IssueWithTTL("session:"+sessionID, "", ttl)
+	// The grant runs to the end of the day its plan ends: an exact expiry would
+	// be the redemption moment plus a known duration, readable by anyone the
+	// grant is shown to.
+	expires := dayCeil(time.Now().Add(time.Duration(d.DurationDays) * 24 * time.Hour))
+	grant, err := s.tokens.IssueUntil("session:"+sessionID, expires)
 	if err != nil {
 		errJSON(w, http.StatusInternalServerError, "grant error")
 		return
 	}
-	// Anonymous by design: no user and no IP address. Recording who redeemed
-	// (even just the address) next to the time would let the operator match
-	// a redemption to the network that bought the token.
-	_ = s.store.AppendAudit(r.Context(), &AuditEntry{Action: "token.redeem", Detail: d.ID})
+	// Nothing about the redemption is recorded beyond the spent-nonce hash and
+	// the redemptions counter: no account, no address, no moment. A timestamp
+	// next to each redemption would help match it to the payment that bought
+	// the token.
 	writeJSON(w, http.StatusOK, map[string]any{
 		"session_id": sessionID,
 		"grant":      grant,
 		"plan":       d.ID,
-		"expires_at": time.Now().Add(ttl).UTC(),
+		"expires_at": expires,
 	})
 }
 

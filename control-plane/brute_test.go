@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -29,7 +30,7 @@ func TestTokenVerifyBrute(t *testing.T) {
 		t.Fatalf("signer: %v", err)
 	}
 	// A real token, plus a large population of hostile/garbage strings.
-	good, _ := signer.Issue("u1", "a@b.co")
+	good, _ := signer.Issue("u1")
 	seeds := []string{
 		"", ".", "..", "a.b", "a.b.c",
 		good, good + "x", "x" + good,
@@ -76,30 +77,29 @@ func FuzzTokenVerify(f *testing.F) {
 func TestAuthHostileInputs(t *testing.T) {
 	_, h, _ := newTestServer(t)
 
-	type reg struct {
-		email, password string
+	passwords := []string{
+		"", "short", "'; DROP TABLE users;--", "pass\x00word123", "pаsswоrd12",
+		strings.Repeat("p", 1024), strings.Repeat("p", 4096),
 	}
-	cases := []reg{
-		{"", ""},                                 // empty
-		{"a@b.co", "short"},                       // password < 8
-		{"", "longenoughpassword"},                // empty email
-		{"'; DROP TABLE users;--@x.co", "password123"}, // SQL-ish (MemStore: stored, no SQL)
-		{"user\x00null@x.co", "password123"},      // NUL byte
-		{"😀@unicode.example", "pаsswоrd12"},       // unicode (incl. Cyrillic look-alikes)
-		{"a@b.co", strings.Repeat("p", 4096)},     // long (but bounded) password
-		{strings.Repeat("e", 4096) + "@b.co", "password123"}, // long email
+	accounts := []string{
+		"", "1234", "1234 5678 9012 3456", "1234-5678-9012-3456", "12345678901234567",
+		"abcd efgh ijkl mnop", "'; DROP TABLE users;--", "١٢٣٤٥٦٧٨٩٠١٢٣٤٥٦", // Arabic-Indic digits
+		strings.Repeat("9", 4096),
 	}
-	for i, c := range cases {
-		rec := do(t, h, "POST", "/api/auth/register", "",
-			map[string]any{"email": c.email, "password": c.password})
+	for i, pw := range passwords {
+		rec := do(t, h, "POST", "/api/auth/register", "", map[string]any{"password": pw})
 		if rec.Code >= 500 {
-			t.Fatalf("case %d (%q): server error %d — hostile input must not 5xx", i, c.email, rec.Code)
+			t.Fatalf("register case %d: server error %d — hostile input must not 5xx", i, rec.Code)
 		}
-		// Login attempts with the same hostile inputs must also never 5xx.
-		rec = do(t, h, "POST", "/api/auth/login", "",
-			map[string]any{"email": c.email, "password": c.password})
-		if rec.Code >= 500 {
-			t.Fatalf("case %d login (%q): server error %d", i, c.email, rec.Code)
+		for j, acct := range accounts {
+			rec = do(t, h, "POST", "/api/auth/login", "",
+				map[string]any{"account_number": acct, "password": pw})
+			if rec.Code >= 500 {
+				t.Fatalf("login case %d/%d: server error %d", i, j, rec.Code)
+			}
+			if rec.Code == http.StatusOK {
+				t.Fatalf("login case %d/%d: a guessed account number logged in", i, j)
+			}
 		}
 	}
 
@@ -107,21 +107,17 @@ func TestAuthHostileInputs(t *testing.T) {
 	// (Argon2id is deliberately expensive, so keep the count modest.)
 	rng := rand.New(rand.NewSource(99))
 	for i := 0; i < 150; i++ {
-		email := fmt.Sprintf("u%d-%d@x.co", i, rng.Int())
-		pw := strings.Repeat("p", 8+rng.Intn(40))
-		rec := do(t, h, "POST", "/api/auth/register", "",
-			map[string]any{"email": email, "password": pw})
-		if rec.Code != http.StatusCreated && rec.Code != http.StatusConflict &&
-			rec.Code != http.StatusBadRequest {
-			t.Fatalf("unexpected register status %d for %q", rec.Code, email)
+		pw := strings.Repeat("p", 4+rng.Intn(40))
+		rec := do(t, h, "POST", "/api/auth/register", "", map[string]any{"password": pw})
+		if rec.Code != http.StatusCreated && rec.Code != http.StatusBadRequest {
+			t.Fatalf("unexpected register status %d (password length %d)", rec.Code, len(pw))
 		}
 	}
 }
 
 // The in-memory store must be safe under concurrent access (run with -race).
 func TestStoreConcurrency(t *testing.T) {
-	srv, h, store := newTestServer(t)
-	_ = store
+	_, h, store := newTestServer(t)
 
 	const workers = 12
 	const perWorker = 6
@@ -131,17 +127,27 @@ func TestStoreConcurrency(t *testing.T) {
 		go func(w int) {
 			defer wg.Done()
 			for i := 0; i < perWorker; i++ {
-				email := fmt.Sprintf("w%d-%d@x.co", w, i)
 				rec := do(t, h, "POST", "/api/auth/register", "",
-					map[string]any{"email": email, "password": "password123"})
+					map[string]any{"password": "password123"})
 				if rec.Code != http.StatusCreated {
 					t.Errorf("concurrent register failed: %d", rec.Code)
 					return
 				}
-				// Each worker also issues a token and writes a routing rule.
-				tok, _ := srv.tokens.Issue(fmt.Sprintf("w%d-%d", w, i), email)
-				do(t, h, "POST", "/api/routing", tok,
-					map[string]any{"domain": fmt.Sprintf("*.w%d-%d.example", w, i), "route": "anon"})
+				// Each worker also logs in and writes an API key.
+				var reg struct {
+					AccountNumber string `json:"account_number"`
+				}
+				_ = json.Unmarshal(rec.Body.Bytes(), &reg)
+				rec = do(t, h, "POST", "/api/auth/login", "",
+					map[string]any{"account_number": reg.AccountNumber, "password": "password123"})
+				var login struct {
+					Token string `json:"token"`
+				}
+				_ = json.Unmarshal(rec.Body.Bytes(), &login)
+				if rec := do(t, h, "POST", "/api/apikeys", login.Token,
+					map[string]any{"name": fmt.Sprintf("w%d-%d", w, i)}); rec.Code != http.StatusCreated {
+					t.Errorf("concurrent api key: %d", rec.Code)
+				}
 			}
 		}(w)
 	}

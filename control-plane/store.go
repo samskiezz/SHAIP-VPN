@@ -18,16 +18,48 @@ import (
 // ErrNotFound is returned when a record does not exist.
 var ErrNotFound = errors.New("not found")
 
-// User is a registered account with pinned public identity keys.
+// User is an account. It holds nothing about the person behind it: the login is
+// a random account number the server generates, and the password is kept only
+// as an Argon2id hash. There is no email, name or phone number to collect.
 type User struct {
-	ID           string    `json:"id"`
-	Email        string    `json:"email"`
-	PasswordHash string    `json:"-"`
-	IdentityID   string    `json:"identity_id"`
-	MlDsaPub     []byte    `json:"-"`
-	EdPub        []byte    `json:"-"`
-	Role         string    `json:"role"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID            string    `json:"id"`
+	AccountNumber string    `json:"-"` // 16 digits; the login, shown to its owner only
+	PasswordHash  string    `json:"-"`
+	Role          string    `json:"role"`
+	CreatedAt     time.Time `json:"created_at"` // the UTC day, see day()
+}
+
+// ErrAccountNumberTaken is returned by CreateUser when the account number is
+// already in use (a 1-in-10^16 coincidence; the caller draws a new number).
+var ErrAccountNumberTaken = errors.New("account number already in use")
+
+// day is t's UTC calendar day. Every record about an account (when it was made,
+// when a device was enrolled or revoked, an audit entry, a key) stores the day,
+// never the moment: a moment could be lined up against network records kept
+// elsewhere, such as a hosting provider's flow logs, to tie an account to the
+// address it was used from. A day can't.
+func day(t time.Time) time.Time { return t.UTC().Truncate(24 * time.Hour) }
+
+// dayCeil rounds t up to a UTC day boundary: a coarse expiry that never falls
+// before t. It is idempotent, so re-storing a coarse value doesn't move it.
+func dayCeil(t time.Time) time.Time {
+	d := day(t)
+	if d.Equal(t) {
+		return d
+	}
+	return d.Add(24 * time.Hour)
+}
+
+// coarsenOrder reduces an order's times to days. An order names nobody, but the
+// moment one was opened or paid could still be matched against network records
+// to find who opened it; the day can't.
+func coarsenOrder(o *PayOrder, created time.Time) {
+	o.CreatedAt = day(created)
+	o.ExpiresAt = dayCeil(o.ExpiresAt)
+	if o.PaidAt != nil {
+		paid := day(*o.PaidAt)
+		o.PaidAt = &paid
+	}
 }
 
 // APIKey is a personal access token for the REST API. Only the hash is stored;
@@ -42,13 +74,14 @@ type APIKey struct {
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
 }
 
-// AuditEntry is one row of the security audit log.
+// AuditEntry is one row of an account's security log: what was done, never
+// from where. There is no address field to fill. At is the UTC day; ID orders
+// the entries within a day.
 type AuditEntry struct {
 	ID     int64     `json:"id"`
-	UserID string    `json:"user_id,omitempty"`
+	UserID string    `json:"-"`
 	Action string    `json:"action"`
 	Detail string    `json:"detail,omitempty"`
-	IP     string    `json:"ip,omitempty"`
 	At     time.Time `json:"at"`
 }
 
@@ -85,6 +118,9 @@ var (
 )
 
 // EnrollToken records an issued enrollment token so it can be claimed once.
+// The stores keep only days: IssuedAt and ClaimedAt are the UTC day, ExpiresAt
+// the end of the expiry's day. The token's exact expiry is inside the signed
+// token itself, which handleEnrollClaim checks before it ever reaches the store.
 type EnrollToken struct {
 	TokenID   string // hex of the token's 16-byte id
 	UserID    string
@@ -94,7 +130,8 @@ type EnrollToken struct {
 }
 
 // Device is an enrolled device: its Ed25519 identity key, bound to an account
-// by a device certificate.
+// by a device certificate. Name is a platform label from a fixed list (see
+// deviceLabel), never free text. CreatedAt and RevokedAt are UTC days.
 type Device struct {
 	ID          string     `json:"id"` // hex of the 16-byte device id
 	UserID      string     `json:"-"`
@@ -173,18 +210,6 @@ type SlashEvent struct {
 	At          time.Time `json:"at"`
 }
 
-// Connection is an active or historical tunnel session.
-type Connection struct {
-	ID        string     `json:"id"`
-	UserID    string     `json:"user_id"`
-	NodeID    string     `json:"node_id"`
-	Route     string     `json:"route"`
-	BytesIn   int64      `json:"bytes_in"`
-	BytesOut  int64      `json:"bytes_out"`
-	StartedAt time.Time  `json:"started_at"`
-	EndedAt   *time.Time `json:"ended_at,omitempty"`
-}
-
 // RevokedIdentity is a CRL entry.
 type RevokedIdentity struct {
 	IdentityID string    `json:"identity_id"`
@@ -193,22 +218,14 @@ type RevokedIdentity struct {
 	Signature  []byte    `json:"-"`
 }
 
-// RoutingRule is a per-user fast/anon policy for a destination domain (§13).
-// Higher priority wins when multiple rules match.
-type RoutingRule struct {
-	ID       string `json:"id"`
-	UserID   string `json:"-"`
-	Domain   string `json:"domain"`
-	Route    string `json:"route"`
-	Priority int    `json:"priority"`
-}
-
 // Store is the persistence interface. Two implementations exist: an in-memory
 // store (default, so the control plane boots with no database) and a Postgres
 // store (used when DATABASE_URL is set).
 type Store interface {
+	// CreateUser stores a new account, or fails with ErrAccountNumberTaken.
 	CreateUser(ctx context.Context, u *User) error
-	GetUserByEmail(ctx context.Context, email string) (*User, error)
+	// GetUserByAccount looks an account up by its normalized account number.
+	GetUserByAccount(ctx context.Context, number string) (*User, error)
 	GetUserByID(ctx context.Context, id string) (*User, error)
 	CountUsers(ctx context.Context) (int, error)
 
@@ -216,11 +233,6 @@ type Store interface {
 	GetNode(ctx context.Context, id string) (*Node, error)
 	CreateNode(ctx context.Context, n *Node) error
 	DeleteNode(ctx context.Context, id string) error
-
-	ListActiveConnections(ctx context.Context) ([]Connection, error)
-	GetConnection(ctx context.Context, id string) (*Connection, error)
-	CountActiveConnections(ctx context.Context) (int, error)
-	EndConnection(ctx context.Context, id string) error
 
 	CreateAPIKey(ctx context.Context, k *APIKey) error
 	ListAPIKeys(ctx context.Context, userID string) ([]APIKey, error)
@@ -235,14 +247,6 @@ type Store interface {
 	// SpendToken records a redeemed nonce, returning ErrSpent if already spent.
 	SpendToken(ctx context.Context, denom, nonceHash string) error
 
-	ListRoutingRules(ctx context.Context, userID string) ([]RoutingRule, error)
-	CreateRoutingRule(ctx context.Context, r *RoutingRule) error
-	DeleteRoutingRule(ctx context.Context, id, userID string) error
-
-	// GetSettings returns a user's stored settings JSON, or ErrNotFound.
-	GetSettings(ctx context.Context, userID string) ([]byte, error)
-	SetSettings(ctx context.Context, userID string, raw []byte) error
-
 	ListRevoked(ctx context.Context) ([]RevokedIdentity, error)
 
 	CreateEnrollToken(ctx context.Context, t *EnrollToken) error
@@ -253,7 +257,7 @@ type Store interface {
 	ClaimEnrollment(ctx context.Context, tokenID string, now time.Time, d *Device) error
 	ListDevices(ctx context.Context, userID string) ([]Device, error)
 	// RevokeDevice marks one of the user's devices revoked. Revoking twice keeps
-	// the first timestamp. ErrNotFound if the device is not theirs.
+	// the first day. ErrNotFound if the device is not theirs.
 	RevokeDevice(ctx context.Context, id, userID string) error
 	ListRevokedDevices(ctx context.Context) ([]Device, error)
 
@@ -286,11 +290,8 @@ type Store interface {
 
 type MemStore struct {
 	mu       sync.RWMutex
-	users    map[string]*User // keyed by email
+	users    map[string]*User // keyed by account number
 	nodes    map[string]*Node // keyed by id
-	conns    map[string]*Connection
-	rules    map[string]*RoutingRule // keyed by rule id
-	settings map[string][]byte       // keyed by user id
 	revoked  map[string]*RevokedIdentity
 	apiKeys  map[string]*APIKey // keyed by key id
 	audit    []AuditEntry
@@ -307,19 +308,16 @@ type MemStore struct {
 
 func NewMemStore() *MemStore {
 	return &MemStore{
-		users:    make(map[string]*User),
-		nodes:    make(map[string]*Node),
-		conns:    make(map[string]*Connection),
-		rules:    make(map[string]*RoutingRule),
-		settings: make(map[string][]byte),
-		revoked:  make(map[string]*RevokedIdentity),
-		apiKeys:  make(map[string]*APIKey),
-		orders:   make(map[string]*PayOrder),
-		spent:    make(map[string]bool),
-		enroll:   make(map[string]*EnrollToken),
-		devices:  make(map[string]*Device),
-		bonds:    make(map[string]*StakeBond),
-		slashes:  make(map[string]*SlashEvent),
+		users:   make(map[string]*User),
+		nodes:   make(map[string]*Node),
+		revoked: make(map[string]*RevokedIdentity),
+		apiKeys: make(map[string]*APIKey),
+		orders:  make(map[string]*PayOrder),
+		spent:   make(map[string]bool),
+		enroll:  make(map[string]*EnrollToken),
+		devices: make(map[string]*Device),
+		bonds:   make(map[string]*StakeBond),
+		slashes: make(map[string]*SlashEvent),
 	}
 }
 
@@ -328,8 +326,8 @@ func (m *MemStore) Close() {}
 func (m *MemStore) CreateUser(_ context.Context, u *User) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.users[u.Email]; ok {
-		return errors.New("email already registered")
+	if _, ok := m.users[u.AccountNumber]; ok {
+		return ErrAccountNumberTaken
 	}
 	if u.ID == "" {
 		u.ID = uuid.NewString()
@@ -337,16 +335,16 @@ func (m *MemStore) CreateUser(_ context.Context, u *User) error {
 	if u.Role == "" {
 		u.Role = "user"
 	}
-	u.CreatedAt = time.Now().UTC()
+	u.CreatedAt = day(time.Now())
 	cp := *u
-	m.users[u.Email] = &cp
+	m.users[u.AccountNumber] = &cp
 	return nil
 }
 
-func (m *MemStore) GetUserByEmail(_ context.Context, email string) (*User, error) {
+func (m *MemStore) GetUserByAccount(_ context.Context, number string) (*User, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	u, ok := m.users[email]
+	u, ok := m.users[number]
 	if !ok {
 		return nil, ErrNotFound
 	}
@@ -370,68 +368,6 @@ func (m *MemStore) CountUsers(_ context.Context) (int, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return len(m.users), nil
-}
-
-func (m *MemStore) ListRoutingRules(_ context.Context, userID string) ([]RoutingRule, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	out := make([]RoutingRule, 0)
-	for _, r := range m.rules {
-		if r.UserID == userID {
-			out = append(out, *r)
-		}
-	}
-	// Highest priority first, then domain, for a stable order.
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Priority != out[j].Priority {
-			return out[i].Priority > out[j].Priority
-		}
-		return out[i].Domain < out[j].Domain
-	})
-	return out, nil
-}
-
-func (m *MemStore) CreateRoutingRule(_ context.Context, r *RoutingRule) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if r.ID == "" {
-		r.ID = uuid.NewString()
-	}
-	cp := *r
-	m.rules[r.ID] = &cp
-	return nil
-}
-
-func (m *MemStore) DeleteRoutingRule(_ context.Context, id, userID string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	r, ok := m.rules[id]
-	if !ok || r.UserID != userID {
-		return ErrNotFound
-	}
-	delete(m.rules, id)
-	return nil
-}
-
-func (m *MemStore) GetSettings(_ context.Context, userID string) ([]byte, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	raw, ok := m.settings[userID]
-	if !ok {
-		return nil, ErrNotFound
-	}
-	cp := make([]byte, len(raw))
-	copy(cp, raw)
-	return cp, nil
-}
-
-func (m *MemStore) SetSettings(_ context.Context, userID string, raw []byte) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	cp := make([]byte, len(raw))
-	copy(cp, raw)
-	m.settings[userID] = cp
-	return nil
 }
 
 func (m *MemStore) ListNodes(_ context.Context) ([]Node, error) {
@@ -478,42 +414,6 @@ func (m *MemStore) DeleteNode(_ context.Context, id string) error {
 	return nil
 }
 
-func (m *MemStore) ListActiveConnections(_ context.Context) ([]Connection, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	out := make([]Connection, 0, len(m.conns))
-	for _, c := range m.conns {
-		if c.EndedAt == nil {
-			out = append(out, *c)
-		}
-	}
-	return out, nil
-}
-
-func (m *MemStore) CountActiveConnections(_ context.Context) (int, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	n := 0
-	for _, c := range m.conns {
-		if c.EndedAt == nil {
-			n++
-		}
-	}
-	return n, nil
-}
-
-func (m *MemStore) EndConnection(_ context.Context, id string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	c, ok := m.conns[id]
-	if !ok {
-		return ErrNotFound
-	}
-	now := time.Now().UTC()
-	c.EndedAt = &now
-	return nil
-}
-
 func (m *MemStore) GetNode(_ context.Context, id string) (*Node, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -525,24 +425,13 @@ func (m *MemStore) GetNode(_ context.Context, id string) (*Node, error) {
 	return &cp, nil
 }
 
-func (m *MemStore) GetConnection(_ context.Context, id string) (*Connection, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	c, ok := m.conns[id]
-	if !ok {
-		return nil, ErrNotFound
-	}
-	cp := *c
-	return &cp, nil
-}
-
 func (m *MemStore) CreateAPIKey(_ context.Context, k *APIKey) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if k.ID == "" {
 		k.ID = uuid.NewString()
 	}
-	k.CreatedAt = time.Now().UTC()
+	k.CreatedAt = day(time.Now())
 	cp := *k
 	m.apiKeys[k.ID] = &cp
 	return nil
@@ -577,9 +466,7 @@ func (m *MemStore) AppendAudit(_ context.Context, e *AuditEntry) error {
 	defer m.mu.Unlock()
 	m.auditSeq++
 	e.ID = m.auditSeq
-	if e.At.IsZero() {
-		e.At = time.Now().UTC()
-	}
+	e.At = day(time.Now())
 	m.audit = append(m.audit, *e)
 	return nil
 }
@@ -591,9 +478,12 @@ func (m *MemStore) ListAudit(_ context.Context, userID string, limit int) ([]Aud
 		limit = 100
 	}
 	out := make([]AuditEntry, 0, limit)
+	if userID == "" {
+		return out, nil
+	}
 	// Newest first.
 	for i := len(m.audit) - 1; i >= 0 && len(out) < limit; i-- {
-		if userID == "" || m.audit[i].UserID == userID {
+		if m.audit[i].UserID == userID {
 			out = append(out, m.audit[i])
 		}
 	}
@@ -606,9 +496,7 @@ func (m *MemStore) CreatePayOrder(_ context.Context, o *PayOrder) error {
 	if o.ID == "" {
 		o.ID = uuid.NewString()
 	}
-	if o.CreatedAt.IsZero() {
-		o.CreatedAt = time.Now().UTC()
-	}
+	coarsenOrder(o, time.Now())
 	cp := *o
 	m.orders[o.ID] = &cp
 	return nil
@@ -628,9 +516,12 @@ func (m *MemStore) GetPayOrder(_ context.Context, id string) (*PayOrder, error) 
 func (m *MemStore) UpdatePayOrder(_ context.Context, o *PayOrder) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.orders[o.ID]; !ok {
+	old, ok := m.orders[o.ID]
+	if !ok {
 		return ErrNotFound
 	}
+	o.CreatedAt, o.ExpiresAt = old.CreatedAt, old.ExpiresAt
+	coarsenOrder(o, old.CreatedAt)
 	cp := *o
 	m.orders[o.ID] = &cp
 	return nil
@@ -664,6 +555,7 @@ func (m *MemStore) CreateEnrollToken(_ context.Context, t *EnrollToken) error {
 		return errors.New("enrollment token id already exists")
 	}
 	cp := *t
+	cp.IssuedAt, cp.ExpiresAt, cp.ClaimedAt = day(t.IssuedAt), dayCeil(t.ExpiresAt), nil
 	m.enroll[t.TokenID] = &cp
 	return nil
 }
@@ -686,7 +578,7 @@ func (m *MemStore) ClaimEnrollment(_ context.Context, tokenID string, now time.T
 			return ErrDeviceKeyInUse
 		}
 	}
-	claimed := now.UTC()
+	claimed := day(now)
 	t.ClaimedAt = &claimed
 	d.TokenID = tokenID
 	d.CreatedAt = claimed
@@ -717,8 +609,8 @@ func (m *MemStore) RevokeDevice(_ context.Context, id, userID string) error {
 		return ErrNotFound
 	}
 	if d.RevokedAt == nil {
-		now := time.Now().UTC()
-		d.RevokedAt = &now
+		today := day(time.Now())
+		d.RevokedAt = &today
 	}
 	return nil
 }

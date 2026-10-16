@@ -15,8 +15,8 @@ import (
 
 // This file completes the REST surface the audit flagged as missing: admin
 // stats, personal API keys, the audit log, a public status probe, and the
-// single-resource node/connection reads. Every handler is backed by a real
-// Store method (in-memory and Postgres) — none return canned data.
+// single-node read. Every handler is backed by a real Store method (in-memory
+// and Postgres) — none return canned data.
 
 // --- admin ---
 
@@ -34,7 +34,8 @@ func (s *Server) requireRole(w http.ResponseWriter, r *http.Request, role string
 	return true
 }
 
-// handleAdminStats returns network-wide counters; admin role required.
+// handleAdminStats returns network-wide totals; admin role required. Even an
+// admin sees no per-customer data: the control plane holds none to show.
 func (s *Server) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 	if !s.requireRole(w, r, "admin") {
 		return
@@ -47,18 +48,11 @@ func (s *Server) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 			online++
 		}
 	}
-	conns, _ := s.store.ListActiveConnections(ctx)
-	var bytesTotal int64
-	for _, c := range conns {
-		bytesTotal += c.BytesIn + c.BytesOut
-	}
 	users, _ := s.store.CountUsers(ctx)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"users":              users,
-		"nodes_online":       online,
-		"nodes_total":        len(nodes),
-		"connections_active": len(conns),
-		"bandwidth_gb_live":  float64(bytesTotal) / 1e9,
+		"users":        users,
+		"nodes_online": online,
+		"nodes_total":  len(nodes),
 	})
 }
 
@@ -135,19 +129,19 @@ func newAPIKeySecret() (string, error) {
 
 // --- audit log ---
 
-// audit records a security-relevant action for the authenticated caller. A
-// failure to persist the entry is logged by the store, never surfaced to the
-// request, so auditing cannot break a user action.
+// audit records a security-relevant action for the authenticated caller: the
+// action and the day, never where the request came from. A failure to
+// persist the entry is not surfaced, so auditing cannot break a user action.
 func (s *Server) audit(r *http.Request, action, detail string) {
 	_ = s.store.AppendAudit(r.Context(), &AuditEntry{
 		UserID: userID(r),
 		Action: action,
 		Detail: detail,
-		IP:     r.RemoteAddr,
 	})
 }
 
-// handleListAudit returns the caller's own audit entries (admins see all).
+// handleListAudit returns the caller's own audit entries. Nobody, admins
+// included, can list another account's.
 func (s *Server) handleListAudit(w http.ResponseWriter, r *http.Request) {
 	limit := 100
 	if v := r.URL.Query().Get("limit"); v != "" {
@@ -155,13 +149,7 @@ func (s *Server) handleListAudit(w http.ResponseWriter, r *http.Request) {
 			limit = n
 		}
 	}
-	scope := userID(r)
-	if u, err := s.store.GetUserByID(r.Context(), userID(r)); err == nil && u.Role == "admin" {
-		if r.URL.Query().Get("all") == "true" {
-			scope = "" // all users
-		}
-	}
-	entries, err := s.store.ListAudit(r.Context(), scope, limit)
+	entries, err := s.store.ListAudit(r.Context(), userID(r), limit)
 	if err != nil {
 		errJSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -196,13 +184,4 @@ func (s *Server) handleGetNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, n)
-}
-
-func (s *Server) handleGetConnection(w http.ResponseWriter, r *http.Request) {
-	c, err := s.store.GetConnection(r.Context(), chi.URLParam(r, "id"))
-	if err != nil {
-		errJSON(w, http.StatusNotFound, "not found")
-		return
-	}
-	writeJSON(w, http.StatusOK, c)
 }

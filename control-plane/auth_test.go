@@ -28,7 +28,7 @@ func TestTokenSignVerify(t *testing.T) {
 	if err != nil {
 		t.Fatalf("signer: %v", err)
 	}
-	tok, err := signer.Issue("user-1", "a@b.co")
+	tok, err := signer.Issue("user-1")
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
@@ -36,7 +36,7 @@ func TestTokenSignVerify(t *testing.T) {
 	if err != nil {
 		t.Fatalf("verify: %v", err)
 	}
-	if claims.Subject != "user-1" || claims.Email != "a@b.co" {
+	if claims.Subject != "user-1" {
 		t.Fatalf("unexpected claims: %+v", claims)
 	}
 	// Tampering must fail.
@@ -47,15 +47,8 @@ func TestTokenSignVerify(t *testing.T) {
 
 func TestExpiredToken(t *testing.T) {
 	signer, _ := NewTokenSigner(-1 * time.Second) // already expired
-	tok, _ := signer.Issue("u", "e")
+	tok, _ := signer.Issue("u")
 	if _, err := signer.Verify(tok); err == nil {
 		t.Fatal("expired token accepted")
-	}
-}
-
-func TestDeriveIdentityID(t *testing.T) {
-	id := deriveIdentityID([]byte{1, 2, 3}, []byte{4, 5, 6})
-	if len(id) != 32 { // 16 bytes hex-encoded
-		t.Fatalf("identity_id length = %d, want 32 hex chars", len(id))
 	}
 }

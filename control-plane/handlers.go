@@ -4,11 +4,13 @@ import (
 	"context"
 	"crypto"
 	"crypto/ed25519"
-	"crypto/sha256"
+	crand "crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"math/big"
 	"net/http"
 	"strings"
 	"time"
@@ -55,20 +57,28 @@ func errJSON(w http.ResponseWriter, status int, msg string) {
 
 // --- auth ---
 
+// Accounts are anonymous (docs/privacy-policy.md). Registering takes only a
+// password; the server answers with a random account number, which is the
+// login. Nothing about the person is asked for or stored, and a request that
+// sends more (an "email" field, say) has it ignored: the decoders below have
+// nowhere to put it.
+const (
+	accountDigits  = 16
+	minPasswordLen = 8
+	maxPasswordLen = 1024 // bounds the Argon2id input
+	maxAuthBody    = 4 << 10
+)
+
 func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Email      string `json:"email"`
-		Password   string `json:"password"`
-		IdentityID string `json:"identity_id"`
-		MlDsaPub   string `json:"ml_dsa_pub"`
-		EdPub      string `json:"ed_pub"`
+		Password string `json:"password"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxAuthBody)).Decode(&body); err != nil {
 		errJSON(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	if body.Email == "" || len(body.Password) < 8 {
-		errJSON(w, http.StatusBadRequest, "email required, password >= 8 chars")
+	if len(body.Password) < minPasswordLen || len(body.Password) > maxPasswordLen {
+		errJSON(w, http.StatusBadRequest, "password must be 8 to 1024 characters")
 		return
 	}
 	hash, err := hashPassword(body.Password)
@@ -76,56 +86,102 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, http.StatusInternalServerError, "hash error")
 		return
 	}
-	mlDsa, _ := hex.DecodeString(body.MlDsaPub)
-	edPub, _ := hex.DecodeString(body.EdPub)
-	identityID := body.IdentityID
-	if identityID == "" && len(mlDsa) > 0 && len(edPub) > 0 {
-		identityID = deriveIdentityID(mlDsa, edPub)
-	}
-	u := &User{
-		Email:        body.Email,
-		PasswordHash: hash,
-		IdentityID:   identityID,
-		MlDsaPub:     mlDsa,
-		EdPub:        edPub,
-	}
-	if err := s.store.CreateUser(r.Context(), u); err != nil {
-		errJSON(w, http.StatusConflict, err.Error())
+	// A clash is a 1-in-10^16 event per existing account; retry a few times.
+	for attempt := 0; attempt < 5; attempt++ {
+		number, err := newAccountNumber()
+		if err != nil {
+			errJSON(w, http.StatusInternalServerError, "rng failure")
+			return
+		}
+		err = s.store.CreateUser(r.Context(), &User{AccountNumber: number, PasswordHash: hash})
+		if errors.Is(err, ErrAccountNumberTaken) {
+			continue
+		}
+		if err != nil {
+			errJSON(w, http.StatusInternalServerError, "could not create the account")
+			return
+		}
+		writeJSON(w, http.StatusCreated, map[string]string{
+			"status":         "registered",
+			"account_number": formatAccountNumber(number),
+			"note":           "This number is your login. Write it down: it is shown once and cannot be recovered.",
+		})
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]string{
-		"status":      "registered",
-		"identity_id": identityID,
-	})
+	errJSON(w, http.StatusServiceUnavailable, "could not allocate an account number; try again")
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
+		AccountNumber string `json:"account_number"`
+		Password      string `json:"password"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxAuthBody)).Decode(&body); err != nil {
 		errJSON(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	u, err := s.store.GetUserByEmail(r.Context(), body.Email)
-	if err != nil {
-		// Do the work anyway to blunt user-enumeration timing.
+	var u *User
+	number, ok := normalizeAccountNumber(body.AccountNumber)
+	if ok && len(body.Password) <= maxPasswordLen {
+		u, _ = s.store.GetUserByAccount(r.Context(), number)
+	}
+	if u == nil {
+		// Do the work anyway, so timing doesn't reveal whether an account exists.
 		_, _ = verifyPassword(body.Password, dummyHash)
 		errJSON(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
-	ok, err := verifyPassword(body.Password, u.PasswordHash)
-	if err != nil || !ok {
+	if ok, err := verifyPassword(body.Password, u.PasswordHash); err != nil || !ok {
 		errJSON(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
-	tok, err := s.tokens.Issue(u.ID, u.Email)
+	tok, err := s.tokens.Issue(u.ID)
 	if err != nil {
 		errJSON(w, http.StatusInternalServerError, "token error")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"token": tok})
+}
+
+// newAccountNumber draws 16 uniformly random decimal digits (about 53 bits).
+func newAccountNumber() (string, error) {
+	limit := new(big.Int).Exp(big.NewInt(10), big.NewInt(accountDigits), nil)
+	n, err := crand.Int(crand.Reader, limit)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%0*d", accountDigits, n.Uint64()), nil
+}
+
+// normalizeAccountNumber accepts the number with or without the spaces or
+// dashes it is displayed with, and reports whether it is 16 digits.
+func normalizeAccountNumber(in string) (string, bool) {
+	var b strings.Builder
+	for _, c := range in {
+		switch {
+		case c >= '0' && c <= '9':
+			if b.Len() == accountDigits {
+				return "", false
+			}
+			b.WriteRune(c)
+		case c == ' ' || c == '-':
+		default:
+			return "", false
+		}
+	}
+	return b.String(), b.Len() == accountDigits
+}
+
+// formatAccountNumber groups the digits in fours, as the UI shows them.
+func formatAccountNumber(n string) string {
+	var b strings.Builder
+	for i, c := range n {
+		if i > 0 && i%4 == 0 {
+			b.WriteByte(' ')
+		}
+		b.WriteRune(c)
+	}
+	return b.String()
 }
 
 // dummyHash is a valid Argon2id hash of a random value, used to equalize login
@@ -264,63 +320,28 @@ func (s *Server) handleDeleteNode(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
-// --- connections ---
+// --- dashboard / mixnet ---
 
-func (s *Server) handleListConnections(w http.ResponseWriter, r *http.Request) {
-	conns, err := s.store.ListActiveConnections(r.Context())
-	if err != nil {
-		errJSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, conns)
-}
-
-func (s *Server) handleDisconnect(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	if err := s.store.EndConnection(r.Context(), id); err != nil {
-		if errors.Is(err, ErrNotFound) {
-			errJSON(w, http.StatusNotFound, "not found")
-			return
-		}
-		errJSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "disconnected"})
-}
-
-// --- dashboard / mixnet / settings ---
-
+// handleDashboard reports the network, never a customer: nothing here is
+// counted per account or per connection.
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	conns, err := s.store.ListActiveConnections(ctx)
+	nodes, err := s.store.ListNodes(ctx)
 	if err != nil {
 		errJSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	var totalBytes int64
-	for _, c := range conns {
-		totalBytes += c.BytesIn + c.BytesOut
-	}
 	online, meanDelay := s.mixnetHealth(ctx)
-	status := "degraded"
-	if online > 0 {
-		status = "ok"
-	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"active_connections": len(conns),
-		"bandwidth_mb":       float64(totalBytes) / 1e6,
-		"latency_ms":         meanDelay,
-		"mixnet_status":      status,
-		"nodes_online":       online,
+		"nodes_online": online,
+		"nodes_total":  len(nodes),
+		"latency_ms":   meanDelay,
 	})
 }
 
 func (s *Server) handleMixnetStatus(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	active, _ := s.store.CountActiveConnections(ctx)
-	online, meanDelay := s.mixnetHealth(ctx)
+	online, meanDelay := s.mixnetHealth(r.Context())
 	writeJSON(w, http.StatusOK, map[string]any{
-		"active_paths":    active,
 		"online_nodes":    online,
 		"cover_rate_pps":  1.0, // configured target cover rate (§10.4)
 		"mean_latency_ms": meanDelay,
@@ -346,54 +367,6 @@ func (s *Server) mixnetHealth(ctx context.Context) (online int, meanLatencyMs in
 		return 0, 0
 	}
 	return online, (delaySum / online) * 5 // 5-hop anon path
-}
-
-// defaultSettings is returned until a user saves their own.
-func defaultSettings() map[string]any {
-	return map[string]any{
-		"default_route":   "fast",
-		"kill_switch":     true,
-		"auto_connect":    false,
-		"mix_hops":        5,
-		"cover_rate_idle": 2.0,
-	}
-}
-
-func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
-	raw, err := s.store.GetSettings(r.Context(), userID(r))
-	if errors.Is(err, ErrNotFound) {
-		writeJSON(w, http.StatusOK, defaultSettings())
-		return
-	}
-	if err != nil {
-		errJSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(raw)
-}
-
-func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
-	var body map[string]any
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		errJSON(w, http.StatusBadRequest, "bad request")
-		return
-	}
-	if dr, ok := body["default_route"].(string); ok && dr != "fast" && dr != "anon" {
-		errJSON(w, http.StatusBadRequest, "default_route must be 'fast' or 'anon'")
-		return
-	}
-	raw, err := json.Marshal(body)
-	if err != nil {
-		errJSON(w, http.StatusBadRequest, "bad request")
-		return
-	}
-	if err := s.store.SetSettings(r.Context(), userID(r), raw); err != nil {
-		errJSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
 }
 
 // --- CRL (§7) ---
@@ -447,11 +420,4 @@ func (s *Server) handleCRL(w http.ResponseWriter, r *http.Request) {
 		"ed25519_pub":   hex.EncodeToString(s.crlPub),
 		"signature_alg": "Ed25519 (ML-DSA-65 co-signature: see §7)",
 	})
-}
-
-func deriveIdentityID(mlDsaPub, edPub []byte) string {
-	h := sha256.New()
-	h.Write(mlDsaPub)
-	h.Write(edPub)
-	return hex.EncodeToString(h.Sum(nil)[:16])
 }

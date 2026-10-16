@@ -4,8 +4,8 @@ import { clearToken } from "@/lib/api";
 
 const links = [
   { href: "/dashboard", label: "Dashboard" },
-  { href: "/connections", label: "Connections" },
-  { href: "/routing", label: "Routing" },
+  { href: "/devices", label: "Devices" },
+  { href: "/pay", label: "Buy access" },
 ];
 
 export default function Nav() {

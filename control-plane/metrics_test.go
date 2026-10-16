@@ -17,7 +17,11 @@ func TestMetricsEndpointExposesRealSeries(t *testing.T) {
 	do(t, h, "GET", "/api/me", tok, nil)
 	do(t, h, "GET", "/api/me", "", nil)
 
-	rec := do(t, h, "GET", "/metrics", "", nil)
+	// /metrics is served on its own private listener, never the public API.
+	if rec := do(t, h, "GET", "/metrics", "", nil); rec.Code != http.StatusNotFound {
+		t.Fatalf("the public API must not serve /metrics, got %d", rec.Code)
+	}
+	rec := do(t, metricsRoutes(), "GET", "/metrics", "", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("/metrics: %d", rec.Code)
 	}

@@ -20,6 +20,9 @@ services:
     environment:
       DATABASE_URL: postgres://pqanon:pqanon@db:5432/pqanon
       LISTEN_ADDR: ":8080"
+      # Metrics on their own port, reachable inside the compose network only
+      # (not published): public counters would show when someone pays.
+      METRICS_ADDR: ":9102"
     depends_on:
       db:
         condition: service_healthy

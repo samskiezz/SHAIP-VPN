@@ -10,8 +10,10 @@ package main
 //	GET    /api/devices       (auth)   the caller's enrolled devices
 //	DELETE /api/devices/{id}  (auth)   revoke a device (published in the signed CRL)
 //
-// Tokens and certificates name the account by its opaque user id, never the
-// email, so the artifacts carry no personal data.
+// An enrollment token names the account by its opaque id (only the device
+// being enrolled sees it). A device certificate names no account at all (see
+// enrollment.WithheldAccount): it is shown to every tunnel server the device
+// connects to, and they have no need to know whose device it is.
 
 import (
 	"crypto/ed25519"
@@ -32,9 +34,25 @@ const (
 	enrollDefaultTTL = 15 * time.Minute
 	enrollMaxTTL     = 24 * time.Hour
 	deviceCertTTL    = 365 * 24 * time.Hour
-	maxDeviceName    = 64
 	maxClaimBody     = 16 << 10
 )
+
+// deviceLabels are the only device names stored. Clients used to send the
+// operating system's device name ("Alex's iPhone"), which is personal data; a
+// platform label, the day and the id are enough to tell devices apart.
+var deviceLabels = []string{"iPhone", "iPad", "Android", "Windows", "Linux", "Mac"}
+
+// deviceLabel reduces whatever a client sent to the platform it names
+// ("Alex's iPhone" → "iPhone"), or "device". The text itself is never kept.
+func deviceLabel(name string) string {
+	name = strings.ToLower(name)
+	for _, l := range deviceLabels {
+		if strings.Contains(name, strings.ToLower(l)) {
+			return l
+		}
+	}
+	return "device"
+}
 
 // ClaimPoPMessage is what the device signs with its identity key to prove it
 // holds the key it is enrolling. Prefixed so the signature cannot be replayed
@@ -110,7 +128,7 @@ func (s *Server) handleEnrollClaim(w http.ResponseWriter, r *http.Request) {
 		Token     string `json:"token"`
 		DevicePub string `json:"device_pub"` // hex Ed25519 identity key
 		PoP       string `json:"pop"`        // hex Ed25519 sig over ClaimPoPMessage(token)
-		Name      string `json:"name"`
+		Name      string `json:"name"`       // mapped to a platform label (deviceLabel)
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxClaimBody)).Decode(&body); err != nil {
 		errJSON(w, http.StatusBadRequest, "bad request")
@@ -141,13 +159,7 @@ func (s *Server) handleEnrollClaim(w http.ResponseWriter, r *http.Request) {
 		reject(http.StatusBadRequest, "proof of possession failed")
 		return
 	}
-	name := strings.TrimSpace(body.Name)
-	if name == "" {
-		name = "device"
-	}
-	if len(name) > maxDeviceName {
-		name = name[:maxDeviceName]
-	}
+	name := deviceLabel(body.Name)
 
 	// Sign first (pure computation), then commit atomically: a signing failure
 	// burns nothing, and a failed claim just discards the unused certificate.
@@ -156,9 +168,11 @@ func (s *Server) handleEnrollClaim(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, http.StatusInternalServerError, "rng failure")
 		return
 	}
-	issued := now.Truncate(time.Second)
+	// Issued on the UTC day, not the moment: the certificate is shown to every
+	// server the device connects to, and its expiry is stored with the device.
+	issued := day(now)
 	certClaims := enrollment.CertClaims{
-		DeviceID: did, Account: claims.Account, DevicePub: devPub,
+		DeviceID: did, Account: enrollment.WithheldAccount, DevicePub: devPub,
 		IssuedAt: issued, ExpiresAt: issued.Add(deviceCertTTL),
 	}
 	cert, err := enrollment.IssueDeviceCert(s.deviceCASigner, certClaims)
@@ -189,7 +203,7 @@ func (s *Server) handleEnrollClaim(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_ = s.store.AppendAudit(r.Context(), &AuditEntry{
-		UserID: claims.Account, Action: "device.enroll", Detail: d.ID + " " + d.Name, IP: r.RemoteAddr,
+		UserID: claims.Account, Action: "device.enroll", Detail: d.ID,
 	})
 	mEnrollments.WithLabelValues("claimed").Inc()
 	writeJSON(w, http.StatusCreated, map[string]any{

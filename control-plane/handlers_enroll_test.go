@@ -64,7 +64,7 @@ func TestEnrollClaimIssuesBoundCertificateOnce(t *testing.T) {
 	uid, tok := authedUser(t, srv, store)
 	token := issueToken(t, h, tok)
 
-	// The token names the account by its opaque id, never the email.
+	// The token names the account by its opaque id (only the device sees it).
 	claims, err := enrollment.VerifyEnrollToken(srv.enrollPub, token, time.Now())
 	if err != nil || claims.Account != uid || !claims.OneTime {
 		t.Fatalf("token claims: %v %+v", err, claims)
@@ -81,14 +81,21 @@ func TestEnrollClaimIssuesBoundCertificateOnce(t *testing.T) {
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &out)
 
-	// The certificate verifies under the device CA and binds exactly this key
-	// to this account.
+	// The certificate verifies under the device CA and binds exactly this key.
+	// It names no account (tunnel servers see it) and was issued on a UTC day
+	// boundary, not at the moment of the claim.
 	cert, err := enrollment.VerifyDeviceCert(srv.deviceCAPub, out.Cert, time.Now())
 	if err != nil {
 		t.Fatalf("cert: %v", err)
 	}
-	if !ed25519.PublicKey(cert.DevicePub).Equal(pub) || cert.Account != uid || hex.EncodeToString(cert.DeviceID[:]) != out.DeviceID {
+	if !ed25519.PublicKey(cert.DevicePub).Equal(pub) || hex.EncodeToString(cert.DeviceID[:]) != out.DeviceID {
 		t.Fatalf("cert binds the wrong thing: %+v", cert)
+	}
+	if cert.Account != enrollment.WithheldAccount || strings.Contains(out.Cert, uid) {
+		t.Fatalf("the certificate must not name the account: %+v", cert)
+	}
+	if !cert.IssuedAt.Equal(day(cert.IssuedAt)) {
+		t.Fatalf("certificate issued at a moment, not a day: %v", cert.IssuedAt)
 	}
 
 	// One-time: the same token cannot enroll a second device.
@@ -101,7 +108,8 @@ func TestEnrollClaimIssuesBoundCertificateOnce(t *testing.T) {
 	rec = do(t, h, "GET", "/api/devices", tok, nil)
 	var devs []Device
 	_ = json.Unmarshal(rec.Body.Bytes(), &devs)
-	if len(devs) != 1 || devs[0].ID != out.DeviceID || devs[0].Name != "laptop" || devs[0].EdPubHex != hex.EncodeToString(pub) {
+	// "laptop" is not a platform label, so it is stored as "device".
+	if len(devs) != 1 || devs[0].ID != out.DeviceID || devs[0].Name != "device" || devs[0].EdPubHex != hex.EncodeToString(pub) {
 		t.Fatalf("devices: %+v", devs)
 	}
 }
@@ -224,9 +232,8 @@ func TestRevokedDeviceAppearsInSignedCRL(t *testing.T) {
 func TestDevicesAreIsolatedPerAccount(t *testing.T) {
 	srv, h, store := newTestServer(t)
 	_, tokA := authedUser(t, srv, store)
-	ub := &User{Email: "b-dev@t.co", PasswordHash: "x", IdentityID: "id-bdev"}
-	_ = store.CreateUser(context.Background(), ub)
-	tokB, _ := srv.tokens.Issue(ub.ID, ub.Email)
+	ub := newUser(t, store, "")
+	tokB, _ := srv.tokens.Issue(ub.ID)
 
 	token := issueToken(t, h, tokA)
 	pub, priv := newDeviceKey(t)

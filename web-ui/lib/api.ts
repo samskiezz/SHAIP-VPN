@@ -3,17 +3,25 @@
 export const API_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
+// The session token lives in sessionStorage: it is gone when the tab closes,
+// so a shared or borrowed computer doesn't stay signed in to the account.
+
 export function getToken(): string | null {
   if (typeof window === "undefined") return null;
-  return window.localStorage.getItem("token");
+  return window.sessionStorage.getItem("token");
 }
 
 export function setToken(token: string) {
-  window.localStorage.setItem("token", token);
+  window.sessionStorage.setItem("token", token);
 }
 
 export function clearToken() {
-  window.localStorage.removeItem("token");
+  window.sessionStorage.removeItem("token");
+}
+
+/** Group a 16-digit account number in fours, as it is shown. */
+export function formatAccount(n: string): string {
+  return n.replace(/\D/g, "").replace(/(\d{4})(?=\d)/g, "$1 ");
 }
 
 type Options = {

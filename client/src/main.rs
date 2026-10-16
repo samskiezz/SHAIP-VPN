@@ -166,9 +166,11 @@ enum Cmd {
         /// This device's identity file (created 0600 if absent).
         #[arg(long)]
         identity: String,
-        /// Label for this device in the account's device list.
-        #[arg(long, default_value = "device")]
-        name: String,
+        /// Platform label for the account's device list: only iPhone, iPad,
+        /// Android, Windows, Linux or Mac is sent (anything else is sent as
+        /// "device"). Default: this machine's platform.
+        #[arg(long)]
+        name: Option<String>,
         /// Where to store the certificate (default: <identity>.cert).
         #[arg(long)]
         cert_out: Option<String>,
@@ -300,7 +302,10 @@ fn cli_main() -> Result<()> {
             identity,
             name,
             cert_out,
-        } => enroll_cmd(&link, &server, &authority_key, &ca_key, &identity, &name, cert_out.as_deref()),
+        } => {
+            let name = name.as_deref().unwrap_or(pqanon::enroll_client::this_platform());
+            enroll_cmd(&link, &server, &authority_key, &ca_key, &identity, name, cert_out.as_deref())
+        }
         Cmd::Crl { url, pubkey, max_age } => crl_cmd(&url, &pubkey, max_age),
         Cmd::Directory { url, authorities } => directory_cmd(&url, &authorities),
         Cmd::Probe {
@@ -332,11 +337,7 @@ fn enroll_cmd(
         name,
         cert_out.map(std::path::Path::new),
     )?;
-    println!(
-        "Enrolled device {} for account {}",
-        hex::encode(done.cert.device_id),
-        done.cert.account
-    );
+    println!("Enrolled device {}", hex::encode(done.cert.device_id));
     println!("certificate: {} (valid until unix {})", done.cert_path.display(), done.cert.expires_at);
     Ok(())
 }

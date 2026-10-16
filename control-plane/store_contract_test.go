@@ -43,21 +43,20 @@ func randHex(n int) string {
 	return hex.EncodeToString(b)
 }
 
-// mkUser creates a user and returns its id. PgStore.CreateUser does not report
-// the generated id, so it is read back by email (the contract callers rely on).
+// mkUser creates a user and returns its id.
 func mkUser(t *testing.T, st Store) string {
 	t.Helper()
-	ctx := context.Background()
-	email := "contract-" + randHex(6) + "@t.co"
-	if err := st.CreateUser(ctx, &User{Email: email, PasswordHash: "x", IdentityID: "id-" + randHex(8)}); err != nil {
-		t.Fatalf("create user: %v", err)
-	}
-	u, err := st.GetUserByEmail(ctx, email)
-	if err != nil || u.ID == "" {
-		t.Fatalf("read back user: %v", err)
+	number, _ := newAccountNumber()
+	u := &User{AccountNumber: number, PasswordHash: "x"}
+	if err := st.CreateUser(context.Background(), u); err != nil || u.ID == "" {
+		t.Fatalf("create user: %v %q", err, u.ID)
 	}
 	return u.ID
 }
+
+// isDay reports whether t is a UTC day boundary: what every customer record
+// stores in place of a moment.
+func isDay(t time.Time) bool { return t.Equal(day(t)) }
 
 func mkToken(t *testing.T, st Store, userID string, ttl time.Duration) string {
 	t.Helper()
@@ -83,22 +82,30 @@ func storeContract(t *testing.T, st Store) {
 	ctx := context.Background()
 
 	t.Run("users", func(t *testing.T) {
-		email := "u-" + randHex(6) + "@t.co"
-		if err := st.CreateUser(ctx, &User{Email: email, PasswordHash: "h", IdentityID: "id-" + randHex(8)}); err != nil {
+		number, _ := newAccountNumber()
+		created := &User{AccountNumber: number, PasswordHash: "h"}
+		if err := st.CreateUser(ctx, created); err != nil || created.ID == "" {
 			t.Fatal(err)
 		}
-		if err := st.CreateUser(ctx, &User{Email: email, PasswordHash: "h"}); err == nil {
-			t.Fatal("duplicate email must be rejected")
+		if err := st.CreateUser(ctx, &User{AccountNumber: number, PasswordHash: "h"}); !errors.Is(err, ErrAccountNumberTaken) {
+			t.Fatalf("a duplicate account number must be refused with ErrAccountNumberTaken, got %v", err)
 		}
-		u, err := st.GetUserByEmail(ctx, email)
-		if err != nil || u.Role != "user" {
-			t.Fatalf("by email: %v %+v", err, u)
+		u, err := st.GetUserByAccount(ctx, number)
+		if err != nil || u.Role != "user" || u.ID != created.ID || u.AccountNumber != number {
+			t.Fatalf("by account number: %v %+v", err, u)
 		}
-		if byID, err := st.GetUserByID(ctx, u.ID); err != nil || byID.Email != email {
+		if !isDay(u.CreatedAt) {
+			t.Fatalf("created_at is a moment, not a day: %v", u.CreatedAt)
+		}
+		if byID, err := st.GetUserByID(ctx, u.ID); err != nil || byID.AccountNumber != number {
 			t.Fatalf("by id: %v", err)
 		}
-		if _, err := st.GetUserByEmail(ctx, "nobody-"+randHex(4)+"@t.co"); !errors.Is(err, ErrNotFound) {
+		other, _ := newAccountNumber()
+		if _, err := st.GetUserByAccount(ctx, other); !errors.Is(err, ErrNotFound) {
 			t.Fatalf("missing user: %v", err)
+		}
+		if _, err := st.GetUserByID(ctx, "session:"+randHex(8)); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("a non-UUID id: %v", err)
 		}
 	})
 
@@ -109,8 +116,8 @@ func storeContract(t *testing.T, st Store) {
 		if err := st.ClaimEnrollment(ctx, tok, time.Now().UTC(), d); err != nil {
 			t.Fatalf("claim: %v", err)
 		}
-		if d.TokenID != tok || d.EdPubHex != hex.EncodeToString(d.EdPub) || d.CreatedAt.IsZero() {
-			t.Fatalf("claimed device not filled in: %+v", d)
+		if d.TokenID != tok || d.EdPubHex != hex.EncodeToString(d.EdPub) || !isDay(d.CreatedAt) {
+			t.Fatalf("claimed device not filled in (or created_at is a moment): %+v", d)
 		}
 		if err := st.ClaimEnrollment(ctx, tok, time.Now().UTC(), mkDevice(uid)); !errors.Is(err, ErrTokenClaimed) {
 			t.Fatalf("second claim: %v", err)
@@ -129,8 +136,9 @@ func storeContract(t *testing.T, st Store) {
 		if err := st.ClaimEnrollment(ctx, tok, time.Now().UTC(), mkDevice(other)); !errors.Is(err, ErrNotFound) {
 			t.Fatalf("cross-account claim: %v", err)
 		}
-		// An expired token fails...
-		if err := st.ClaimEnrollment(ctx, tok, time.Now().UTC().Add(2*time.Hour), mkDevice(uid)); !errors.Is(err, ErrTokenExpired) {
+		// An expired token fails. Stores keep the expiry only to the end of its
+		// day (the exact one is in the signed token), so go two days on.
+		if err := st.ClaimEnrollment(ctx, tok, time.Now().UTC().Add(49*time.Hour), mkDevice(uid)); !errors.Is(err, ErrTokenExpired) {
 			t.Fatalf("expired claim: %v", err)
 		}
 		// ...and a reused device key fails without burning the fresh token.
@@ -213,47 +221,25 @@ func storeContract(t *testing.T, st Store) {
 			t.Fatal(err)
 		}
 		first := revokedAt(t, st, d.ID)
-		time.Sleep(10 * time.Millisecond)
+		if !isDay(first) {
+			t.Fatalf("revoked_at is a moment, not a day: %v", first)
+		}
 		if err := st.RevokeDevice(ctx, d.ID, uid); err != nil {
 			t.Fatal(err)
 		}
 		if again := revokedAt(t, st, d.ID); !again.Equal(first) {
-			t.Fatal("revoking twice must keep the first timestamp")
+			t.Fatal("revoking twice must keep the first day")
 		}
 	})
 
-	t.Run("settings-routing-apikeys-audit", func(t *testing.T) {
+	t.Run("apikeys-audit", func(t *testing.T) {
 		uid := mkUser(t, st)
-		if _, err := st.GetSettings(ctx, uid); !errors.Is(err, ErrNotFound) {
-			t.Fatalf("unset settings: %v", err)
-		}
-		if err := st.SetSettings(ctx, uid, []byte(`{"default_route":"anon"}`)); err != nil {
-			t.Fatal(err)
-		}
-		if raw, err := st.GetSettings(ctx, uid); err != nil || len(raw) == 0 {
-			t.Fatalf("settings: %v", err)
-		}
-
-		r := &RoutingRule{UserID: uid, Domain: "*.x.co", Route: "anon", Priority: 3}
-		if err := st.CreateRoutingRule(ctx, r); err != nil || r.ID == "" {
-			t.Fatalf("rule: %v", err)
-		}
-		if rules, _ := st.ListRoutingRules(ctx, uid); len(rules) != 1 || rules[0].Domain != "*.x.co" {
-			t.Fatalf("rules: %+v", rules)
-		}
-		if err := st.DeleteRoutingRule(ctx, r.ID, mkUser(t, st)); !errors.Is(err, ErrNotFound) {
-			t.Fatal("deleting another user's rule must fail")
-		}
-		if err := st.DeleteRoutingRule(ctx, r.ID, uid); err != nil {
-			t.Fatal(err)
-		}
-
 		k := &APIKey{UserID: uid, Name: "ci", Prefix: "pqa_abcdefgh", KeyHash: randHex(32)}
 		if err := st.CreateAPIKey(ctx, k); err != nil || k.ID == "" {
 			t.Fatalf("api key: %v", err)
 		}
-		if keys, _ := st.ListAPIKeys(ctx, uid); len(keys) != 1 || keys[0].Name != "ci" {
-			t.Fatalf("keys: %+v", keys)
+		if keys, _ := st.ListAPIKeys(ctx, uid); len(keys) != 1 || keys[0].Name != "ci" || !isDay(keys[0].CreatedAt) {
+			t.Fatalf("keys (created_at must be a day): %+v", keys)
 		}
 		if err := st.DeleteAPIKey(ctx, k.ID, uid); err != nil {
 			t.Fatal(err)
@@ -262,8 +248,15 @@ func storeContract(t *testing.T, st Store) {
 		if err := st.AppendAudit(ctx, &AuditEntry{UserID: uid, Action: "contract.test", Detail: "d"}); err != nil {
 			t.Fatal(err)
 		}
-		if entries, _ := st.ListAudit(ctx, uid, 10); len(entries) != 1 || entries[0].Action != "contract.test" {
-			t.Fatalf("audit: %+v", entries)
+		entries, _ := st.ListAudit(ctx, uid, 10)
+		if len(entries) != 1 || entries[0].Action != "contract.test" || !isDay(entries[0].At) {
+			t.Fatalf("audit (at must be a day): %+v", entries)
+		}
+		if others, _ := st.ListAudit(ctx, mkUser(t, st), 10); len(others) != 0 {
+			t.Fatalf("audit entries leak across accounts: %+v", others)
+		}
+		if all, _ := st.ListAudit(ctx, "", 10); len(all) != 0 {
+			t.Fatalf("an empty account must list nothing, not everyone's entries: %+v", all)
 		}
 	})
 
@@ -379,6 +372,19 @@ func storeContract(t *testing.T, st Store) {
 		got, err := st.GetPayOrder(ctx, o.ID)
 		if err != nil || got.Status != "paid" || len(got.BlindSigs) != 1 || len(got.BlindedTokens) != 1 {
 			t.Fatalf("order round trip: %v %+v", err, got)
+		}
+		// An order's times are days: opened, paid, and an expiry rounded up
+		// (never earlier than the one asked for).
+		if !isDay(got.CreatedAt) || got.PaidAt == nil || !isDay(*got.PaidAt) || !isDay(got.ExpiresAt) ||
+			got.ExpiresAt.Before(time.Now().Add(time.Hour)) {
+			t.Fatalf("order times must be days: %+v", got)
+		}
+		// Re-saving an order does not move its expiry.
+		if err := st.UpdatePayOrder(ctx, got); err != nil {
+			t.Fatal(err)
+		}
+		if again, _ := st.GetPayOrder(ctx, o.ID); !again.ExpiresAt.Equal(got.ExpiresAt) || !again.CreatedAt.Equal(got.CreatedAt) {
+			t.Fatalf("re-saving moved the order's times: %+v vs %+v", again, got)
 		}
 		nonce := randHex(16)
 		if err := st.SpendToken(ctx, "month", nonce); err != nil {

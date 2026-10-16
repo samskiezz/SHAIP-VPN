@@ -137,9 +137,8 @@ func TestBondCountsOnlyOncePaid(t *testing.T) {
 func TestBondPermissions(t *testing.T) {
 	srv, h, store := newTestServer(t)
 	_, tokA := authedUser(t, srv, store)
-	ub := &User{Email: "b-stake@t.co", PasswordHash: "x", IdentityID: "id-bstake"}
-	_ = store.CreateUser(context.Background(), ub)
-	tokB, _ := srv.tokens.Issue(ub.ID, ub.Email)
+	ub := newUser(t, store, "")
+	tokB, _ := srv.tokens.Issue(ub.ID)
 	node, _ := registerNode(t, h, tokA, "a-node")
 
 	if rec := do(t, h, "POST", "/api/stake/"+node+"/bond", tokB, map[string]any{"amount_sats": 1, "rail": "dev"}); rec.Code != http.StatusForbidden {

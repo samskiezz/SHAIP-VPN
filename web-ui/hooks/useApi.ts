@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react';
+import { getToken } from '@/lib/api';
 
 export interface ApiState<T> {
   data: T | null;
@@ -13,7 +14,7 @@ export function useApi<T>() {
   const call = useCallback(async (input: RequestInfo, init?: RequestInit): Promise<T | null> => {
     setState((s) => ({ ...s, loading: true, error: null }));
     try {
-      const tok = typeof localStorage !== 'undefined' ? localStorage.getItem('token') : null;
+      const tok = getToken();
       const resp = await fetch(input, {
         ...init,
         headers: {

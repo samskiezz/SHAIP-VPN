@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -164,9 +163,10 @@ func TestUnlinkablePaymentFlow(t *testing.T) {
 		t.Fatalf("redeem: %d (%s)", rec.Code, rec.Body.String())
 	}
 	var grant struct {
-		SessionID string `json:"session_id"`
-		Grant     string `json:"grant"`
-		Plan      string `json:"plan"`
+		SessionID string    `json:"session_id"`
+		Grant     string    `json:"grant"`
+		Plan      string    `json:"plan"`
+		ExpiresAt time.Time `json:"expires_at"`
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &grant)
 	if grant.SessionID == "" || grant.Grant == "" || grant.Plan != "month" {
@@ -176,20 +176,14 @@ func TestUnlinkablePaymentFlow(t *testing.T) {
 	if _, err := srv.tokens.Verify(grant.Grant); err != nil {
 		t.Fatalf("access grant must verify: %v", err)
 	}
-	// The redemption is recorded without a user or the caller's IP address
-	// (httptest requests come from 192.0.2.1).
-	entries, _ := srv.store.ListAudit(context.Background(), "", 100)
-	found := false
-	for _, e := range entries {
-		if e.Action == "token.redeem" {
-			found = true
-			if e.IP != "" || e.UserID != "" {
-				t.Fatalf("an anonymous redemption must not record who made it: %+v", e)
-			}
-		}
+	// Nothing about the redemption is written down: no audit entry at all
+	// (httptest requests come from 192.0.2.1, and it must appear nowhere).
+	if n := len(srv.store.(*MemStore).audit); n != 0 {
+		t.Fatalf("a redemption must leave no audit entry, found %d", n)
 	}
-	if !found {
-		t.Fatal("no token.redeem audit entry")
+	// The grant's expiry is a day boundary, not the redemption moment + 30d.
+	if exp := grant.ExpiresAt; !exp.Equal(day(exp)) {
+		t.Fatalf("grant expiry %v reveals the moment of redemption", exp)
 	}
 
 	// 8. Double-spend is refused.
@@ -209,7 +203,7 @@ func TestUnlinkablePaymentFlow(t *testing.T) {
 
 	// 10. The payment metrics now carry real samples (this flow created an order
 	// and redeemed ok / was refused / was forged).
-	m := do(t, h, "GET", "/metrics", "", nil).Body.String()
+	m := do(t, metricsRoutes(), "GET", "/metrics", "", nil).Body.String()
 	for _, want := range []string{
 		`pqanon_cp_orders_total{denom="month",rail="dev"}`,
 		`pqanon_cp_redemptions_total{denom="month",result="ok"}`,
