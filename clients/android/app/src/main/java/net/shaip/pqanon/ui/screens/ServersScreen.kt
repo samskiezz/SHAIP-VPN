@@ -7,6 +7,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import net.shaip.pqanon.net.Api
@@ -66,24 +67,26 @@ fun ServersScreen(api: Api) {
 @Composable
 private fun HeaderRow() {
     Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp)) {
-        Cell("Server", 2.2f, header = true)
-        Cell("Role", 1f, header = true)
+        Cell("Server", 2.0f, header = true)
+        Cell("Role", 0.9f, header = true)
         Cell("Capacity", 1.2f, header = true)
-        Cell("Status", 1f, header = true)
+        Cell("Status", 1.5f, header = true)
     }
 }
 
 @Composable
 private fun NodeRow(n: Node) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(2.2f)) {
-            Text(n.name.ifBlank { n.id }, color = Tokens.Ink, fontWeight = FontWeight.Medium)
+        Column(Modifier.weight(2.0f).padding(end = 8.dp)) {
+            Text(n.name.ifBlank { n.id }, color = Tokens.Ink, fontWeight = FontWeight.Medium,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (n.address.isNotBlank())
-                Text(n.address, color = Tokens.Ink3, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+                Text(n.address, color = Tokens.Ink3, fontFamily = FontFamily.Monospace, fontSize = 11.sp,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        Cell(ROLE[n.role] ?: n.role.ifBlank { "—" }, 1f)
+        Cell(ROLE[n.role] ?: n.role.ifBlank { "—" }, 0.9f)
         Cell(if (n.capacityMbps > 0) "${n.capacityMbps} Mbps" else "—", 1.2f, mono = true)
-        Box(Modifier.weight(1f)) {
+        Box(Modifier.weight(1.5f)) {
             StatusPill(if (n.online) "online" else "offline", if (n.online) Tokens.Ok else Tokens.Steel)
         }
     }

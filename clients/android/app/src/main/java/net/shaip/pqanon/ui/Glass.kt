@@ -81,11 +81,12 @@ fun StatusPill(label: String, tint: Color) {
             .background(tint.copy(alpha = 0.12f))
             .border(BorderStroke(1.dp, tint.copy(alpha = 0.35f)), RoundedCornerShape(12.dp))
             .height(24.dp)
-            .padding(horizontal = 10.dp),
+            .padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
     ) {
         GlowDot(tint)
-        Text(label.uppercase(), color = tint, fontFamily = Mono, fontSize = 10.sp, letterSpacing = 1.4.sp)
+        Text(label.uppercase(), color = tint, fontFamily = Mono, fontSize = 10.sp,
+            letterSpacing = 0.8.sp, maxLines = 1, softWrap = false)
     }
 }
