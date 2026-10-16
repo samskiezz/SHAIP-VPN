@@ -150,6 +150,7 @@ func (s *Server) handleCreateOrder(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	mOrders.WithLabelValues(order.Rail, order.Denom).Inc()
 	writeJSON(w, http.StatusCreated, s.orderView(order))
 }
 
@@ -271,6 +272,7 @@ func (s *Server) handleRedeem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := d.Verify(nonce, sig); err != nil {
+		mRedemptions.WithLabelValues(d.ID, "invalid").Inc()
 		errJSON(w, http.StatusUnauthorized, "invalid token")
 		return
 	}
@@ -280,12 +282,14 @@ func (s *Server) handleRedeem(w http.ResponseWriter, r *http.Request) {
 	nonceHash := hex.EncodeToString(h[:])
 	if err := s.store.SpendToken(r.Context(), d.ID, nonceHash); err != nil {
 		if errors.Is(err, ErrSpent) {
+			mRedemptions.WithLabelValues(d.ID, "spent").Inc()
 			errJSON(w, http.StatusConflict, "token already redeemed")
 			return
 		}
 		errJSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	mRedemptions.WithLabelValues(d.ID, "ok").Inc()
 
 	sessionID := newSessionID()
 	ttl := time.Duration(d.DurationDays) * 24 * time.Hour

@@ -22,6 +22,7 @@ pub mod handshake;
 pub mod i18n;
 pub mod ipparse;
 pub mod kdf;
+pub mod metrics;
 pub mod mix;
 pub mod obf;
 pub mod router;

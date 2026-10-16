@@ -47,6 +47,10 @@ struct Cli {
     /// independent, so the decoy may share the tunnel's port number.
     #[arg(long)]
     decoy: Option<String>,
+
+    /// Expose Prometheus metrics on this TCP address (e.g. 127.0.0.1:9100).
+    #[arg(long)]
+    metrics: Option<String>,
 }
 
 enum PeerState {
@@ -74,6 +78,18 @@ async fn main() -> Result<()> {
 
     let socket = Arc::new(UdpSocket::bind(&cli.listen).await?);
     tracing::info!(listen = %socket.local_addr()?, "pqanond listening");
+
+    // Optional Prometheus metrics endpoint.
+    if let Some(metrics_addr) = cli.metrics.clone() {
+        let addr: SocketAddr = metrics_addr
+            .parse()
+            .map_err(|e| anyhow::anyhow!("bad --metrics address {metrics_addr:?}: {e}"))?;
+        tokio::spawn(async move {
+            if let Err(e) = pqanon::metrics::serve(addr).await {
+                tracing::error!(err = %e, "metrics server failed");
+            }
+        });
+    }
 
     // Optional co-located TLS decoy on the TCP port.
     if let Some(decoy_addr) = cli.decoy.clone() {
@@ -137,6 +153,7 @@ async fn handle(
         let sealed = obf.demorph(pkt)?;
         let env = session.open_data(&sealed)?;
         if env.msg_type == MsgType::Data {
+            pqanon::metrics::DATA_PACKETS.inc();
             tracing::info!(%src, bytes = env.payload.len(), "DATA received; echoing");
             let reply = session.seal_data(MsgType::Data, env.payload)?;
             let wire = obf.morph(&reply);
@@ -171,7 +188,13 @@ async fn handle(
                 anyhow::bail!("CLIENT_FINISH without pending handshake");
             };
             let mut hs = *hs;
-            let est: Established = hs.recv_client_finish(&env)?;
+            let est: Established = match hs.recv_client_finish(&env) {
+                Ok(e) => e,
+                Err(e) => {
+                    pqanon::metrics::HANDSHAKES_FAILED.inc();
+                    return Err(e);
+                }
+            };
             tracing::info!(%src, conn_id = format!("{:#018x}", est.conn_id),
                 client = %hex16(est.peer_id), "session established");
             let session = Session::new(est.conn_id, est.k_c2s, est.k_s2c, src, false, 1400);
@@ -183,6 +206,8 @@ async fn handle(
                     obf: Box::new(obf),
                 },
             );
+            pqanon::metrics::HANDSHAKES_OK.inc();
+            pqanon::metrics::SESSIONS_ESTABLISHED.inc();
         }
         other => anyhow::bail!("unexpected handshake type {other:?}"),
     }
@@ -281,6 +306,7 @@ async fn handle_tun(
             let payload = (env.msg_type == MsgType::Data).then_some(env.payload);
             drop(st); // don't hold the lock across the TUN write
             if let Some(p) = payload {
+                pqanon::metrics::DATA_PACKETS.inc();
                 tun.send(&p).await?;
             }
             return Ok(());
@@ -315,7 +341,13 @@ async fn handle_tun(
                 anyhow::bail!("CLIENT_FINISH without pending handshake");
             };
             let mut hs = *hs;
-            let est = hs.recv_client_finish(&env)?;
+            let est = match hs.recv_client_finish(&env) {
+                Ok(e) => e,
+                Err(e) => {
+                    pqanon::metrics::HANDSHAKES_FAILED.inc();
+                    return Err(e);
+                }
+            };
             let assigned = st.router.allocate_v4(est.conn_id);
             st.conn_addr.insert(est.conn_id, src);
             let session = Session::new(est.conn_id, est.k_c2s, est.k_s2c, src, false, 1400);
@@ -327,6 +359,8 @@ async fn handle_tun(
                     obf: Box::new(obf),
                 },
             );
+            pqanon::metrics::HANDSHAKES_OK.inc();
+            pqanon::metrics::SESSIONS_ESTABLISHED.inc();
             tracing::info!(%src, conn_id = format!("{:#018x}", est.conn_id),
                 assigned = ?assigned, "session established; tunnel IP assigned");
         }

@@ -70,10 +70,12 @@ func routes(srv *Server, label string) http.Handler {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(30 * time.Second))
 	r.Use(corsMiddleware)
+	r.Use(metricsMiddleware)
 
 	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "store": label})
 	})
+	r.Get("/metrics", handleMetrics) // Prometheus scrape target
 
 	r.Route("/api", func(r chi.Router) {
 		r.Post("/auth/register", srv.handleRegister)

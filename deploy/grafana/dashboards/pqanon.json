@@ -1,0 +1,86 @@
+{
+  "uid": "pqanon-overview",
+  "title": "PQ-ANON Overview",
+  "tags": ["pqanon"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "15s",
+  "time": { "from": "now-1h", "to": "now" },
+  "templating": { "list": [] },
+  "annotations": { "list": [] },
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "Targets up",
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "mappings": [
+        { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+      ], "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value_and_name" },
+      "targets": [ { "refId": "A", "expr": "up", "legendFormat": "{{job}}", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+    },
+    {
+      "id": 2, "type": "timeseries", "title": "Control-plane requests/s by status",
+      "gridPos": { "h": 8, "w": 9, "x": 6, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 10 }, "unit": "reqps" }, "overrides": [] },
+      "targets": [ { "refId": "A", "expr": "sum by (status) (rate(pqanon_cp_requests_total[5m]))", "legendFormat": "{{status}}", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+    },
+    {
+      "id": 3, "type": "timeseries", "title": "Control-plane p99 latency",
+      "gridPos": { "h": 8, "w": 9, "x": 15, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 10 }, "unit": "s" }, "overrides": [] },
+      "targets": [ { "refId": "A", "expr": "histogram_quantile(0.99, sum by (le) (rate(pqanon_cp_request_duration_seconds_bucket[5m])))", "legendFormat": "p99", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+    },
+    {
+      "id": 4, "type": "timeseries", "title": "Auth failures/s",
+      "gridPos": { "h": 7, "w": 6, "x": 0, "y": 5 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 10 }, "unit": "short" }, "overrides": [] },
+      "targets": [ { "refId": "A", "expr": "rate(pqanon_cp_auth_failures_total[5m])", "legendFormat": "auth failures", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+    },
+    {
+      "id": 5, "type": "timeseries", "title": "Tunnel handshakes/s",
+      "gridPos": { "h": 8, "w": 9, "x": 6, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 10 }, "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(pqanon_server_handshakes_ok_total[5m]))", "legendFormat": "ok", "datasource": { "type": "prometheus", "uid": "prometheus" } },
+        { "refId": "B", "expr": "sum(rate(pqanon_server_handshakes_failed_total[5m]))", "legendFormat": "failed", "datasource": { "type": "prometheus", "uid": "prometheus" } }
+      ]
+    },
+    {
+      "id": 6, "type": "timeseries", "title": "Decoy probes/s (prober scans)",
+      "gridPos": { "h": 8, "w": 9, "x": 15, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 10 }, "unit": "short" }, "overrides": [] },
+      "targets": [ { "refId": "A", "expr": "rate(pqanon_server_decoy_probes_total[5m])", "legendFormat": "probes", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+    },
+    {
+      "id": 7, "type": "timeseries", "title": "Payments: orders/s by rail",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 10 }, "unit": "short" }, "overrides": [] },
+      "targets": [ { "refId": "A", "expr": "sum by (rail) (rate(pqanon_cp_orders_total[15m]))", "legendFormat": "{{rail}}", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+    },
+    {
+      "id": 8, "type": "timeseries", "title": "Payments: redemptions/s by result",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 10 }, "unit": "short" }, "overrides": [] },
+      "targets": [ { "refId": "A", "expr": "sum by (result) (rate(pqanon_cp_redemptions_total[15m]))", "legendFormat": "{{result}}", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+    },
+    {
+      "id": 9, "type": "timeseries", "title": "Mix cells/s",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 10 }, "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(pqanon_mix_cells_forwarded_total[5m]))", "legendFormat": "forwarded", "datasource": { "type": "prometheus", "uid": "prometheus" } },
+        { "refId": "B", "expr": "sum(rate(pqanon_mix_cover_cells_total[5m]))", "legendFormat": "cover", "datasource": { "type": "prometheus", "uid": "prometheus" } }
+      ]
+    }
+  ]
+}

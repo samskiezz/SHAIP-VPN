@@ -118,20 +118,24 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 var dummyHash, _ = hashPassword("pqanon-timing-equalizer")
 
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
+	fail := func(w http.ResponseWriter) {
+		mAuthFailures.Inc()
+		errJSON(w, http.StatusUnauthorized, "unauthorized")
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		auth := r.Header.Get("Authorization")
 		if !strings.HasPrefix(auth, "Bearer ") {
-			errJSON(w, http.StatusUnauthorized, "unauthorized")
+			fail(w)
 			return
 		}
 		tok := strings.TrimPrefix(auth, "Bearer ")
 		if tok == "" {
-			errJSON(w, http.StatusUnauthorized, "unauthorized")
+			fail(w)
 			return
 		}
 		claims, err := s.tokens.Verify(tok)
 		if err != nil {
-			errJSON(w, http.StatusUnauthorized, "unauthorized")
+			fail(w)
 			return
 		}
 		ctx := context.WithValue(r.Context(), ctxUserKey{}, claims.Subject)

@@ -40,6 +40,10 @@ struct Cli {
     /// Network-wide cover emission rate, in cells/sec (ignored without peers).
     #[arg(long = "cover-rate", default_value_t = 1.0)]
     cover_rate: f64,
+
+    /// Expose Prometheus metrics on this TCP address (e.g. 127.0.0.1:9101).
+    #[arg(long)]
+    metrics: Option<String>,
 }
 
 #[tokio::main]
@@ -59,6 +63,17 @@ async fn main() -> Result<()> {
 
     let socket = Arc::new(UdpSocket::bind(&cli.listen).await?);
     tracing::info!(listen = %socket.local_addr()?, "pqanon-mixd listening");
+
+    if let Some(metrics_addr) = cli.metrics.clone() {
+        let addr: SocketAddr = metrics_addr
+            .parse()
+            .map_err(|e| anyhow::anyhow!("bad --metrics address {metrics_addr:?}: {e}"))?;
+        tokio::spawn(async move {
+            if let Err(e) = pqanon::metrics::serve(addr).await {
+                tracing::error!(err = %e, "metrics server failed");
+            }
+        });
+    }
 
     // Globally-scheduled cover traffic: one Poisson process at a node-wide rate,
     // independent of how many clients are connected or active, so the emission
@@ -83,6 +98,7 @@ async fn main() -> Result<()> {
                     OsRng.fill_bytes(&mut cell);
                     let peer = peers[rand::random::<usize>() % peers.len()];
                     let _ = cover_sock.send_to(&cell, peer).await;
+                    pqanon::metrics::MIX_COVER_CELLS.inc();
                 }
             }
         });
@@ -112,6 +128,8 @@ async fn main() -> Result<()> {
                 tracing::info!(%src, %next, "relaying cell");
                 if let Err(e) = socket.send_to(&cell[..], next).await {
                     tracing::warn!(%next, error = %e, "forward failed");
+                } else {
+                    pqanon::metrics::MIX_CELLS_FORWARDED.inc();
                 }
             }
             Ok(Peeled::Deliver { payload }) => {

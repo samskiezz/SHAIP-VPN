@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -188,6 +189,19 @@ func TestUntraceablePaymentFlow(t *testing.T) {
 		"signature": b64.EncodeToString(sig),
 	}); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 for a forged token, got %d", rec.Code)
+	}
+
+	// 10. The payment metrics now carry real samples (this flow created an order
+	// and redeemed ok / was refused / was forged).
+	m := do(t, h, "GET", "/metrics", "", nil).Body.String()
+	for _, want := range []string{
+		`pqanon_cp_orders_total{denom="month",rail="dev"}`,
+		`pqanon_cp_redemptions_total{denom="month",result="ok"}`,
+		`pqanon_cp_redemptions_total{denom="month",result="invalid"}`,
+	} {
+		if !strings.Contains(m, want) {
+			t.Errorf("metrics missing %q", want)
+		}
 	}
 }
 

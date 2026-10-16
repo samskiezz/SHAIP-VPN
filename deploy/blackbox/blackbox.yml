@@ -1,0 +1,13 @@
+# Black-box exporter modules (§16).
+modules:
+  udp_connect:
+    prober: udp
+    timeout: 5s
+    udp:
+      preferred_ip_protocol: "ip4"
+  http_2xx:
+    prober: http
+    timeout: 5s
+    http:
+      preferred_ip_protocol: "ip4"
+      valid_status_codes: [200]

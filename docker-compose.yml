@@ -35,7 +35,7 @@ services:
     build:
       context: .
       dockerfile: server/Dockerfile
-    command: ["--listen", "0.0.0.0:443"]
+    command: ["--listen", "0.0.0.0:443", "--metrics", "0.0.0.0:9100"]
     ports:
       - "443:443/udp"
 
@@ -44,9 +44,67 @@ services:
       context: .
       dockerfile: server/Dockerfile
     entrypoint: ["/usr/local/bin/pqanon-mixd"]
-    command: ["--listen", "0.0.0.0:8443"]
+    command: ["--listen", "0.0.0.0:8443", "--metrics", "0.0.0.0:9101"]
     ports:
       - "8443:8443/udp"
 
+  # --- Monitoring (§16). `docker compose up` brings up a working stack:
+  #     Grafana  → http://localhost:3001   Prometheus → http://localhost:9090
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+    ports: ["9090:9090"]
+    depends_on: [control-plane]
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.0
+    volumes:
+      - ./deploy/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    environment:
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+      PAGERDUTY_SERVICE_KEY: ${PAGERDUTY_SERVICE_KEY:-}
+    ports: ["9093:9093"]
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PW:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports: ["3001:3000"]
+    depends_on: [prometheus]
+
+  blackbox-exporter:
+    image: prom/blackbox-exporter:v0.26.0
+    volumes:
+      - ./deploy/blackbox/blackbox.yml:/etc/blackbox_exporter/config.yml:ro
+    ports: ["9115:9115"]
+
+  node-exporter:
+    image: prom/node-exporter:v1.9.0
+    command:
+      - '--path.rootfs=/host'
+    volumes:
+      - /:/host:ro,rslave
+    pid: host
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.17.1
+    environment:
+      DATA_SOURCE_NAME: postgresql://pqanon:pqanon@db:5432/pqanon?sslmode=disable
+    depends_on: [db]
+
 volumes:
   pgdata:
+  prometheus-data:
+  grafana-data:

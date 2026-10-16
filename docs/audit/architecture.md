@@ -123,5 +123,3 @@ These are designed/partially present but **not** end-to-end today:
 - Rekey driver and the cookie anti-DoS exchange (the TLS-decoy half of
   anti-probing is wired).
 - Native platform clients (macOS/iOS/Android/desktop) and an FFI crate.
-- Prometheus metrics emission (so Grafana dashboards are deferred until the
-  series exist).

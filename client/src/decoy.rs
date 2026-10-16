@@ -136,6 +136,7 @@ impl TlsDecoy {
             .await
             .map_err(|_| anyhow!("handshake timeout"))?
             .context("tls accept")?;
+        crate::metrics::DECOY_PROBES.inc();
 
         // What the prober told us, for the "someone scanned us" log line.
         {
