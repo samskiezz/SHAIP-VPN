@@ -56,10 +56,10 @@
           </div>
           <div style="position:relative;width:44px;height:44px;border-radius:22px;display:flex;align-items:center;justify-content:center;background:linear-gradient(180deg,rgba(255,255,255,0.09),rgba(255,255,255,0.03));backdrop-filter:blur(40px);-webkit-backdrop-filter:blur(40px);border:0.5px solid rgba(255,255,255,0.16);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.3)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M6 8a6 6 0 1112 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.9 1.9 0 003.4 0"></path></svg><span style="position:absolute;top:10px;right:11px;width:8px;height:8px;border-radius:4px;background:#FF5C7A;box-shadow:0 0 0 2px #0A0D18"></span></div>
         </div>
-        <canvas data-gfx="net" data-cy="0.5" data-r="0.36" style="position:absolute;left:0;top:92px;width:390px;height:380px;display:block"></canvas>
+        <canvas data-gfx="net" data-cy="0.5" data-r="0.36" data-hud-clear="124" style="position:absolute;left:0;top:92px;width:390px;height:380px;display:block"></canvas>
         <div style="position:absolute;top:92px;left:0;width:390px;height:380px;z-index:6;display:flex;align-items:center;justify-content:center;pointer-events:none">
           <svg width="244" height="244" viewBox="0 0 244 244" style="position:absolute"><circle cx="122" cy="122" r="118" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="6" stroke-dasharray="0.7 5.48"></circle><circle cx="122" cy="122" r="100" fill="none" stroke="{{ c.orbRing }}" stroke-width="1"></circle><circle cx="122" cy="122" r="100" fill="none" stroke="{{ c.orbColor }}" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="{{ c.arc }}" transform="rotate(-90 122 122)"></circle></svg>
-          <div onClick="{{ toggleConnect }}" style="pointer-events:auto;width:156px;height:156px;border-radius:78px;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;background:radial-gradient(80% 80% at 30% 18%,rgba(255,255,255,0.24),rgba(255,255,255,0.04) 60%),rgba(10,14,26,0.4);backdrop-filter:blur(14px) saturate(180%);-webkit-backdrop-filter:blur(14px) saturate(180%);border:0.5px solid rgba(255,255,255,0.32);box-shadow:inset 0 1px 0 rgba(255,255,255,0.5),inset 0 -14px 28px rgba(0,0,0,0.4),0 30px 60px -10px rgba(0,0,0,0.85),0 0 70px {{ c.orbGlow }}">
+          <div onClick="{{ toggleConnect }}" role="button" aria-label="{{ c.orbA11y }}" style="pointer-events:auto;width:156px;height:156px;border-radius:78px;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;background:radial-gradient(80% 80% at 30% 18%,rgba(255,255,255,0.24),rgba(255,255,255,0.04) 60%),rgba(10,14,26,0.4);backdrop-filter:blur(14px) saturate(180%);-webkit-backdrop-filter:blur(14px) saturate(180%);border:0.5px solid rgba(255,255,255,0.32);box-shadow:inset 0 1px 0 rgba(255,255,255,0.5),inset 0 -14px 28px rgba(0,0,0,0.4),0 30px 60px -10px rgba(0,0,0,0.85),0 0 70px {{ c.orbGlow }}">
             <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="{{ c.orbColor }}" stroke-width="2" stroke-linecap="round"><path d="M12 3v8M6.3 6.8a8 8 0 1011.4 0"></path></svg>
             <span style="font:600 11px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.18em;color:{{ c.orbColor }}">{{ c.orbLabel }}</span>
             <span style="font-size:11px;color:rgba(220,228,255,0.5)">{{ c.orbSub }}</span>
@@ -70,9 +70,12 @@
             <div style="display:flex;align-items:center;gap:7px;height:24px;padding:0 10px;border-radius:12px;background:{{ c.pillBg }}"><span style="width:6px;height:6px;border-radius:3px;background:{{ c.statusColor }};box-shadow:0 0 8px {{ c.statusColor }}"></span><span style="font:600 10px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:{{ c.statusColor }}">{{ c.status }}</span></div>
             <span style="font:500 15px ui-monospace,'SF Mono',Menlo,monospace;font-variant-numeric:tabular-nums;letter-spacing:.02em">{{ c.timer }}</span>
           </div>
-          <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px">
-            <div style="display:flex;flex-direction:column;gap:5px"><span style="font-size:26px;font-weight:600;letter-spacing:-.035em;line-height:1">{{ c.city }}</span><span style="font:400 11px ui-monospace,'SF Mono',Menlo,monospace;color:rgba(220,228,255,0.5)">{{ c.node }} · {{ c.dc }} · {{ c.proto }}</span></div>
-            <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px"><span style="font:500 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:rgba(220,228,255,0.4)">EXIT IP</span><span style="font:500 13px ui-monospace,'SF Mono',Menlo,monospace">{{ c.ip }}</span></div>
+          <div style="display:flex;flex-direction:column;gap:5px">
+            <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px">
+              <span style="font-size:26px;font-weight:600;letter-spacing:-.035em;line-height:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ c.city }}</span>
+              <div style="flex:none;display:flex;flex-direction:column;align-items:flex-end;gap:4px"><span style="font:500 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:rgba(220,228,255,0.4)">EXIT IP</span><span style="font:500 13px ui-monospace,'SF Mono',Menlo,monospace;line-height:1">{{ c.ip }}</span></div>
+            </div>
+            <span style="font:400 11px ui-monospace,'SF Mono',Menlo,monospace;color:rgba(220,228,255,0.5);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ c.node }} · {{ c.dc }} · {{ c.proto }}</span>
           </div>
           <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-top:0.5px solid rgba(255,255,255,0.1);padding-top:12px">
             <sc-for list="{{ metrics }}" as="m" hint-placeholder-count="4">
@@ -86,7 +89,7 @@
         <div style="position:absolute;top:676px;left:16px;right:16px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;z-index:8">
           <sc-for list="{{ quick }}" as="q" hint-placeholder-count="3">
             <div onClick="{{ q.onClick }}" style="height:62px;padding:0 12px;border-radius:22px;display:flex;flex-direction:column;justify-content:center;gap:5px;cursor:pointer;background:linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.02));backdrop-filter:blur(40px) saturate(180%);-webkit-backdrop-filter:blur(40px) saturate(180%);border:0.5px solid {{ q.border }};box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.28),0 16px 30px -16px rgba(0,0,0,0.9)">
-              <div style="display:flex;align-items:center;gap:6px"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="{{ q.color }}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="{{ q.d }}"></path></svg><span style="font-size:13px;font-weight:600;letter-spacing:-.01em">{{ q.label }}</span></div>
+              <div style="display:flex;align-items:center;gap:6px"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="{{ q.color }}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="{{ q.d }}"></path></svg><span style="font-size:12px;font-weight:600;letter-spacing:-.01em;white-space:nowrap">{{ q.label }}</span></div>
               <span style="font:600 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:{{ q.color }}">{{ q.state }}</span>
             </div>
           </sc-for>
@@ -105,7 +108,7 @@
         <div style="position:absolute;top:0;left:0;right:0;height:54px;display:flex;align-items:center;justify-content:space-between;padding:4px 30px 0 48px;box-sizing:border-box;z-index:20;font:600 16px -apple-system,'SF Pro Text',system-ui"><span>9:41</span><svg width="72" height="12" viewBox="0 0 72 12" fill="#F5F7FC"><rect x="0" y="8" width="3" height="4" rx="1"></rect><rect x="5" y="5.5" width="3" height="6.5" rx="1"></rect><rect x="10" y="3" width="3" height="9" rx="1"></rect><rect x="15" y="0.5" width="3" height="11.5" rx="1"></rect><path d="M31 3.2a9 9 0 0112 0l-1.3 1.4a7 7 0 00-9.4 0zM33.6 6a5.3 5.3 0 016.8 0L37 9.6z"></path><rect x="47.5" y="0.5" width="22" height="11" rx="3.5" fill="none" stroke="#F5F7FC" stroke-opacity="0.4"></rect><rect x="49.5" y="2.5" width="16" height="7" rx="2"></rect></svg></div>
         <div style="position:absolute;top:11px;left:132px;width:126px;height:37px;border-radius:20px;background:#000;z-index:21"></div>
         <div style="position:absolute;top:62px;left:24px;right:16px;display:flex;align-items:flex-start;justify-content:space-between;z-index:8">
-          <div style="display:flex;flex-direction:column;gap:6px"><span style="font-size:34px;font-weight:700;letter-spacing:-.04em;line-height:1">Network</span><span style="font:500 10px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:rgba(220,228,255,0.45)">42 NODES · 18 REGIONS · 12 ROUTES</span></div>
+          <div style="display:flex;flex-direction:column;gap:6px"><span style="font-size:34px;font-weight:700;letter-spacing:-.03em;line-height:1">Network</span><span style="font:500 10px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:rgba(220,228,255,0.45)">42 NODES · 18 REGIONS · 12 ROUTES</span></div>
           <div style="width:44px;height:44px;border-radius:22px;display:flex;align-items:center;justify-content:center;background:linear-gradient(180deg,rgba(255,255,255,0.09),rgba(255,255,255,0.03));backdrop-filter:blur(40px);-webkit-backdrop-filter:blur(40px);border:0.5px solid rgba(255,255,255,0.16);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.3)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 3l9 5-9 5-9-5 9-5zM3 13l9 5 9-5"></path></svg></div>
         </div>
         <canvas data-gfx="globe" data-r="0.4" style="position:absolute;left:0;top:118px;width:390px;height:420px;display:block"></canvas>
@@ -179,7 +182,7 @@
         <div style="position:absolute;top:0;left:0;right:0;height:54px;display:flex;align-items:center;justify-content:space-between;padding:4px 30px 0 48px;box-sizing:border-box;z-index:20;font:600 16px -apple-system,'SF Pro Text',system-ui"><span>9:41</span><svg width="72" height="12" viewBox="0 0 72 12" fill="#F5F7FC"><rect x="0" y="8" width="3" height="4" rx="1"></rect><rect x="5" y="5.5" width="3" height="6.5" rx="1"></rect><rect x="10" y="3" width="3" height="9" rx="1"></rect><rect x="15" y="0.5" width="3" height="11.5" rx="1"></rect><path d="M31 3.2a9 9 0 0112 0l-1.3 1.4a7 7 0 00-9.4 0zM33.6 6a5.3 5.3 0 016.8 0L37 9.6z"></path><rect x="47.5" y="0.5" width="22" height="11" rx="3.5" fill="none" stroke="#F5F7FC" stroke-opacity="0.4"></rect><rect x="49.5" y="2.5" width="16" height="7" rx="2"></rect></svg></div>
         <div style="position:absolute;top:11px;left:132px;width:126px;height:37px;border-radius:20px;background:#000;z-index:21"></div>
         <div style="position:absolute;top:62px;left:16px;right:16px;display:flex;flex-direction:column;gap:10px;z-index:8">
-          <div style="display:flex;align-items:baseline;justify-content:space-between;padding:0 8px 4px"><span style="font-size:34px;font-weight:700;letter-spacing:-.03em;line-height:1">Traffic</span><span style="display:flex;align-items:center;gap:6px;font:500 10px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:{{ c.statusColor }}"><span style="width:6px;height:6px;border-radius:3px;background:{{ c.statusColor }};box-shadow:0 0 8px {{ c.statusColor }}"></span>LIVE · {{ c.node }}</span></div>
+          <div style="display:flex;align-items:baseline;justify-content:space-between;padding:0 8px 4px"><span style="font-size:34px;font-weight:700;letter-spacing:-.03em;line-height:1">Traffic</span><span style="display:flex;align-items:center;gap:6px;font:500 10px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:{{ c.statusColor }}"><span style="width:6px;height:6px;border-radius:3px;background:{{ c.statusColor }};box-shadow:0 0 8px {{ c.statusColor }}"></span>{{ traffic.live }} · {{ c.node }}</span></div>
           <div style="position:relative;padding:18px 18px 14px;border-radius:30px;display:flex;flex-direction:column;gap:8px;background:linear-gradient(180deg,rgba(255,255,255,0.085),rgba(255,255,255,0.025));backdrop-filter:blur(40px) saturate(180%);-webkit-backdrop-filter:blur(40px) saturate(180%);border:0.5px solid rgba(255,255,255,0.15);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.32),0 1px 1px rgba(0,0,0,0.6),0 24px 48px -18px rgba(0,0,0,0.9)">
             <div style="display:flex;justify-content:space-between;align-items:flex-start">
               <div style="display:flex;flex-direction:column;gap:4px"><span style="font:500 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.16em;color:rgba(220,228,255,0.45)">THROUGHPUT ↓</span><div style="display:flex;align-items:baseline;gap:6px"><span style="font-size:52px;font-weight:600;letter-spacing:-.045em;line-height:1;font-variant-numeric:tabular-nums">{{ traffic.down }}</span><span style="font:500 13px ui-monospace,'SF Mono',Menlo,monospace;color:rgba(220,228,255,0.5)">Mbps</span></div></div>
@@ -271,7 +274,7 @@
         <canvas data-gfx="radar" data-r="0.4" style="position:absolute;left:35px;top:104px;width:320px;height:280px;display:block"></canvas>
         <div style="position:absolute;top:110px;left:16px;display:flex;flex-direction:column;gap:2px;font:500 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.12em;color:rgba(220,228,255,0.4);z-index:8"><span>SWEEP 1.1 rad/s</span><span>RANGE 24H</span></div>
         <div style="position:absolute;top:110px;right:16px;display:flex;flex-direction:column;align-items:flex-end;gap:2px;font:500 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.12em;color:rgba(220,228,255,0.4);z-index:8"><span>DNS · IP · TLS</span><span>22 SIGNALS</span></div>
-        <div style="position:absolute;top:388px;left:16px;right:16px;display:flex;flex-direction:column;gap:10px;z-index:8">
+        <div style="position:absolute;top:388px;left:0;right:0;bottom:0;padding:0 16px 118px;box-sizing:border-box;overflow-y:auto;scrollbar-width:none;display:flex;flex-direction:column;gap:10px;z-index:8">
           <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px">
             <sc-for list="{{ counters }}" as="k" hint-placeholder-count="3">
               <div style="padding:11px 13px;border-radius:20px;display:flex;flex-direction:column;gap:3px;background:linear-gradient(180deg,rgba(255,255,255,0.07),rgba(255,255,255,0.02));backdrop-filter:blur(40px);-webkit-backdrop-filter:blur(40px);border:0.5px solid rgba(255,255,255,0.13);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.25)">
@@ -333,7 +336,7 @@
             </sc-for>
           </div>
           <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px">
-            <sc-for list="{{ advanced }}" as="ad" hint-placeholder-count="3"><div style="padding:9px 12px;border-radius:16px;display:flex;flex-direction:column;gap:2px;background:rgba(255,255,255,0.04);border:0.5px solid rgba(255,255,255,0.1)"><span style="font:500 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:rgba(220,228,255,0.42)">{{ ad.k }}</span><span style="font:500 12px ui-monospace,'SF Mono',Menlo,monospace">{{ ad.v }}</span></div></sc-for>
+            <sc-for list="{{ advanced }}" as="ad" hint-placeholder-count="3"><div style="padding:9px 12px;border-radius:16px;display:flex;flex-direction:column;gap:2px;background:rgba(255,255,255,0.04);border:0.5px solid rgba(255,255,255,0.1)"><span style="font:500 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;text-transform:uppercase;color:rgba(220,228,255,0.42)">{{ ad.k }}</span><span style="font:500 12px ui-monospace,'SF Mono',Menlo,monospace">{{ ad.v }}</span></div></sc-for>
           </div>
         </div>
         <div style="position:absolute;left:0;right:0;bottom:0;height:130px;background:linear-gradient(180deg,rgba(2,3,6,0),rgba(2,3,6,0.92));z-index:14;pointer-events:none"></div>
@@ -392,7 +395,7 @@
         <canvas data-gfx="net" data-cy="0.55" data-r="0.42" style="position:absolute;left:0;top:200px;width:390px;height:520px;display:block;opacity:0.85"></canvas>
         <div style="position:absolute;top:11px;left:95px;width:200px;height:37px;border-radius:20px;background:#000;z-index:21;display:flex;align-items:center;justify-content:space-between;padding:0 12px;box-sizing:border-box">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="{{ la.color }}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7.5 3v5.5c0 4.6-3.2 8.6-7.5 9.5-4.3-.9-7.5-4.9-7.5-9.5V6L12 3z"></path></svg>
-          <span style="font:600 12px ui-monospace,'SF Mono',Menlo,monospace;color:{{ la.color }};font-variant-numeric:tabular-nums">{{ la.rtt }}ms</span>
+          <span style="font:600 12px ui-monospace,'SF Mono',Menlo,monospace;color:{{ la.color }};font-variant-numeric:tabular-nums">{{ la.island }}</span>
         </div>
         <div style="position:absolute;top:0;left:0;right:0;height:54px;display:flex;align-items:center;justify-content:space-between;padding:4px 30px 0 34px;box-sizing:border-box;z-index:20;font:600 15px -apple-system,'SF Pro Text',system-ui"><span>Acme</span><svg width="72" height="12" viewBox="0 0 72 12" fill="#F5F7FC"><rect x="0" y="8" width="3" height="4" rx="1"></rect><rect x="5" y="5.5" width="3" height="6.5" rx="1"></rect><rect x="10" y="3" width="3" height="9" rx="1"></rect><rect x="15" y="0.5" width="3" height="11.5" rx="1"></rect><path d="M31 3.2a9 9 0 0112 0l-1.3 1.4a7 7 0 00-9.4 0zM33.6 6a5.3 5.3 0 016.8 0L37 9.6z"></path><rect x="47.5" y="0.5" width="22" height="11" rx="3.5" fill="none" stroke="#F5F7FC" stroke-opacity="0.4"></rect><rect x="49.5" y="2.5" width="16" height="7" rx="2"></rect></svg></div>
         <div style="position:absolute;top:84px;left:0;right:0;display:flex;flex-direction:column;align-items:center;gap:0;z-index:6">
@@ -403,14 +406,14 @@
           <div style="display:flex;align-items:center;justify-content:space-between">
             <div style="display:flex;align-items:center;gap:10px">
               <div style="width:34px;height:34px;border-radius:10px;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#5CF2FF,#3C7D9A);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.6)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#03060C" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7.5 3v5.5c0 4.6-3.2 8.6-7.5 9.5-4.3-.9-7.5-4.9-7.5-9.5V6L12 3z"></path></svg></div>
-              <div style="display:flex;flex-direction:column;gap:1px"><span style="font-size:15px;font-weight:600">{{ la.status }} · {{ la.city }}</span><span style="font:400 10px ui-monospace,'SF Mono',Menlo,monospace;color:rgba(220,228,255,0.55)">{{ la.node }} · SHAIP MESH</span></div>
+              <div style="display:flex;flex-direction:column;gap:1px"><span style="font-size:15px;font-weight:600">{{ la.status }} · {{ la.city }}</span><span style="font:400 10px ui-monospace,'SF Mono',Menlo,monospace;color:rgba(220,228,255,0.55)">{{ la.node }} · {{ la.proto }}</span></div>
             </div>
             <span style="font:600 15px ui-monospace,'SF Mono',Menlo,monospace;font-variant-numeric:tabular-nums;color:{{ la.color }}">{{ la.timer }}</span>
           </div>
-          <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px">
+          <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;gap:8px;align-items:center">
             <div style="display:flex;flex-direction:column;gap:2px"><span style="font:500 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:rgba(220,228,255,0.45)">DOWN</span><span style="font-size:20px;font-weight:600;letter-spacing:-.03em;font-variant-numeric:tabular-nums">{{ la.down }}<span style="font:400 10px ui-monospace,'SF Mono',Menlo,monospace;color:rgba(220,228,255,0.45)"> Mbps</span></span></div>
             <div style="display:flex;flex-direction:column;gap:2px"><span style="font:500 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:rgba(220,228,255,0.45)">RTT</span><span style="font-size:20px;font-weight:600;letter-spacing:-.03em;font-variant-numeric:tabular-nums">{{ la.rtt }}<span style="font:400 10px ui-monospace,'SF Mono',Menlo,monospace;color:rgba(220,228,255,0.45)"> ms</span></span></div>
-            <div onClick="{{ toggleConnect }}" style="height:40px;border-radius:20px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;cursor:pointer;background:rgba(255,255,255,0.12);border:0.5px solid rgba(255,255,255,0.2);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.35)">{{ c.orbSub }}</div>
+            <div onClick="{{ toggleConnect }}" role="button" style="height:40px;padding:0 16px;white-space:nowrap;border-radius:20px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;cursor:pointer;background:rgba(255,255,255,0.12);border:0.5px solid rgba(255,255,255,0.2);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.35)">{{ c.orbSub }}</div>
           </div>
         </div>
         <div style="position:absolute;left:46px;right:46px;bottom:44px;display:flex;justify-content:space-between;z-index:8">
@@ -454,25 +457,43 @@ const I = {
   dns: 'M12 3a9 9 0 100 18 9 9 0 000-18zM8 12l3 3 5-6'
 };
 
+// Globe hub index of each node (shaip-engine.js CITIES order).
+const HUB = { SYD: 0, SIN: 1, TYO: 2, FRA: 3, LAX: 6, AKL: 9, MEL: 12 };
+// Nodes segments: All / Recommended (green RTT) / Dedicated. Access segments: All / Granted / Pending.
+const NODE_FILTERS = [() => true, x => x.ms < 50, x => x.tag === 'DEDICATED'];
+const ACCESS_FILTERS = [() => true, r => r.state === 'GRANTED', r => r.state === 'MFA'];
+const f = k => 150 + 28 * Math.sin(k * .55) + 16 * Math.sin(k * 1.7 + 1) + 8 * Math.sin(k * 3.1);
+const g = k => 38 + 10 * Math.sin(k * .8 + 2) + 6 * Math.sin(k * 2.3);
+const HIST = 48;
+
 class Component extends DCLogic {
-  state = { connected: true, srv: 0, proto: 'mesh', kill: true, multihop: true, dns: true, split: false, posture: true, always: true, pq: true, seg: 0, aseg: 0, t: 0 };
+  // t0/base: the tick the current session started at, and the seconds it already had when the mock
+  // opened (01:23:45), so a reconnect starts a fresh session. down/up: 48-sample 1 Hz history.
+  state = { connected: true, srv: 0, proto: 'mesh', kill: true, multihop: true, dns: true, split: false, posture: true, always: true, pq: true, seg: 0, aseg: 0, t: 0,
+    t0: 0, base: 5025, down: Array.from({ length: HIST }, (_, i) => f(i - HIST + 1)), up: Array.from({ length: HIST }, (_, i) => g(i - HIST + 1)) };
 
   componentDidMount() {
     import(new URL('./shaip-engine.js', document.baseURI).href).then(m => {
       const loop = ts => { this.raf = requestAnimationFrame(loop); const o = this.engOpts(); document.querySelectorAll('canvas[data-gfx]').forEach(c => m.draw(c, ts, o)); };
       this.raf = requestAnimationFrame(loop);
     });
-    this.iv = setInterval(() => this.setState(s => ({ t: s.t + 1 })), 1000);
+    this.iv = setInterval(() => this.setState(s => { const t = s.t + 1; return { t, down: [...s.down.slice(1), s.connected ? f(t) : 0], up: [...s.up.slice(1), s.connected ? g(t) : 0] }; }), 1000);
   }
   componentWillUnmount() { cancelAnimationFrame(this.raf); clearInterval(this.iv); }
 
+  connect(srv) { this.setState(s => s.connected ? (srv === undefined ? { connected: false } : { srv }) : { connected: true, t0: s.t, base: 0, ...(srv === undefined ? {} : { srv }) }); }
+
   engOpts() {
-    const s = this.state, srv = SERVERS[s.srv];
+    const s = this.state, srv = SERVERS[s.srv], on = s.connected, rtt = srv.ms + Math.round(Math.sin(s.t * 1.3) * 2), act = HUB[srv.code];
+    const others = [['SIN-01', 'RELAY · 92ms'], ['TYO-04', 'STANDBY · 118ms'], ['FRA-01', 'DEDICATED · 268ms'], ['SYD-03', 'STANDBY · 14ms']].filter(l => l[0] !== srv.id).slice(0, 3);
+    const hubLabels = { 0: ['SYD-03', '14ms'], 1: ['SIN-01', '92ms · RELAY'], 2: ['TYO-04', '118ms'], 9: ['AKL-02', '38ms'] };
+    hubLabels[act] = [srv.id, on ? `${rtt}ms · ACTIVE` : 'STANDBY'];
     return {
-      connected: s.connected, density: this.props.density ?? 170, hud: this.props.hud ?? true, floor: this.props.floor ?? true, quality: this.props.quality ?? 'Ultra',
+      connected: on, density: this.props.density ?? 170, hud: this.props.hud ?? true, floor: this.props.floor ?? true, quality: this.props.quality ?? 'Ultra',
+      reduceMotion: !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches),
       c1: CY, c2: VI, bad: BA, warn: WA,
-      labels: [[srv.id, `ACTIVE · ${srv.ms}ms`], ['SIN-01', 'RELAY · 92ms'], ['TYO-04', 'STANDBY · 118ms'], ['FRA-01', 'DEDICATED · 268ms']],
-      ms: { 0: `${srv.ms}ms · ACTIVE`, 1: '92ms · RELAY', 2: '118ms', 9: '38ms' },
+      labels: [[srv.id, `ACTIVE · ${rtt}ms`], ...others],
+      active: act, hubLabels,
       radar: [['C2 BEACON BLOCKED', '185.220.101.4'], ['PHISH DOMAIN', 'acme-sso.co']]
     };
   }
@@ -480,24 +501,23 @@ class Component extends DCLogic {
   renderVals() {
     const s = this.state, on = s.connected, srv = SERVERS[s.srv], proto = PROTOS.find(p => p.k === s.proto);
     const tabs = k => TABS.map(([label, d], i) => ({ label, d, bg: i === k ? 'rgba(255,255,255,0.1)' : 'transparent', color: i === k ? CY : SUB }));
-    const f = k => 150 + 28 * Math.sin(k * .55) + 16 * Math.sin(k * 1.7 + 1) + 8 * Math.sin(k * 3.1);
-    const g = k => 38 + 10 * Math.sin(k * .8 + 2) + 6 * Math.sin(k * 2.3);
     const rtt = srv.ms + Math.round(Math.sin(s.t * 1.3) * 2);
-    const sec = on ? 5025 + s.t : 0, pad = x => String(x).padStart(2, '0');
+    const sec = on ? s.base + (s.t - s.t0) : 0, pad = x => String(x).padStart(2, '0');
     const timer = on ? `${pad(Math.floor(sec / 3600))}:${pad(Math.floor(sec / 60) % 60)}:${pad(sec % 60)}` : '--:--:--';
-    const W = 326, H = 140, pts = fn => Array.from({ length: 48 }, (_, i) => [i * W / 47, H - 4 - fn(s.t - 47 + i) / 220 * (H - 12)]);
+    const W = 326, H = 140, pts = arr => arr.map((v, i) => [i * W / 47, H - 4 - v / 220 * (H - 12)]);
     const toPath = a => a.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
-    const dline = toPath(pts(on ? f : () => 0));
+    const dline = toPath(pts(s.down));
     const sw = (key, label, sub) => ({ label, sub, j: s[key] ? 'flex-end' : 'flex-start', bg: s[key] ? OK : 'rgba(255,255,255,0.14)', onClick: () => this.setState({ [key]: !s[key] }) });
     const div = (arr) => arr.map((x, i) => ({ ...x, bt: i ? '0.5px solid rgba(255,255,255,0.08)' : '0.5px solid transparent' }));
     return {
       tabsC: tabs(0), tabsN: tabs(1), tabsA: tabs(2), tabsS: tabs(3), tabsX: tabs(4),
-      toggleConnect: () => this.setState({ connected: !on }),
+      toggleConnect: () => this.connect(),
       c: {
         status: on ? 'PROTECTED' : 'EXPOSED', statusColor: on ? OK : BA, pillBg: on ? 'rgba(98,245,168,0.12)' : 'rgba(255,92,122,0.12)',
         timer, city: on ? srv.city : 'Not connected', node: srv.id, dc: srv.dc, proto: proto.name, ip: on ? srv.ip : '—', rtt: on ? `${rtt} ms` : 'OFFLINE',
         orbColor: on ? CY : 'rgba(220,228,255,0.55)', orbRing: on ? 'rgba(92,242,255,0.18)' : 'rgba(255,255,255,0.08)', orbGlow: on ? 'rgba(92,242,255,0.28)' : 'rgba(0,0,0,0)',
-        arc: on ? `${(300 + (s.t % 30) * 10).toFixed(0)} 629` : '0 629', orbLabel: on ? 'SECURED' : 'OFFLINE', orbSub: on ? 'Tap to disconnect' : 'Tap to connect'
+        arc: on ? `${(300 + (sec % 30) * 10).toFixed(0)} 629` : '0 629', orbLabel: on ? 'SECURED' : 'OFFLINE', orbSub: on ? 'Tap to disconnect' : 'Tap to connect',
+        orbA11y: on ? `Disconnect VPN. Protected via ${srv.city}` : 'Connect VPN'
       },
       metrics: [
         { label: 'DOWN', value: on ? f(s.t).toFixed(0) : '—', unit: 'Mbps' },
@@ -506,7 +526,7 @@ class Component extends DCLogic {
         { label: 'LOSS', value: on ? '0.02' : '—', unit: '%' }
       ].map((m, i) => ({ ...m, pl: i ? '12px' : '0px', bl: i ? '0.5px solid rgba(255,255,255,0.08)' : '0.5px solid transparent' })),
       quick: [
-        { label: 'Kill switch', state: s.kill ? 'ARMED' : 'OFF', color: s.kill ? OK : BA, d: I.lock, onClick: () => this.setState({ kill: !s.kill }) },
+        { label: 'Kill switch', state: s.kill ? 'ARMED' : 'DISARMED', color: s.kill ? OK : BA, d: I.lock, onClick: () => this.setState({ kill: !s.kill }) },
         { label: 'Multi-hop', state: s.multihop ? '3 HOPS' : 'DIRECT', color: s.multihop ? CY : SUB, d: I.hop, onClick: () => this.setState({ multihop: !s.multihop }) },
         { label: 'Private DNS', state: s.dns ? 'FILTERING' : 'OFF', color: s.dns ? VI : SUB, d: I.dns, onClick: () => this.setState({ dns: !s.dns }) }
       ].map(q => ({ ...q, border: q.color === SUB ? 'rgba(255,255,255,0.14)' : q.color.replace('#', '') && hexA(q.color, .35) })),
@@ -514,26 +534,26 @@ class Component extends DCLogic {
       route: [
         { name: 'iPhone', meta: '10.84.12.7', act: true },
         { name: `${srv.code} edge`, meta: on ? `${rtt} ms` : '—', act: on },
-        { name: 'SIN relay', meta: s.multihop ? '+41 ms' : 'bypassed', act: on && s.multihop },
+        { name: 'SIN relay', meta: !s.multihop ? 'bypassed' : on ? '+41 ms' : '—', act: on && s.multihop },
         { name: 'Acme VPC', meta: 'ap-se-2', act: on }
       ].map(r => ({ ...r, ring: r.act ? CY : 'rgba(255,255,255,0.25)', fill: r.act ? CY : '#0A0D18', glow: r.act ? 'rgba(92,242,255,0.6)' : 'rgba(0,0,0,0)' })),
       netStats: [{ label: 'CIPHER', value: 'ChaCha20' }, { label: 'HANDSHAKE', value: on ? `${s.t % 120}s ago` : '—' }, { label: 'MTU', value: '1420' }],
       segs: ['All', 'Recommended', 'Dedicated'].map((label, i) => ({ label, bg: i === s.seg ? 'rgba(255,255,255,0.14)' : 'transparent', color: i === s.seg ? '#F5F7FC' : SUB, shadow: i === s.seg ? 'inset 0 0.5px 0 rgba(255,255,255,0.3),0 4px 10px rgba(0,0,0,0.4)' : 'none', onClick: () => this.setState({ seg: i }) })),
-      servers: div(SERVERS.map((x, i) => {
+      servers: div(SERVERS.map((x, i) => [x, i]).filter(([x]) => NODE_FILTERS[s.seg](x)).map(([x, i]) => {
         const sel = i === s.srv;
         return {
           ...x, msTxt: `${x.ms}`, loadPct: x.load + '%', msColor: x.ms < 50 ? OK : x.ms < 150 ? WA : BA,
           bars: Array.from({ length: 16 }, (_, k) => ({ h: (3 + 13 * Math.abs(Math.sin(k * 1.7 + i * 0.9 + s.t * 0.35))).toFixed(1) + 'px', c: sel ? CY : 'rgba(220,228,255,0.35)' })),
           bg: sel ? 'linear-gradient(90deg,rgba(92,242,255,0.12),rgba(92,242,255,0.02))' : 'transparent',
           badgeBg: sel ? 'linear-gradient(135deg,#5CF2FF,#8A9BB8)' : 'rgba(255,255,255,0.06)', badgeInk: sel ? '#04050A' : '#F5F7FC',
-          tagShow: !!x.tag, onClick: () => this.setState({ srv: i, connected: true })
+          tagShow: !!x.tag, onClick: () => this.connect(i)
         };
       })),
-      traffic: { down: on ? f(s.t).toFixed(1) : '0.0', up: on ? g(s.t).toFixed(1) : '0.0', dline, darea: dline + ` L${W} ${H} L0 ${H} Z`, uline: toPath(pts(on ? g : () => 0)), peak: on ? '212.4' : '0.0' },
+      traffic: { live: on ? 'LIVE' : 'OFFLINE', down: on ? f(s.t).toFixed(1) : '0.0', up: on ? g(s.t).toFixed(1) : '0.0', dline, darea: dline + ` L${W} ${H} L0 ${H} Z`, uline: toPath(pts(s.up)), peak: Math.max(...s.down).toFixed(1) },
       tiles: [
         { label: 'SESSION', value: on ? (2.41 + s.t * .018).toFixed(2) : '0.00', unit: 'GB' },
         { label: 'JITTER', value: on ? (1.2 + Math.abs(Math.sin(s.t)) * .6).toFixed(1) : '—', unit: 'ms' },
-        { label: 'PACKETS', value: on ? (1.84 + s.t * .0021).toFixed(2) : '0', unit: 'M' }
+        { label: 'PACKETS', value: on ? (1.84 + s.t * .0021).toFixed(2) : '0.00', unit: 'M' }
       ],
       apps: div([
         { name: 'GitHub Enterprise', host: 'git.acme.internal', val: '1.24 GB', w: '82%', color: CY },
@@ -549,7 +569,7 @@ class Component extends DCLogic {
         { ab: 'SH', name: 'bastion-syd', meta: 'SSH 22 · JIT · 58m left', state: 'GRANTED', color: OK },
         { ab: 'CI', name: 'jenkins.ci', meta: 'HTTPS · Platform', state: 'GRANTED', color: OK },
         { ab: 'FN', name: 'finance.acme', meta: 'HTTPS · Finance only', state: 'DENIED', color: BA }
-      ].map(r => ({ ...r, pillBg: hexA(r.color, .12) }))),
+      ].filter(ACCESS_FILTERS[s.aseg]).map(r => ({ ...r, pillBg: hexA(r.color, .12) }))),
       kill: {
         status: s.kill ? 'ARMED' : 'DISARMED', color: s.kill ? OK : BA, j: s.kill ? 'flex-end' : 'flex-start', bg: s.kill ? OK : 'rgba(255,255,255,0.14)', onClick: () => this.setState({ kill: !s.kill }),
         desc: s.kill ? 'All traffic is blocked if the tunnel drops. Enforced by workspace policy.' : 'Traffic can leak during reconnects. Your admin has been notified.'
@@ -575,7 +595,7 @@ class Component extends DCLogic {
         { name: 'iPhone 17 Pro', meta: 'iOS 26.1 · this device', state: on ? 'TUNNEL UP' : 'IDLE', color: on ? OK : SUB },
         { name: 'MacBook Pro 14"', meta: 'macOS 26 · SYD-03', state: 'TUNNEL UP', color: OK }
       ]),
-      la: { city: on ? srv.city : 'Disconnected', node: srv.id, timer, down: on ? f(s.t).toFixed(0) : '0', rtt: on ? String(rtt) : '—', color: on ? OK : BA, status: on ? 'Protected' : 'Exposed' }
+      la: { city: on ? srv.city : 'Not connected', node: srv.id, proto: proto.name.toUpperCase(), timer, down: on ? f(s.t).toFixed(0) : '—', rtt: on ? String(rtt) : '—', island: on ? `${rtt}ms` : '—', color: on ? OK : BA, status: on ? 'Protected' : 'Exposed' }
     };
   }
 }
