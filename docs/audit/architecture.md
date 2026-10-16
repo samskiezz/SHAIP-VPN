@@ -83,10 +83,13 @@ store by default or Postgres when `DATABASE_URL` is set):
   (`{account_number, password}`)
 - `GET /api/crl` (Ed25519-signed revocation list, unauthenticated)
 - Payments, enrollment claims, staking status and the directory (public)
-- Authenticated (`Bearer` token): `GET/POST /api/nodes`, `GET/DELETE /api/nodes/{id}`,
-  `GET /api/mixnet`, `GET /api/dashboard`, `GET /api/stats`, `GET/DELETE /api/me`
-  (deleting erases the account), API keys, the caller's own audit log, devices
-  and enrollment, staking bonds.
+- Authenticated (`Bearer` session token, or `Bearer pqa_…` personal API key,
+  matched by its SHA-256): `GET/POST /api/nodes`, `GET/DELETE /api/nodes/{id}`
+  (delete: the node's operator or an admin only, and not while its stake is
+  bonded, unbonding, or a bond awaits payment), `GET /api/mixnet`,
+  `GET /api/dashboard`, `GET /api/stats`, `GET/DELETE /api/me` (deleting erases
+  the account), API keys, the caller's own audit log, devices and enrollment,
+  staking bonds.
 
 The control plane keeps no per-account connection log, no domain rules and no
 settings; it has no request logger and stores no IP address

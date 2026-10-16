@@ -161,7 +161,10 @@ cp_e2e() {
   case "$(echo "$AKEY" | python3 -c "import sys,json;print(json.load(sys.stdin)['key'][:4])" 2>/dev/null)" in
     pqa_) ok=$((ok+1));; *) echo "  ✗ apikey secret not returned"; bad=$((bad+1));; esac
   chk "$(curl -s -H "Authorization: Bearer $TOK" "$B/api/apikeys" | python3 -c "import sys,json;d=json.load(sys.stdin);print('leak' if any('key' in k for k in d) else 'ok')" 2>/dev/null)" "ok" "apikey list hides secret"
+  local ASECRET; ASECRET=$(echo "$AKEY" | python3 -c "import sys,json;print(json.load(sys.stdin)['key'])" 2>/dev/null)
+  chk "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $ASECRET" "$B/api/me")" 200 "the API key authenticates"
   chk "$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "$B/api/apikeys/$AKID" -H "Authorization: Bearer $TOK")" 200 "apikey delete"
+  chk "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $ASECRET" "$B/api/me")" 401 "a deleted API key stops working"
   # Admin-only endpoint is forbidden for a normal user.
   chk "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOK" "$B/api/admin/stats")" 403 "admin stats gated"
   kill $PID 2>/dev/null; wait $PID 2>/dev/null

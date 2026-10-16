@@ -48,6 +48,7 @@ produce byte-identical descriptors; a shared vector pins this.
 | `POST /api/stake/{node}/bond` | operator | `{amount_sats, rail}` returns a charge to pay. Sats-denominated rails only: `btcpay`, or `dev` in tests. |
 | `GET /api/stake/{node}` | public | Bonded, unbonding, withdrawable and slashed amounts, `jailed`, `eligible`, pending bonds, and slash records. It also credits newly paid bonds. |
 | `POST /api/stake/{node}/unbond` | operator | `{amount_sats}` starts unbonding. |
+| `DELETE /api/nodes/{node}` | operator (or admin) | Removes the node. Refused while it has bonded stake, unbonding stake not yet released (it must stay slashable), or a bond awaiting payment. |
 | `POST /api/stake/slash` | **public** | `{descriptor_a, descriptor_b}`: verify, then slash `STAKE_SLASH_PERCENT` (default 50%) of bonded **and** unreleased unbonding stake, and jail the node. One slash per (node, epoch). |
 | `GET /api/directory` | public | The signed consensus of eligible nodes. |
 

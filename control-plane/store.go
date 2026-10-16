@@ -66,16 +66,16 @@ func coarsenOrder(o *PayOrder, created time.Time) {
 	}
 }
 
-// APIKey is a personal access token for the REST API. Only the hash is stored;
-// the full secret is shown once at creation.
+// APIKey is a personal access token for the REST API, sent as
+// "Authorization: Bearer pqa_…". Only its SHA-256 is stored; the secret is
+// shown once at creation. When a key is used is not recorded.
 type APIKey struct {
-	ID         string     `json:"id"`
-	UserID     string     `json:"-"`
-	Name       string     `json:"name"`
-	Prefix     string     `json:"prefix"`
-	KeyHash    string     `json:"-"`
-	CreatedAt  time.Time  `json:"created_at"`
-	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
+	ID        string    `json:"id"`
+	UserID    string    `json:"-"`
+	Name      string    `json:"name"`
+	Prefix    string    `json:"prefix"`
+	KeyHash   string    `json:"-"`
+	CreatedAt time.Time `json:"created_at"` // the UTC day
 }
 
 // AuditEntry is one row of an account's security log: what was done, never
@@ -245,6 +245,8 @@ type Store interface {
 	DeleteNode(ctx context.Context, id string) error
 
 	CreateAPIKey(ctx context.Context, k *APIKey) error
+	// GetAPIKeyByHash finds the key with this SHA-256 (hex), or ErrNotFound.
+	GetAPIKeyByHash(ctx context.Context, hash string) (*APIKey, error)
 	ListAPIKeys(ctx context.Context, userID string) ([]APIKey, error)
 	DeleteAPIKey(ctx context.Context, id, userID string) error
 
@@ -501,6 +503,18 @@ func (m *MemStore) CreateAPIKey(_ context.Context, k *APIKey) error {
 	cp := *k
 	m.apiKeys[k.ID] = &cp
 	return nil
+}
+
+func (m *MemStore) GetAPIKeyByHash(_ context.Context, hash string) (*APIKey, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, k := range m.apiKeys {
+		if k.KeyHash == hash {
+			cp := *k
+			return &cp, nil
+		}
+	}
+	return nil, ErrNotFound
 }
 
 func (m *MemStore) ListAPIKeys(_ context.Context, userID string) ([]APIKey, error) {

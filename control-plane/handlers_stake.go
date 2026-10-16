@@ -61,7 +61,7 @@ func (s *Server) operatorNode(w http.ResponseWriter, r *http.Request) (*Node, bo
 	}
 	if n.OwnerID != userID(r) {
 		if u, err := s.store.GetUserByID(r.Context(), userID(r)); err != nil || u.Role != "admin" {
-			errJSON(w, http.StatusForbidden, "only the node's operator can manage its stake")
+			errJSON(w, http.StatusForbidden, "only the node's operator can do that")
 			return nil, false
 		}
 	}

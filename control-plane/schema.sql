@@ -55,8 +55,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
     name           TEXT NOT NULL,
     key_prefix     TEXT NOT NULL,                -- first 8 chars, shown in the UI
     key_hash       TEXT NOT NULL,                -- SHA-256 of the full key
-    created_at     TIMESTAMPTZ NOT NULL DEFAULT date_trunc('day', now(), 'UTC'),
-    last_used_at   TIMESTAMPTZ
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT date_trunc('day', now(), 'UTC')
 );
 
 -- An account's own security log: what was done (a device enrolled, a key
@@ -173,6 +172,7 @@ CREATE TABLE IF NOT EXISTS slash_events (
 
 CREATE INDEX IF NOT EXISTS idx_nodes_status       ON nodes(status);
 CREATE INDEX IF NOT EXISTS idx_apikeys_user       ON api_keys(user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_apikeys_hash ON api_keys(key_hash);
 CREATE INDEX IF NOT EXISTS idx_audit_user_seq     ON audit_log(user_id, id DESC);
 CREATE INDEX IF NOT EXISTS idx_devices_user       ON devices(user_id);
 CREATE INDEX IF NOT EXISTS idx_devices_revoked    ON devices(revoked_at) WHERE revoked_at IS NOT NULL;
@@ -199,6 +199,10 @@ ALTER TABLE users DROP COLUMN IF EXISTS email;
 ALTER TABLE users DROP COLUMN IF EXISTS identity_id;
 ALTER TABLE users DROP COLUMN IF EXISTS ml_dsa_pub;
 ALTER TABLE users DROP COLUMN IF EXISTS ed_pub;
+
+-- When an API key was last used is not recorded (the column was never
+-- written; it is gone so nothing can start writing it).
+ALTER TABLE api_keys DROP COLUMN IF EXISTS last_used_at;
 
 -- A per-account connection log, per-account domain lists, and free-form
 -- per-account settings: none of these is kept any more.
@@ -233,7 +237,7 @@ DECLARE c record;
 BEGIN
     FOR c IN SELECT * FROM (VALUES
         ('users', 'created_at', true), ('api_keys', 'created_at', true),
-        ('api_keys', 'last_used_at', false), ('audit_log', 'at', true),
+        ('audit_log', 'at', true),
         ('enroll_tokens', 'issued_at', false), ('enroll_tokens', 'claimed_at', false),
         ('devices', 'created_at', true), ('devices', 'revoked_at', false),
         ('devices', 'cert_expires', false), ('spent_tokens', 'spent_at', true),

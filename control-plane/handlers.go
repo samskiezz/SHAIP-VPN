@@ -5,6 +5,7 @@ import (
 	"crypto"
 	"crypto/ed25519"
 	crand "crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -14,8 +15,6 @@ import (
 	"net/http"
 	"strings"
 	"time"
-
-	"github.com/go-chi/chi/v5"
 
 	"pqanon/control-plane/keystore"
 )
@@ -204,12 +203,26 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			fail(w)
 			return
 		}
-		claims, err := s.tokens.Verify(tok)
-		if err != nil {
-			fail(w)
-			return
+		var subject string
+		if strings.HasPrefix(tok, apiKeyPrefix) {
+			// A personal API key: looked up by the SHA-256 of the whole
+			// secret, so only a holder of the full key matches.
+			sum := sha256.Sum256([]byte(tok))
+			k, err := s.store.GetAPIKeyByHash(r.Context(), hex.EncodeToString(sum[:]))
+			if err != nil {
+				fail(w)
+				return
+			}
+			subject = k.UserID
+		} else {
+			claims, err := s.tokens.Verify(tok)
+			if err != nil {
+				fail(w)
+				return
+			}
+			subject = claims.Subject
 		}
-		ctx := context.WithValue(r.Context(), ctxUserKey{}, claims.Subject)
+		ctx := context.WithValue(r.Context(), ctxUserKey{}, subject)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -307,9 +320,44 @@ func (s *Server) handleCreateNode(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]string{"status": "created", "id": n.ID})
 }
 
+// handleDeleteNode removes a node; only its operator (or an admin) may. A node
+// still holding stake can't go: its bonded and unbonding stake must stay
+// slashable until released, and deleting the node would erase that stake,
+// its unbondings and its slash record with it. Nor can one with a bond still
+// awaiting payment, which would then have nowhere to be credited.
 func (s *Server) handleDeleteNode(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	if err := s.store.DeleteNode(r.Context(), id); err != nil {
+	n, ok := s.operatorNode(w, r)
+	if !ok {
+		return
+	}
+	ctx, now := r.Context(), time.Now()
+	if n.StakeSats > 0 {
+		errJSON(w, http.StatusConflict, "this node has bonded stake: unbond it and wait for the unbonding period first")
+		return
+	}
+	unbondings, err := s.store.ListUnbondings(ctx, n.ID)
+	if err != nil {
+		errJSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	for _, u := range unbondings {
+		if u.AmountSats > 0 && u.ReleaseAt.After(now) {
+			errJSON(w, http.StatusConflict, "this node's stake is still unbonding (and slashable) until "+u.ReleaseAt.UTC().Format(time.RFC3339))
+			return
+		}
+	}
+	bonds, err := s.store.ListBonds(ctx, n.ID)
+	if err != nil {
+		errJSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	for _, b := range bonds {
+		if b.Status == "awaiting_payment" && b.CreatedAt.After(now.Add(-BondWatchWindow)) {
+			errJSON(w, http.StatusConflict, "a bond for this node is still awaiting payment")
+			return
+		}
+	}
+	if err := s.store.DeleteNode(ctx, n.ID); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			errJSON(w, http.StatusNotFound, "not found")
 			return

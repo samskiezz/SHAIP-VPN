@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 // adminUser creates an admin account and returns its id + token.
@@ -170,5 +171,83 @@ func TestNodeDetail(t *testing.T) {
 	// Missing node → 404.
 	if rec := do(t, h, "GET", "/api/nodes/does-not-exist", tok, nil); rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 for missing node, got %d", rec.Code)
+	}
+}
+
+// An API key authenticates as its account until it is deleted; anything that
+// merely looks like one does not.
+func TestAPIKeyAuthenticates(t *testing.T) {
+	srv, h, store := newTestServer(t)
+	uid, tok := authedUser(t, srv, store)
+	rec := do(t, h, "POST", "/api/apikeys", tok, map[string]any{"name": "ci"})
+	var created map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &created)
+	key, _ := created["key"].(string)
+	id, _ := created["id"].(string)
+
+	rec = do(t, h, "GET", "/api/me", key, nil)
+	var me map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &me)
+	if rec.Code != http.StatusOK || me["id"] != uid {
+		t.Fatalf("an API key must authenticate as its account: %d %v", rec.Code, me)
+	}
+	for _, bad := range []string{key[:len(key)-1], key + "x", "pqa_" + strings.Repeat("A", 43), "pqa_"} {
+		if rec := do(t, h, "GET", "/api/me", bad, nil); rec.Code != http.StatusUnauthorized {
+			t.Fatalf("%q must not authenticate, got %d", bad, rec.Code)
+		}
+	}
+	do(t, h, "DELETE", "/api/apikeys/"+id, tok, nil)
+	if rec := do(t, h, "GET", "/api/me", key, nil); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("a deleted key must stop working, got %d", rec.Code)
+	}
+}
+
+// Only a node's operator (or an admin) can delete it, and not while its stake
+// is bonded or still unbonding.
+func TestNodeDeletePermissionsAndStake(t *testing.T) {
+	srv, h, store := newTestServer(t)
+	_, tokA := authedUser(t, srv, store)
+	ub := newUser(t, store, "")
+	tokB, _ := srv.tokens.Issue(ub.ID)
+	_, adminTok := adminUser(t, srv, store)
+	ctx := context.Background()
+
+	mk := func(name string) string {
+		id, _ := registerNode(t, h, tokA, name)
+		return id
+	}
+	plain := mk("plain-01")
+	if rec := do(t, h, "DELETE", "/api/nodes/"+plain, tokB, nil); rec.Code != http.StatusForbidden {
+		t.Fatalf("another account deleting the node: %d", rec.Code)
+	}
+	if rec := do(t, h, "DELETE", "/api/nodes/"+plain, tokA, nil); rec.Code != http.StatusOK {
+		t.Fatalf("the operator deleting an unstaked node: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := do(t, h, "DELETE", "/api/nodes/"+plain, tokA, nil); rec.Code != http.StatusNotFound {
+		t.Fatalf("deleting twice: %d", rec.Code)
+	}
+
+	staked := mk("staked-01")
+	b := &StakeBond{NodeID: staked, AmountSats: 200_000, Rail: "dev", Quote: RailQuote{Address: "dev:s"}}
+	if err := store.CreateBond(ctx, b); err != nil {
+		t.Fatal(err)
+	}
+	if rec := do(t, h, "DELETE", "/api/nodes/"+staked, tokA, nil); rec.Code != http.StatusConflict {
+		t.Fatalf("a node with a bond awaiting payment: %d", rec.Code)
+	}
+	if _, err := store.CreditBond(ctx, b.ID, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if rec := do(t, h, "DELETE", "/api/nodes/"+staked, adminTok, nil); rec.Code != http.StatusConflict {
+		t.Fatalf("a node with bonded stake, even for an admin: %d", rec.Code)
+	}
+	if err := store.Unbond(ctx, staked, 200_000, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if rec := do(t, h, "DELETE", "/api/nodes/"+staked, tokA, nil); rec.Code != http.StatusConflict {
+		t.Fatalf("a node whose stake is still unbonding: %d", rec.Code)
+	}
+	if n, _ := store.GetNode(ctx, staked); n == nil {
+		t.Fatal("a refused delete must change nothing")
 	}
 }

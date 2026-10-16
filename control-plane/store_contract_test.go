@@ -241,6 +241,12 @@ func storeContract(t *testing.T, st Store) {
 		if keys, _ := st.ListAPIKeys(ctx, uid); len(keys) != 1 || keys[0].Name != "ci" || !isDay(keys[0].CreatedAt) {
 			t.Fatalf("keys (created_at must be a day): %+v", keys)
 		}
+		if got, err := st.GetAPIKeyByHash(ctx, k.KeyHash); err != nil || got.ID != k.ID || got.UserID != uid {
+			t.Fatalf("key by hash: %v %+v", err, got)
+		}
+		if _, err := st.GetAPIKeyByHash(ctx, randHex(32)); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("unknown hash: %v", err)
+		}
 		if err := st.DeleteAPIKey(ctx, k.ID, uid); err != nil {
 			t.Fatal(err)
 		}

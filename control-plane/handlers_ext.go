@@ -117,6 +117,10 @@ func (s *Server) handleDeleteAPIKey(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
+// apiKeyPrefix marks an API key in an Authorization header (session tokens
+// are base64url claims, which never start with it).
+const apiKeyPrefix = "pqa_"
+
 // newAPIKeySecret returns a URL-safe token "pqa_<43 base64url chars>" from 32
 // bytes of CSPRNG output.
 func newAPIKeySecret() (string, error) {
@@ -124,7 +128,7 @@ func newAPIKeySecret() (string, error) {
 	if _, err := rand.Read(b[:]); err != nil {
 		return "", err
 	}
-	return "pqa_" + base64.RawURLEncoding.EncodeToString(b[:]), nil
+	return apiKeyPrefix + base64.RawURLEncoding.EncodeToString(b[:]), nil
 }
 
 // --- audit log ---

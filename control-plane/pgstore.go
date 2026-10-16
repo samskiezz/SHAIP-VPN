@@ -249,9 +249,23 @@ func (s *PgStore) CreateAPIKey(ctx context.Context, k *APIKey) error {
 		k.UserID, k.Name, k.Prefix, k.KeyHash, k.CreatedAt).Scan(&k.ID)
 }
 
+func (s *PgStore) GetAPIKeyByHash(ctx context.Context, hash string) (*APIKey, error) {
+	var k APIKey
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, user_id, name, key_prefix, key_hash, created_at FROM api_keys WHERE key_hash = $1`, hash).
+		Scan(&k.ID, &k.UserID, &k.Name, &k.Prefix, &k.KeyHash, &k.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &k, nil
+}
+
 func (s *PgStore) ListAPIKeys(ctx context.Context, userID string) ([]APIKey, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, user_id, name, key_prefix, key_hash, created_at, last_used_at
+		`SELECT id, user_id, name, key_prefix, key_hash, created_at
 		 FROM api_keys WHERE user_id = $1 ORDER BY created_at DESC`, userID)
 	if err != nil {
 		return nil, err
@@ -260,7 +274,7 @@ func (s *PgStore) ListAPIKeys(ctx context.Context, userID string) ([]APIKey, err
 	out := make([]APIKey, 0)
 	for rows.Next() {
 		var k APIKey
-		if err := rows.Scan(&k.ID, &k.UserID, &k.Name, &k.Prefix, &k.KeyHash, &k.CreatedAt, &k.LastUsedAt); err != nil {
+		if err := rows.Scan(&k.ID, &k.UserID, &k.Name, &k.Prefix, &k.KeyHash, &k.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, k)
