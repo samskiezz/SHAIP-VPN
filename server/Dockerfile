@@ -11,8 +11,10 @@ RUN cargo build --release --locked -p pqanon-server -p pqanon-client
 
 FROM debian:bookworm-slim
 # nftables: `pqanond --nat` installs its masquerade + MSS-clamp rules with nft.
+# conntrack: it deletes a freed tunnel address's NAT state with conntrack, so
+# --nat refuses to start without it.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends nftables ca-certificates \
+ && apt-get install -y --no-install-recommends nftables conntrack ca-certificates \
  && rm -rf /var/lib/apt/lists/* \
  && useradd -r -s /usr/sbin/nologin pqanon \
  && mkdir -p /var/lib/pqanon && chown pqanon /var/lib/pqanon

@@ -5,9 +5,17 @@
 //! address is a hash of the identity — usually across a server restart too.
 //! When a session ends the lease is held for a grace period, then freed; if
 //! the pool is full, the longest-idle released lease is reused.
+//!
+//! An address that leaves a lease may still have NAT (conntrack) state in the
+//! kernel for its old holder's connections, and a late reply to one of them
+//! would be delivered to whoever holds the address next. So every freed
+//! address is reported by [`Pool::take_freed`], and an expired one is not
+//! handed out again until the caller has cleared that state and called
+//! [`Pool::flushed`]. A reused grace-period lease is reported too; the caller
+//! clears it before the new session's first packet can flow.
 
 use anyhow::{bail, Result};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::Ipv4Addr;
 use std::time::{Duration, Instant};
 
@@ -23,6 +31,10 @@ pub struct Pool {
     gateway: Ipv4Addr,
     leases: HashMap<[u8; 16], Lease>,
     by_ip: HashMap<Ipv4Addr, [u8; 16]>,
+    /// Expired addresses whose NAT state has not been cleared yet.
+    draining: HashSet<Ipv4Addr>,
+    /// Addresses freed since the last `take_freed`.
+    freed: Vec<Ipv4Addr>,
 }
 
 impl Pool {
@@ -45,6 +57,8 @@ impl Pool {
             gateway,
             leases: HashMap::new(),
             by_ip: HashMap::new(),
+            draining: HashSet::new(),
+            freed: Vec::new(),
         })
     }
 
@@ -78,7 +92,7 @@ impl Pool {
         let start = u32::from_be_bytes([id[0], id[1], id[2], id[3]]) % hosts;
         let free = (0..hosts)
             .map(|k| Ipv4Addr::from(self.network + 1 + (start + k) % hosts))
-            .find(|ip| *ip != self.gateway && !self.by_ip.contains_key(ip));
+            .find(|ip| *ip != self.gateway && !self.by_ip.contains_key(ip) && !self.draining.contains(ip));
         let ip = match free {
             Some(ip) => ip,
             None => {
@@ -89,6 +103,7 @@ impl Pool {
                     .min_by_key(|(at, _, _)| *at)
                     .map(|(_, vid, ip)| (vid, ip))?;
                 self.leases.remove(&victim);
+                self.freed.push(ip); // its NAT state must go before the new holder's traffic
                 ip
             }
         };
@@ -104,16 +119,31 @@ impl Pool {
         }
     }
 
-    /// Free leases released more than `grace` ago.
+    /// Free leases released more than `grace` ago. Their addresses stay out
+    /// of use until [`Pool::flushed`].
     pub fn expire(&mut self, now: Instant, grace: Duration) {
-        let by_ip = &mut self.by_ip;
+        let (by_ip, draining, freed) = (&mut self.by_ip, &mut self.draining, &mut self.freed);
         self.leases.retain(|_, l| match l.released_at {
             Some(at) if now.saturating_duration_since(at) > grace => {
                 by_ip.remove(&l.ip);
+                draining.insert(l.ip);
+                freed.push(l.ip);
                 false
             }
             _ => true,
         });
+    }
+
+    /// Addresses freed since the last call, whose NAT state the caller clears.
+    pub fn take_freed(&mut self) -> Vec<Ipv4Addr> {
+        std::mem::take(&mut self.freed)
+    }
+
+    /// The NAT state of these addresses is gone: they may be handed out again.
+    pub fn flushed(&mut self, ips: &[Ipv4Addr]) {
+        for ip in ips {
+            self.draining.remove(ip);
+        }
     }
 
     /// Leases currently held (live or in their grace period).
@@ -177,6 +207,26 @@ mod tests {
         assert_eq!(p.len(), 2, "still in grace");
         p.expire(t0 + Duration::from_secs(11), Duration::from_secs(10));
         assert_eq!(p.len(), 1, "expired; the live lease stays");
+    }
+
+    #[test]
+    fn a_freed_address_is_not_reused_until_its_nat_state_is_cleared() {
+        // /30: one client address (.2; the gateway is .1).
+        let mut p = Pool::new(Ipv4Addr::new(10, 9, 0, 1), 30).unwrap();
+        let t0 = Instant::now();
+        let a = p.lease(id(1)).unwrap();
+        p.release(id(1), t0);
+        p.expire(t0 + Duration::from_secs(11), Duration::from_secs(10));
+        assert_eq!(p.take_freed(), vec![a], "the expired address is reported");
+        assert_eq!(p.lease(id(2)), None, "not handed out while its NAT state may live");
+        p.flushed(&[a]);
+        assert_eq!(p.lease(id(2)), Some(a), "free once cleared");
+        assert!(p.take_freed().is_empty());
+
+        // Reusing a grace-period lease reports the address too.
+        p.release(id(2), t0);
+        assert_eq!(p.lease(id(3)), Some(a));
+        assert_eq!(p.take_freed(), vec![a]);
     }
 
     #[test]

@@ -82,11 +82,11 @@ struct Cli {
     #[arg(long, default_value_t = 10)]
     handshake_timeout_secs: u64,
 
-    /// Log client IP addresses and identity/device ids as they are. By
-    /// default they appear only as per-run pseudonyms, so logs can't be used
-    /// to tell who was connected. For debugging.
-    #[arg(long)]
-    log_clients: bool,
+    /// Keep a disconnected client's tunnel address for this many seconds, so
+    /// it gets the same one (and keeps its TCP connections) if it comes back.
+    /// Then the address's NAT state is deleted and it is free for others.
+    #[arg(long, default_value_t = 600)]
+    lease_grace_secs: u64,
 
     /// Also run a live TLS 1.3 decoy on this TCP address (e.g. 0.0.0.0:443). A
     /// prober that scans the TCP port completes a real HTTPS handshake and sees
@@ -230,13 +230,9 @@ async fn crl_refresher(
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Logs go to stderr so stdout stays clean for --print-public.
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
-        )
-        .with_writer(std::io::stderr)
-        .init();
+    // Logs go to stderr (stdout stays clean for --print-public), and never
+    // carry an IP address: see pqanon::redact.
+    pqanon::redact::init_server_logging("info");
     let cli = Cli::parse();
 
     let identity = match &cli.identity {
@@ -291,6 +287,7 @@ async fn main() -> Result<()> {
     let limits = Limits {
         handshake_timeout: Duration::from_secs(cli.handshake_timeout_secs.max(1)),
         session_timeout: Duration::from_secs(cli.session_timeout_secs.max(5)),
+        lease_grace: Duration::from_secs(cli.lease_grace_secs),
         ..Limits::default()
     };
 
@@ -343,9 +340,11 @@ async fn main() -> Result<()> {
             }
         }
         None => {
-            tracing::info!(listen = %socket.local_addr()?, "pqanond listening (echo mode)");
-            let core = Core::new(gate, Forwarding::Echo, limits)?.with_client_logging(cli.log_clients);
-            serve(socket, core, None).await
+            // Addresses are redacted from the logs; the port is not.
+            let local = socket.local_addr()?;
+            tracing::info!(listen = %local, port = local.port(), "pqanond listening (echo mode)");
+            let core = Core::new(gate, Forwarding::Echo, limits)?;
+            serve(socket, core, None, false).await
         }
     }
 }
@@ -385,6 +384,15 @@ async fn tun_mode(cli: &Cli, socket: Arc<UdpSocket>, gate: Gate, limits: Limits,
         Some(gateway)
     };
 
+    // Freed tunnel addresses have their NAT state deleted (see nat.rs); with
+    // --nat that is required, not best effort.
+    let conntrack = nat::conntrack_available();
+    if cli.nat.is_some() && !conntrack {
+        anyhow::bail!(
+            "--nat needs the conntrack tool (apt install conntrack): without it, a tunnel address \
+             given to a new client could receive late replies to its previous holder's connections"
+        );
+    }
     let _nat = match &cli.nat {
         Some(egress) => Some(nat::enable(tun.name(), gateway, prefix, egress)?),
         None => {
@@ -403,13 +411,10 @@ async fn tun_mode(cli: &Cli, socket: Arc<UdpSocket>, gate: Gate, limits: Limits,
             allow_private_destinations: cli.allow_private_destinations,
         }),
         limits,
-    )?
-    .with_client_logging(cli.log_clients);
-    if cli.log_clients {
-        tracing::warn!("--log-clients: client IP addresses and ids are written to the logs");
-    }
-    tracing::info!(listen = %socket.local_addr()?, "pqanond listening (TUN mode)");
-    serve(socket, core, Some(tun)).await
+    )?;
+    let local = socket.local_addr()?;
+    tracing::info!(listen = %local, port = local.port(), "pqanond listening (TUN mode)");
+    serve(socket, core, Some(tun), conntrack).await
     // `_nat` drops here: forwarding and masquerade are removed.
 }
 
@@ -418,9 +423,29 @@ type Tun = pqanon::tun::AsyncTun;
 #[cfg(not(target_os = "linux"))]
 type Tun = ();
 
+/// Delete the NAT state of tunnel addresses that left a lease, then let the
+/// pool hand them out again. Runs before the outputs of the event that freed
+/// them are delivered, so a new holder's ACK can't go out (and its traffic
+/// can't start) while the old holder's state is still there.
+async fn clear_freed(core: &std::sync::Mutex<Core>, conntrack: bool) {
+    let freed = core.lock().expect("core lock").take_freed_addresses();
+    if freed.is_empty() {
+        return;
+    }
+    #[cfg(target_os = "linux")]
+    if conntrack {
+        let ips = freed.clone();
+        let _ = tokio::task::spawn_blocking(move || pqanon_server::nat::forget_flows(&ips)).await;
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = conntrack;
+    core.lock().expect("core lock").addresses_flushed(&freed);
+}
+
 /// The I/O shell: UDP datagrams and TUN packets in, [`Out`]s out, a 1 s
-/// housekeeping tick, and a clean shutdown on SIGINT/SIGTERM.
-async fn serve(socket: Arc<UdpSocket>, core: Core, tun: Option<Arc<Tun>>) -> Result<()> {
+/// housekeeping tick, and a clean shutdown on SIGINT/SIGTERM. `conntrack`:
+/// delete freed tunnel addresses' NAT state (TUN mode).
+async fn serve(socket: Arc<UdpSocket>, core: Core, tun: Option<Arc<Tun>>, conntrack: bool) -> Result<()> {
     let core = Arc::new(std::sync::Mutex::new(core));
 
     #[cfg(target_os = "linux")]
@@ -452,6 +477,7 @@ async fn serve(socket: Arc<UdpSocket>, core: Core, tun: Option<Arc<Tun>>) -> Res
             loop {
                 tick.tick().await;
                 core.lock().expect("core lock").on_tick(Instant::now());
+                clear_freed(&core, conntrack).await;
             }
         });
     }
@@ -470,6 +496,7 @@ async fn serve(socket: Arc<UdpSocket>, core: Core, tun: Option<Arc<Tun>>) -> Res
                     }
                 };
                 let outs = core.lock().expect("core lock").on_datagram(src, &buf[..n], Instant::now());
+                clear_freed(&core, conntrack).await;
                 deliver(&socket, tun.as_deref(), outs).await;
             }
             _ = &mut shutdown => break,

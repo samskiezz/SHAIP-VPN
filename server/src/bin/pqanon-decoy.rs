@@ -27,10 +27,6 @@ struct Args {
     #[arg(long)]
     index: Option<PathBuf>,
 
-    /// Suppress per-connection probe logging.
-    #[arg(long, default_value_t = false)]
-    quiet: bool,
-
     /// Handshake timeout, seconds.
     #[arg(long, default_value_t = 10)]
     handshake_timeout_secs: u64,
@@ -38,11 +34,7 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "pqanon=info".into()),
-        )
-        .init();
+    pqanon::redact::init_server_logging("pqanon=info");
 
     let args = Args::parse();
     let index_html = match &args.index {
@@ -54,7 +46,6 @@ async fn main() -> Result<()> {
         cert_path: args.cert,
         key_path: args.key,
         index_html,
-        log_probes: !args.quiet,
         handshake_timeout: Duration::from_secs(args.handshake_timeout_secs),
     };
 

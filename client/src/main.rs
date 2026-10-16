@@ -908,6 +908,11 @@ fn status_cmd() -> Result<()> {
             print!("{text}");
             Ok(())
         }
+        // The file is 0600: which server you use is nobody else's business on
+        // a shared machine.
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+            anyhow::bail!("the tunnel status is readable by root only: run `sudo pqanon status`")
+        }
         Err(_) => {
             println!("state=NotRunning");
             Ok(())

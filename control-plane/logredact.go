@@ -31,40 +31,72 @@ func (r *redactingWriter) Write(p []byte) (int, error) {
 }
 
 // redactAddrs returns text with every IP address in it replaced. It splits the
-// text into runs of the bytes an address, port or zone can contain, and
-// replaces each run that parses as an address. Parsing, not pattern matching,
-// decides, so times ("12:34:56") and versions ("go1.22.3") are left alone.
+// text into runs of the characters an address and port are made of (hex
+// digits, '.' and ':') and replaces each run that parses as an address or
+// address:port. A run that doesn't is searched for an IPv4 address glued to
+// other characters ("id7a192.0.2.1:80"). Parsing, not pattern matching,
+// decides, so times ("12:34:56"), versions ("go1.22.3") and hex ids are left
+// alone. The Rust daemons use the same rules (client/src/redact.rs).
 func redactAddrs(text []byte) []byte {
 	var out bytes.Buffer
 	for i := 0; i < len(text); {
-		if !isAddrByte(text[i]) {
-			out.WriteByte(text[i])
-			i++
-			continue
-		}
 		j := i
-		for j < len(text) && isAddrByte(text[j]) {
-			j++
+		if isAddrByte(text[i]) {
+			for j < len(text) && isAddrByte(text[j]) {
+				j++
+			}
+			out.Write(redactRun(text[i:j]))
+		} else {
+			for j < len(text) && !isAddrByte(text[j]) {
+				j++
+			}
+			out.Write(text[i:j])
 		}
-		out.Write(redactRun(text[i:j]))
 		i = j
 	}
 	return out.Bytes()
 }
 
 func isAddrByte(c byte) bool {
-	return c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' ||
-		c == '.' || c == ':' || c == '%'
+	return c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F' || c == '.' || c == ':'
 }
 
-// redactRun replaces run if it is an address (or address:port), allowing for
-// sentence punctuation after it ("refused 10.0.0.5:5432: connect").
+// redactRun replaces run if it is an address (allowing for sentence
+// punctuation after it: "refused 10.0.0.5:5432: connect"), or else any IPv4
+// address (and port) inside it.
 func redactRun(run []byte) []byte {
 	core := bytes.TrimRight(run, ".:")
 	if isAddr(string(core)) {
 		return append([]byte(redactedAddr), run[len(core):]...)
 	}
-	return run
+	var out []byte
+	for i := 0; i < len(run); {
+		if run[i] < '0' || run[i] > '9' {
+			out = append(out, run[i])
+			i++
+			continue
+		}
+		j := i
+		for j < len(run) && (run[j] >= '0' && run[j] <= '9' || run[j] == '.') {
+			j++
+		}
+		cand := bytes.TrimRight(run[i:j], ".")
+		if a, err := netip.ParseAddr(string(cand)); err == nil && a.Is4() {
+			end := i + len(cand)
+			if end+1 < len(run) && run[end] == ':' && run[end+1] >= '0' && run[end+1] <= '9' {
+				end++
+				for end < len(run) && run[end] >= '0' && run[end] <= '9' {
+					end++
+				}
+			}
+			out = append(out, redactedAddr...)
+			i = end
+		} else {
+			out = append(out, run[i:j]...)
+			i = j
+		}
+	}
+	return out
 }
 
 func isAddr(s string) bool {

@@ -476,10 +476,10 @@ vpn_lab() {
   ./scripts/e2e/vpn_lab.sh
 }
 if [ "$(id -u)" = "0" ] && [ -e /dev/net/tun ] && command -v ip >/dev/null && command -v nft >/dev/null \
-   && command -v curl >/dev/null && command -v python3 >/dev/null; then
-  stage "vpn: full tunnel across 4 netns (NAT, DNS, reconnect, kill switch)" vpn_lab
+   && command -v conntrack >/dev/null && command -v curl >/dev/null && command -v python3 >/dev/null; then
+  stage "vpn: full tunnel across 4 netns (NAT, DNS, reconnect, kill switch, no client logs)" vpn_lab
 else
-  skip  "vpn: full tunnel across 4 netns (NAT, DNS, reconnect, kill switch)" "needs root, /dev/net/tun, iproute2, nftables, curl, python3"
+  skip  "vpn: full tunnel across 4 netns (NAT, DNS, reconnect, kill switch, no client logs)" "needs root, /dev/net/tun, iproute2, nftables, conntrack, curl, python3"
 fi
 if command -v python3 >/dev/null; then
   stage "stake: bond → directory → equivocation slash (x-lang)" stake_e2e

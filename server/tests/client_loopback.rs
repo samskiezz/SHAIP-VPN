@@ -84,12 +84,17 @@ fn start(extra: &[&str]) -> Daemon {
         .spawn()
         .unwrap();
     // Read until the daemon reports its port, then keep draining stderr so its
-    // per-packet logging can never block on a full pipe.
+    // logging can never block on a full pipe.
     let mut lines = BufReader::new(child.stderr.take().unwrap()).lines();
+    // The log redacts every address (the daemon's own included) but not the
+    // port.
     let addr = loop {
         let line = strip_ansi(&lines.next().expect("pqanond exited early").unwrap());
-        if let Some(rest) = line.split("listen=").nth(1) {
-            break rest.split_whitespace().next().unwrap().parse().unwrap();
+        if !line.contains("pqanond listening") {
+            continue;
+        }
+        if let Some(rest) = line.split("port=").nth(1) {
+            break format!("127.0.0.1:{}", rest.split_whitespace().next().unwrap()).parse().unwrap();
         }
     };
     std::thread::spawn(move || for _ in lines {});

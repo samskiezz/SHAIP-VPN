@@ -56,6 +56,8 @@ impl Default for Gauge {
 // --- pqanond (tunnel daemon) ---
 pub static HANDSHAKES_OK: Counter = Counter::new();
 pub static HANDSHAKES_FAILED: Counter = Counter::new();
+pub static HANDSHAKES_DROPPED: Counter = Counter::new();
+pub static POOL_EXHAUSTED: Counter = Counter::new();
 pub static SESSIONS_ESTABLISHED: Counter = Counter::new();
 pub static DATA_PACKETS: Counter = Counter::new();
 pub static DECOY_PROBES: Counter = Counter::new();
@@ -71,6 +73,9 @@ pub static BYTES_TO_CLIENTS: Counter = Counter::new();
 // --- pqanon-mixd (mix node) ---
 pub static MIX_CELLS_FORWARDED: Counter = Counter::new();
 pub static MIX_COVER_CELLS: Counter = Counter::new();
+pub static MIX_CELLS_DROPPED: Counter = Counter::new();
+pub static MIX_FORWARD_FAILED: Counter = Counter::new();
+pub static MIX_PAYLOADS_DELIVERED: Counter = Counter::new();
 
 struct Metric {
     name: &'static str,
@@ -91,6 +96,8 @@ fn snapshot() -> Vec<Metric> {
     vec![
         counter("pqanon_server_handshakes_ok_total", "Completed server handshakes.", HANDSHAKES_OK.get()),
         counter("pqanon_server_handshakes_failed_total", "Server handshakes that errored or were rejected.", HANDSHAKES_FAILED.get()),
+        counter("pqanon_server_handshakes_dropped_total", "CLIENT_HELLOs dropped at the half-open handshake limit.", HANDSHAKES_DROPPED.get()),
+        counter("pqanon_server_pool_exhausted_total", "Sessions refused because every tunnel address was in use.", POOL_EXHAUSTED.get()),
         counter("pqanon_server_sessions_established_total", "Sessions established (keys derived).", SESSIONS_ESTABLISHED.get()),
         counter("pqanon_server_data_packets_total", "DATA packets decrypted by the server.", DATA_PACKETS.get()),
         counter("pqanon_server_decoy_probes_total", "TLS decoy handshakes completed by a prober.", DECOY_PROBES.get()),
@@ -104,6 +111,9 @@ fn snapshot() -> Vec<Metric> {
         counter("pqanon_server_client_bytes_out_total", "Bytes of IP traffic sent to clients.", BYTES_TO_CLIENTS.get()),
         counter("pqanon_mix_cells_forwarded_total", "Onion cells peeled and forwarded by the mix.", MIX_CELLS_FORWARDED.get()),
         counter("pqanon_mix_cover_cells_total", "Cover-traffic cells emitted by the mix.", MIX_COVER_CELLS.get()),
+        counter("pqanon_mix_cells_dropped_total", "Datagrams dropped: not a cell, a replay, or not peelable by this hop.", MIX_CELLS_DROPPED.get()),
+        counter("pqanon_mix_forward_failed_total", "Peeled cells the mix could not send on.", MIX_FORWARD_FAILED.get()),
+        counter("pqanon_mix_payloads_delivered_total", "Cells that ended at this hop (exit delivery).", MIX_PAYLOADS_DELIVERED.get()),
     ]
 }
 

@@ -327,7 +327,9 @@ func TestRedactAddrs(t *testing.T) {
 	for in, want := range map[string]string{
 		"dial tcp 10.0.0.5:5432: connect: connection refused": "dial tcp [addr]: connect: connection refused",
 		"peer=203.0.113.7 sent junk":                          "peer=[addr] sent junk",
-		"from [2001:db8::1]:443 and fe80::1%eth0.":            "from [[addr]]:443 and [addr].",
+		"from [2001:db8::1]:443 and fe80::1%eth0.":            "from [[addr]]:443 and [addr]%eth0.",
+		"id7a192.0.2.1:80,":                                   "id7a[addr],",
+		"oid 1.2.3.4.5 and ab:cd:ef":                          "oid 1.2.3.4.5 and ab:cd:ef",
 		"http://192.0.2.10:18082/json_rpc":                    "http://[addr]/json_rpc",
 		"::ffff:198.51.100.4 mapped":                          "[addr] mapped",
 		"2026/10/16 12:34:56 listening on :8080":              "2026/10/16 12:34:56 listening on :8080",

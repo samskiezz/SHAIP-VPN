@@ -26,11 +26,17 @@ impl Daemon {
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
+        // The log redacts every address (the daemon's own included) but not
+        // the port, so the address is the one we asked for, with that port.
+        let host = listen.rsplit_once(':').unwrap().0;
         let mut lines = BufReader::new(child.stderr.take().unwrap()).lines();
         let addr = loop {
             let line = strip_ansi(&lines.next().expect("pqanond exited early").unwrap());
-            if let Some(rest) = line.split("listen=").nth(1) {
-                break rest.split_whitespace().next().unwrap().parse().unwrap();
+            if !line.contains("pqanond listening") {
+                continue;
+            }
+            if let Some(rest) = line.split("port=").nth(1) {
+                break format!("{host}:{}", rest.split_whitespace().next().unwrap()).parse().unwrap();
             }
         };
         std::thread::spawn(move || for _ in lines {});

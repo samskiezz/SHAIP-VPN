@@ -17,12 +17,13 @@
 //! - **Lifecycle.** PINGs are answered with PONGs; a session silent for the
 //!   session timeout, or one that sends `Close`, is ended; half-open
 //!   handshakes expire; on shutdown every client is told `Close`.
-//! - **Logs don't identify clients.** Client IP addresses and identity /
-//!   device ids appear in logs only as per-run pseudonyms (a keyed hash with a
-//!   key that never leaves the process), so lines about one client can be
-//!   correlated within a run but not tied to a person or across restarts.
-//!   `with_client_logging(true)` (pqanond `--log-clients`) logs them as is,
-//!   for debugging.
+//! - **Nothing about a client is logged.** No log line names a client's IP
+//!   address, identity, device, tunnel address, or when one connected or for
+//!   how long: there is no per-session log line at all, and no switch that
+//!   turns one on. What the server does is visible only as aggregate counters
+//!   (the `metrics` module). A client's address and keys live in memory for
+//!   as long as its session does, because the server needs them to send its
+//!   traffic back, and are forgotten when the session ends.
 
 use crate::pool::Pool;
 use pqanon::client::{SessionInfo, MTU, TUNNEL_MTU};
@@ -34,7 +35,6 @@ use pqanon::obf::Obfuscator;
 use pqanon::transport::Session;
 use pqanon::wire::{Envelope, MsgType};
 use std::collections::HashMap;
-use std::hash::BuildHasher;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::{Duration, Instant};
 
@@ -108,14 +108,6 @@ pub enum Out {
     Tun(Vec<u8>),
 }
 
-/// Why a session ended.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Ended {
-    Closed,
-    TimedOut,
-    Replaced,
-}
-
 struct Pending {
     hs: Box<ServerHandshake>,
     hello: Vec<u8>,
@@ -126,7 +118,6 @@ struct Pending {
 struct Peer {
     dp: DataPlane,
     identity: [u8; 16],
-    device: Option<[u8; 16]>,
     assigned: Option<Ipv4Addr>,
     hs_conn_id: u64,
     ack: Vec<u8>,
@@ -144,6 +135,8 @@ pub struct CoreStats {
     pub keepalives: u64,
     pub decoys: u64,
     pub ended: u64,
+    /// CLIENT_HELLOs dropped at the half-open handshake limit.
+    pub dropped: u64,
 }
 
 pub struct Core {
@@ -156,13 +149,8 @@ pub struct Core {
     by_identity: HashMap<[u8; 16], SocketAddr>,
     routes: HashMap<Ipv4Addr, SocketAddr>,
     stats: CoreStats,
-    log_clients: bool,
-    /// Randomly keyed (per process) hasher for log pseudonyms.
-    pseudonym_key: std::collections::hash_map::RandomState,
-}
-
-fn hex16(b: [u8; 16]) -> String {
-    b.iter().map(|x| format!("{x:02x}")).collect()
+    /// When the half-open limit was last reported (at most once a minute).
+    last_drop_warning: Option<Instant>,
 }
 
 /// Destinations a client may not reach through the server unless allowed:
@@ -197,39 +185,26 @@ impl Core {
             by_identity: HashMap::new(),
             routes: HashMap::new(),
             stats: CoreStats::default(),
-            log_clients: false,
-            pseudonym_key: std::collections::hash_map::RandomState::new(),
+            last_drop_warning: None,
         })
-    }
-
-    /// Log client addresses and ids as they are (debugging) instead of as
-    /// per-run pseudonyms.
-    pub fn with_client_logging(mut self, on: bool) -> Self {
-        self.log_clients = on;
-        self
-    }
-
-    /// How a client's address appears in logs. Only the IP is hashed, so a
-    /// client that changes ports keeps its pseudonym.
-    fn who(&self, addr: &SocketAddr) -> String {
-        if self.log_clients {
-            addr.to_string()
-        } else {
-            format!("client-{:08x}", self.pseudonym_key.hash_one(addr.ip()) as u32)
-        }
-    }
-
-    /// How an identity or device id appears in logs.
-    fn ident(&self, id: [u8; 16]) -> String {
-        if self.log_clients {
-            hex16(id)
-        } else {
-            format!("id-{:08x}", self.pseudonym_key.hash_one(id) as u32)
-        }
     }
 
     pub fn stats(&self) -> CoreStats {
         self.stats
+    }
+
+    /// Tunnel addresses that just left a lease. The shell clears the kernel's
+    /// NAT state for each, then calls [`Core::addresses_flushed`]; until then an
+    /// expired address is given to no one, so a client can never receive late
+    /// packets from another client's old connections.
+    pub fn take_freed_addresses(&mut self) -> Vec<Ipv4Addr> {
+        self.pool.as_mut().map(Pool::take_freed).unwrap_or_default()
+    }
+
+    pub fn addresses_flushed(&mut self, ips: &[Ipv4Addr]) {
+        if let Some(pool) = self.pool.as_mut() {
+            pool.flushed(ips);
+        }
     }
 
     pub fn sessions(&self) -> usize {
@@ -309,16 +284,20 @@ impl Core {
             }
         }
         if self.pending.len() >= self.limits.max_pending && !self.pending.contains_key(&src) {
-            tracing::warn!(src = %self.who(&src), "too many half-open handshakes; dropping CLIENT_HELLO");
+            self.stats.dropped += 1;
+            metrics::HANDSHAKES_DROPPED.inc();
+            if self.last_drop_warning.is_none_or(|t| now.saturating_duration_since(t) >= Duration::from_secs(60)) {
+                self.last_drop_warning = Some(now);
+                tracing::warn!(limit = self.limits.max_pending, "half-open handshake limit reached; dropping new CLIENT_HELLOs");
+            }
             return Vec::new();
         }
         let mut hs = self.gate.handshake(env.conn_id);
         let server_hello = match hs.recv_client_hello(&env, true).and_then(|_| hs.server_hello()) {
             Ok(sh) => sh.to_plain(),
-            Err(e) => {
+            Err(_) => {
                 self.stats.handshakes_failed += 1;
                 metrics::HANDSHAKES_FAILED.inc();
-                tracing::debug!(src = %self.who(&src), error = %e, "CLIENT_HELLO rejected");
                 return Vec::new();
             }
         };
@@ -331,7 +310,6 @@ impl Core {
                 created: now,
             },
         );
-        tracing::debug!(src = %self.who(&src), "CLIENT_HELLO ok; sent SERVER_HELLO");
         vec![Out::Udp(server_hello, src)]
     }
 
@@ -341,26 +319,25 @@ impl Core {
         };
         let est: Established = match p.hs.recv_client_finish(&env) {
             Ok(e) => e,
-            Err(e) => {
+            Err(_) => {
                 self.stats.handshakes_failed += 1;
                 metrics::HANDSHAKES_FAILED.inc();
-                tracing::info!(src = %self.who(&src), error = %e, "handshake refused");
                 return Vec::new();
             }
         };
         // One session per identity; and a different identity may have been
         // using this address before.
         if let Some(old) = self.by_identity.get(&est.peer_id).copied() {
-            self.end(old, Ended::Replaced, now);
+            self.end(old, now);
         }
         if self.peers.contains_key(&src) {
-            self.end(src, Ended::Replaced, now);
+            self.end(src, now);
         }
         let assigned = match self.pool.as_mut() {
             Some(pool) => match pool.lease(est.peer_id) {
                 Some(ip) => Some(ip),
                 None => {
-                    tracing::warn!(src = %self.who(&src), "tunnel address pool exhausted; refusing the session");
+                    metrics::POOL_EXHAUSTED.inc();
                     return Vec::new();
                 }
             },
@@ -394,13 +371,11 @@ impl Core {
             self.routes.insert(ip, src);
         }
         self.by_identity.insert(est.peer_id, src);
-        let device = est.device.as_ref().map(|d| d.device_id);
         self.peers.insert(
             src,
             Peer {
                 dp,
                 identity: est.peer_id,
-                device,
                 assigned,
                 hs_conn_id: env.conn_id,
                 ack: ack.clone(),
@@ -411,8 +386,6 @@ impl Core {
         self.stats.handshakes_ok += 1;
         metrics::HANDSHAKES_OK.inc();
         metrics::SESSIONS_ESTABLISHED.inc();
-        tracing::info!(src = %self.who(&src), client = %self.ident(est.peer_id),
-            device = %device.map(|d| self.ident(d)).unwrap_or_else(|| "-".into()), assigned = ?assigned, "session established");
         vec![Out::Udp(ack, src)]
     }
 
@@ -432,7 +405,7 @@ impl Core {
                 _ => Vec::new(), // cover traffic
             },
             MsgType::Close => {
-                self.end(src, Ended::Closed, now);
+                self.end(src, now);
                 Vec::new()
             }
             _ => Vec::new(),
@@ -505,7 +478,7 @@ impl Core {
             .map(|(a, _)| *a)
             .collect();
         for addr in silent {
-            self.end(addr, Ended::TimedOut, now);
+            self.end(addr, now);
         }
         if let Some(pool) = self.pool.as_mut() {
             pool.expire(now, self.limits.lease_grace);
@@ -513,7 +486,9 @@ impl Core {
         self.update_gauges();
     }
 
-    fn end(&mut self, addr: SocketAddr, why: Ended, now: Instant) {
+    /// End a session (closed, timed out, or replaced by a new handshake) and
+    /// forget its address and keys.
+    fn end(&mut self, addr: SocketAddr, now: Instant) {
         let Some(p) = self.peers.remove(&addr) else { return };
         if self.by_identity.get(&p.identity) == Some(&addr) {
             self.by_identity.remove(&p.identity);
@@ -532,9 +507,6 @@ impl Core {
         }
         self.stats.ended += 1;
         metrics::SESSIONS_ENDED.inc();
-        tracing::info!(src = %self.who(&addr), client = %self.ident(p.identity),
-            device = %p.device.map(|d| self.ident(d)).unwrap_or_else(|| "-".into()),
-            reason = ?why, lasted_s = now.saturating_duration_since(p.created).as_secs(), "session ended");
     }
 
     /// Tell every client the server is going away, and forget them.
@@ -547,7 +519,7 @@ impl Core {
         }
         let addrs: Vec<SocketAddr> = self.peers.keys().copied().collect();
         for a in addrs {
-            self.end(a, Ended::Closed, now);
+            self.end(a, now);
         }
         self.update_gauges();
         out
@@ -733,20 +705,88 @@ mod tests {
         });
     }
 
+    /// Everything the core logs, at every level, as text.
+    #[derive(Clone, Default)]
+    struct Captured(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for Captured {
+        fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(b);
+            Ok(b.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Captured {
+        type Writer = Captured;
+        fn make_writer(&'a self) -> Captured {
+            self.clone()
+        }
+    }
+
     #[test]
-    fn logs_name_clients_by_pseudonym_unless_asked() {
+    fn nothing_about_a_client_reaches_the_logs() {
         big_stack(|| {
-            let core = tun_core(&Identity::generate());
-            let a: SocketAddr = "198.51.100.7:40000".parse().unwrap();
-            let b: SocketAddr = "198.51.100.7:40001".parse().unwrap();
-            let who = core.who(&a);
-            assert!(who.starts_with("client-") && !who.contains("198.51"), "{who}");
-            assert_eq!(who, core.who(&b), "same IP, other port: same pseudonym");
-            assert!(!core.ident([7; 16]).contains("0707"));
-            // Another run (another key) gives another pseudonym.
-            assert_ne!(who, tun_core(&Identity::generate()).who(&a));
-            let open = tun_core(&Identity::generate()).with_client_logging(true);
-            assert_eq!(open.who(&a), "198.51.100.7:40000");
+            let logs = Captured::default();
+            let subscriber = tracing_subscriber::fmt()
+                .with_max_level(tracing::Level::TRACE)
+                .with_ansi(false)
+                .with_writer(logs.clone())
+                .finish();
+            let server = Identity::generate();
+            let alice = Identity::generate();
+            let a_addr: SocketAddr = "198.51.100.7:40000".parse().unwrap();
+            let a2_addr: SocketAddr = "198.51.100.7:40001".parse().unwrap();
+            let mallory: SocketAddr = "203.0.113.66:5555".parse().unwrap();
+            let assigned = tracing::subscriber::with_default(subscriber, || {
+                let mut core = tun_core(&server);
+                core.limits.max_pending = 1;
+                let now = Instant::now();
+                // A whole session: handshake, traffic both ways, keepalive, a
+                // rekey from another port, close.
+                let (mut a, info) = connect(&mut core, server.public(), alice.clone(), a_addr);
+                let a_ip = info.assigned_v4.unwrap();
+                let web = Ipv4Addr::new(93, 184, 215, 14);
+                let w = a.outbound(&ipv4(a_ip, web)).unwrap();
+                core.on_datagram(a_addr, &w, now);
+                core.on_tun_packet(&ipv4(web, a_ip));
+                let ping = a.seal(MsgType::Cover, ctl::ping(1)).unwrap();
+                core.on_datagram(a_addr, &ping, now);
+                let (mut a2, _) = connect(&mut core, server.public(), alice.clone(), a2_addr);
+                let close = a2.seal(MsgType::Close, Vec::new()).unwrap();
+                core.on_datagram(a2_addr, &close, now);
+                // A refused handshake (tampered CLIENT_FINISH), the half-open
+                // limit, a probe, a timeout, and shutdown.
+                let mut hs = ClientHandshake::new(Identity::generate(), server.public(), 7);
+                let hello = hs.client_hello([0u8; 32]).unwrap().to_plain();
+                let sh = core.on_datagram(mallory, &hello, now);
+                hs.recv_server_hello(&Envelope::from_plain(udp(&sh)).unwrap()).unwrap();
+                let (mut fin, _) = hs.client_finish().unwrap();
+                let last = fin.payload.len() - 1;
+                fin.payload[last] ^= 1;
+                core.on_datagram(mallory, &fin.to_plain(), now);
+                let mut h1 = ClientHandshake::new(Identity::generate(), server.public(), 8);
+                core.on_datagram(mallory, &h1.client_hello([0u8; 32]).unwrap().to_plain(), now);
+                let mut h2 = ClientHandshake::new(Identity::generate(), server.public(), 9);
+                core.on_datagram(a_addr, &h2.client_hello([0u8; 32]).unwrap().to_plain(), now);
+                assert_eq!(core.stats().dropped, 1, "the second half-open handshake is dropped");
+                core.on_datagram(mallory, &[0x16; 600], now);
+                core.on_tick(now + Duration::from_secs(11)); // the half-open one expires
+                let (_, _) = connect(&mut core, server.public(), Identity::generate(), "198.51.100.9:1".parse().unwrap());
+                core.on_tick(now + Duration::from_secs(400));
+                core.shutdown(now + Duration::from_secs(401));
+                a_ip
+            });
+            let text = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
+            let alice_id: String = alice.identity_id().iter().map(|b| format!("{b:02x}")).collect();
+            for needle in ["198.51.100", "203.0.113", "40000", "40001", "5555", &alice_id[..8], &assigned.to_string(), "10.77.0."] {
+                assert!(!text.contains(needle), "a log line carries {needle:?}:\n{text}");
+            }
+            // The one thing reported is the aggregate condition, without a client.
+            assert!(text.contains("half-open handshake limit reached"), "{text}");
+            assert_eq!(text.lines().count(), 1, "nothing else is logged:\n{text}");
         });
     }
 

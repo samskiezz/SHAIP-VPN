@@ -54,7 +54,6 @@ async fn decoy_completes_handshake_and_serves_html() -> Result<()> {
         cert_path: cert_path.clone(),
         key_path: key_path.clone(),
         index_html: DEFAULT_INDEX_HTML.to_string(),
-        log_probes: false,
         handshake_timeout: Duration::from_secs(5),
     };
     let decoy = TlsDecoy::new(cfg)?;
@@ -108,7 +107,6 @@ async fn decoy_returns_404_for_unknown_path() -> Result<()> {
         cert_path: cert_path.clone(),
         key_path: key_path.clone(),
         index_html: DEFAULT_INDEX_HTML.to_string(),
-        log_probes: false,
         handshake_timeout: Duration::from_secs(5),
     };
     let decoy = TlsDecoy::new(cfg)?;

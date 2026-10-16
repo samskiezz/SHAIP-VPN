@@ -88,7 +88,7 @@ PQ=$(sed -n 's/^server_ml_dsa_pub *= *"\(.*\)"/\1/p' "$W/pins")
 ED=$(sed -n 's/^server_ed_pub *= *"\(.*\)"/\1/p' "$W/pins")
 start_server() { # <n>
   ip netns exec $S "$SRV" --identity "$W/srv.id" --listen 198.51.100.2:443 --tun pqs0 --tun-addr 10.77.0.1/24 \
-    --nat s0 --dns-upstream 203.0.113.2:53 --metrics 127.0.0.1:9100 > "$W/server.$1.log" 2>&1 &
+    --nat s0 --dns-upstream 203.0.113.2:53 --metrics 127.0.0.1:9100 --lease-grace-secs 3 > "$W/server.$1.log" 2>&1 &
   SRV_PID=$!; PIDS+=($SRV_PID)
   waitfor "$W/server.$1.log" "pqanond listening" 100
 }
@@ -112,6 +112,9 @@ start_client() { # <n> [run flags...]
   waitfor "$W/client.$n.log" "^connected:" 150
 }
 status_field() { sed -n "s/^$1=//p" "$W/status" 2>/dev/null; }
+metric() { ip netns exec $S curl -s http://127.0.0.1:9100/metrics | sed -n "s/^$1 //p"; }
+# NAT (conntrack) entries in the server's kernel for connections from ADDR.
+flows_from() { ip netns exec $S conntrack -L --orig-src "$1" 2>/dev/null | grep -c . ; }
 
 check "pqanond starts (TUN + NAT + DNS forwarder)" start_server 1
 check "pqanon run connects" start_client 1
@@ -154,6 +157,7 @@ check "the client reconnected after a server crash" waitfor "$W/client.1.log" "t
 check "traffic flows again" [ "$(get http://vpn-4.test:8080/)" = "caller=198.51.100.2" ]
 check "the web host never saw the client's own address while connected" bash -c \
   "! tail -n +$((MARK+1)) '$W/http.log' | grep -q '^192.168.77.2 '"
+check "the server's kernel holds NAT state for the client's open connections" [ "$(flows_from "$TUNIP")" -gt 0 ]
 
 echo "  -- disconnect"
 kill -TERM $CLI_PID; wait $CLI_PID 2>/dev/null
@@ -161,7 +165,12 @@ check "the client disconnected cleanly" grep -q "^disconnected:" "$W/client.1.lo
 check "routes restored" bash -c "! ip -n $C route | grep -qE '0.0.0.0/1|128.0.0.0/1|^198.51.100.2'"
 check "resolver restored" [ "$(cat "/etc/netns/$C/resolv.conf")" = "$ORIG_RESOLV" ]
 check "firewall rules removed" bash -c "! ip netns exec $C nft list table inet pqanon_client >/dev/null 2>&1"
-check "the server ended the session on the client's Close" waitfor "$W/server.3.log" "session ended.*Closed" 30
+sessions_zero() { local i; for i in $(seq 30); do [ "$(metric pqanon_server_sessions_active)" = 0 ] && return 0; sleep 0.1; done; return 1; }
+check "the server ended the session on the client's Close" sessions_zero
+# After the lease grace (3 s here), the address's NAT state is deleted, so a
+# client given the address next can never receive this client's late replies.
+sleep 5
+check "the freed tunnel address's NAT state was deleted" [ "$(flows_from "$TUNIP")" = 0 ]
 check "direct traffic works again" [ "$(get http://after-1.test:8080/)" = "caller=192.168.77.2" ]
 
 echo "  -- kill switch"
@@ -175,6 +184,15 @@ DOWN=$(PQANON_STATE_DIR="$W/state" ip netns exec $C "$CLI" down 2>&1)
 check "pqanon down lifts the kill switch and restores the resolver" bash -c \
   "grep -q 'removed the kill-switch' <<<'$DOWN' && grep -q 'restored /etc/resolv.conf' <<<'$DOWN'"
 check "direct traffic works after pqanon down" [ "$(get http://after-2.test:8080/)" = "caller=192.168.77.2" ]
+
+echo "  -- the server keeps nothing about its client"
+CLI_ID=$("$CLI" keygen --out "$W/cli.id" 2>/dev/null | sed -n 's/^identity_id : //p')
+check "the server's logs carry no IP address at all (client, tunnel or otherwise)" bash -c \
+  "! grep -hE '([0-9]{1,3}\.){3}[0-9]{1,3}' '$W'/server.*.log"
+check "the server's logs never name the client's identity" bash -c \
+  "[ -n '$CLI_ID' ] && ! grep -q '${CLI_ID:0:12}' '$W'/server.*.log"
+check "the server's logs have no line per session" bash -c \
+  "! grep -hiE 'session (established|ended)|handshake (refused|ok)|CLIENT_HELLO' '$W'/server.*.log"
 
 echo "  VPN lab: $ok checks passed, $bad failed"
 [ "$bad" -eq 0 ]

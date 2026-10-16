@@ -54,11 +54,7 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
-        )
-        .init();
+    pqanon::redact::init_server_logging("info");
     let cli = Cli::parse();
 
     // Long-term mix key: loaded from (or created in) --key so it survives
@@ -126,36 +122,41 @@ async fn main() -> Result<()> {
     // is immutable in flight, so an exact byte-for-byte repeat is a replay.
     let mut replay = BloomFilter::new(1 << 20, 3);
 
+    // Nothing about a cell is logged, at any level: not where it came from,
+    // where it went, its size, or when. A mix that logged "cell from A to B at
+    // T" would undo the mixing it exists for. What it does is visible only as
+    // counters (pqanon::metrics).
     let mut buf = vec![0u8; 65536];
     loop {
         let (n, src) = socket.recv_from(&mut buf).await?;
         if n != CELL_SIZE {
-            tracing::debug!(%src, n, "dropping non-cell datagram");
+            pqanon::metrics::MIX_CELLS_DROPPED.inc();
             continue;
         }
         let mut cell = [0u8; CELL_SIZE];
         cell.copy_from_slice(&buf[..CELL_SIZE]);
+        let _ = src; // used only to receive; never stored or logged
 
         if replay.check_and_insert(&cell) {
-            tracing::debug!(%src, "dropping replayed cell");
+            pqanon::metrics::MIX_CELLS_DROPPED.inc();
             continue;
         }
 
         match peel(&secret, &cell) {
             Ok(Peeled::Relay { next, cell }) => {
-                tracing::info!(%src, %next, "relaying cell");
-                if let Err(e) = socket.send_to(&cell[..], next).await {
-                    tracing::warn!(%next, error = %e, "forward failed");
-                } else {
+                if socket.send_to(&cell[..], next).await.is_ok() {
                     pqanon::metrics::MIX_CELLS_FORWARDED.inc();
+                } else {
+                    pqanon::metrics::MIX_FORWARD_FAILED.inc();
                 }
             }
             Ok(Peeled::Deliver { payload }) => {
-                tracing::info!(%src, bytes = payload.len(), "exit: delivering payload");
                 // An exit gateway hands `payload` to the clearnet bridge
-                // (pqanon-gw); here we only log it.
+                // (pqanon-gw); this daemon only counts it.
+                let _ = payload;
+                pqanon::metrics::MIX_PAYLOADS_DELIVERED.inc();
             }
-            Err(e) => tracing::debug!(%src, error = %e, "cell not for this hop"),
+            Err(_) => pqanon::metrics::MIX_CELLS_DROPPED.inc(),
         }
     }
 }

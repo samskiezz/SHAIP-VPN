@@ -45,12 +45,16 @@ pub const DEFAULT_INDEX_HTML: &str = r#"<!DOCTYPE html>
 "#;
 
 /// Decoy configuration.
+///
+/// There is no option to log visitors. Anyone may connect to the decoy, a
+/// customer whose network blocks UDP included, so it never records who
+/// connected, the name or path they asked for, or when; a completed handshake
+/// only advances the `pqanon_server_decoy_probes_total` counter.
 pub struct DecoyConfig {
     pub listen: std::net::SocketAddr,
     pub cert_path: PathBuf,
     pub key_path: PathBuf,
     pub index_html: String,
-    pub log_probes: bool,
     pub handshake_timeout: Duration,
 }
 
@@ -61,7 +65,6 @@ impl Default for DecoyConfig {
             cert_path: PathBuf::from("/etc/pqanon/decoy/cert.pem"),
             key_path: PathBuf::from("/etc/pqanon/decoy/key.pem"),
             index_html: DEFAULT_INDEX_HTML.to_string(),
-            log_probes: true,
             handshake_timeout: Duration::from_secs(10),
         }
     }
@@ -114,7 +117,8 @@ impl TlsDecoy {
 
         let me = Arc::new(self);
         loop {
-            let (stream, peer) = match listener.accept().await {
+            // The peer's address is not kept: not logged, not stored.
+            let (stream, _) = match listener.accept().await {
                 Ok(x) => x,
                 Err(e) => {
                     tracing::warn!(err = %e, "decoy accept failed");
@@ -123,39 +127,17 @@ impl TlsDecoy {
             };
             let me = me.clone();
             tokio::spawn(async move {
-                if let Err(e) = me.handle_one(stream, peer).await {
-                    tracing::debug!(%peer, err = %e, "decoy connection ended");
-                }
+                let _ = me.handle_one(stream).await;
             });
         }
     }
 
-    async fn handle_one(&self, stream: tokio::net::TcpStream, peer: std::net::SocketAddr) -> Result<()> {
-        let start = std::time::Instant::now();
+    async fn handle_one(&self, stream: tokio::net::TcpStream) -> Result<()> {
         let mut tls = tokio::time::timeout(self.config.handshake_timeout, self.acceptor.accept(stream))
             .await
             .map_err(|_| anyhow!("handshake timeout"))?
             .context("tls accept")?;
         crate::metrics::DECOY_PROBES.inc();
-
-        // What the prober told us, for the "someone scanned us" log line.
-        {
-            let (_, session) = tls.get_ref();
-            if self.config.log_probes {
-                let sni = session.server_name().unwrap_or("(none)").to_string();
-                let alpn = session
-                    .alpn_protocol()
-                    .map(|p| String::from_utf8_lossy(p).into_owned())
-                    .unwrap_or_else(|| "(none)".into());
-                tracing::info!(
-                    %peer, sni = %sni, alpn = %alpn,
-                    version = ?session.protocol_version(),
-                    cipher = ?session.negotiated_cipher_suite(),
-                    elapsed_ms = start.elapsed().as_millis() as u64,
-                    "decoy handshake completed"
-                );
-            }
-        }
 
         // Read the request line (bounded).
         let mut req_buf = vec![0u8; 8192];
@@ -170,10 +152,6 @@ impl TlsDecoy {
         } else {
             String::new()
         };
-        if self.config.log_probes && !request_line.is_empty() {
-            tracing::info!(%peer, request = %request_line, "decoy request");
-        }
-
         // Respond like an ordinary static server.
         let path = parse_path(&request_line);
         let (status, content_type, body): (&str, &str, Vec<u8>) = match path.as_str() {

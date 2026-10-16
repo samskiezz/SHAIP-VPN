@@ -1,6 +1,7 @@
 # systemd unit for a PQ-ANON VPN server. pqanond is configured by flags (it
 # reads no config file); these are the ones a production server needs.
 #
+#   apt install nftables conntrack        # --nat needs both
 #   install -m 0755 target/release/pqanond /usr/local/bin/
 #   install -m 0644 examples/pqanond.service /etc/systemd/system/
 #   systemctl daemon-reload && systemctl enable --now pqanond
@@ -10,8 +11,11 @@
 # devices only, add the control plane's keys:
 #   --device-ca <device_ca_pub> --crl-url https://cp.example.com/api/crl --crl-pub <crl_pub>
 #
-# Logs name clients only by per-run pseudonyms (no IP addresses or ids);
-# --log-clients is for debugging and changes what docs/privacy-policy.md may say.
+# pqanond logs nothing about clients: no IP address, identity, device, tunnel
+# address or session line, at any log level, and there is no option to turn
+# that on (docs/log-schema.md). Every log line also passes through an address
+# redactor. Activity is visible only as aggregate counters on --metrics, which
+# stays on localhost here.
 
 [Unit]
 Description=PQ-ANON VPN server (pqanond)

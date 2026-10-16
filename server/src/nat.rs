@@ -12,6 +12,12 @@
 //! Everything is removed again on drop (forwarding is switched back off if it
 //! was off before). A daemon that crashes leaves the table, which the next
 //! start replaces atomically.
+//!
+//! The kernel's connection tracking holds the NAT state of every open
+//! connection (needed to send replies back). When a tunnel address leaves its
+//! lease, [`forget_flows`] deletes that address's entries: they would outlive
+//! the session, and a late reply to one would reach whoever holds the address
+//! next. This uses the `conntrack` tool, so `--nat` requires it.
 
 use anyhow::{bail, Context, Result};
 use std::io::Write;
@@ -39,6 +45,31 @@ fn nft(script: &str) -> Result<()> {
         bail!("nft: {}", String::from_utf8_lossy(&out.stderr).trim());
     }
     Ok(())
+}
+
+/// Whether the `conntrack` tool (conntrack-tools) can be run.
+pub fn conntrack_available() -> bool {
+    Command::new("conntrack")
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
+/// Delete the connection-tracking (NAT) entries of these tunnel addresses: the
+/// connections their last holder opened, and any to them.
+pub fn forget_flows(ips: &[Ipv4Addr]) {
+    for ip in ips {
+        for dir in ["--orig-src", "--orig-dst"] {
+            // Exit status 1 only means there was nothing to delete.
+            let _ = Command::new("conntrack")
+                .args(["-D", dir, &ip.to_string()])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+        }
+    }
 }
 
 /// nftables table name for a TUN device (identifier-safe).
