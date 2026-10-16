@@ -1,0 +1,65 @@
+<title>SHAIP Web App</title>
+<style>
+/* The real SHAIP web app, light only as the app is: its compiled Tailwind
+   styles, plus the preview bar. Colors are tokens, set explicitly. */
+:root {
+  --bar-bg: #e0f2fe;
+  --bar-fg: #0c4a6e;
+  --bar-rule: #7dd3fc;
+  --page-bg: #f9fafb;
+  --page-fg: #111827;
+  --error: #b91c1c;
+  color-scheme: light;
+}
+/*__TAILWIND__*/
+body { background: var(--page-bg); color: var(--page-fg); }
+.preview-bar {
+  background: var(--bar-bg); color: var(--bar-fg);
+  border-bottom: 1px solid var(--bar-rule);
+  padding-block: 10px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  font-size: 13px; line-height: 1.5;
+}
+.preview-bar p { max-width: 72ch; margin: 0; }
+.preview-bar strong { font-weight: 600; }
+.boot { padding: 32px 24px; color: var(--bar-fg); font-size: 14px; }
+.boot.failed { color: var(--error); }
+</style>
+
+<div class="preview-bar" role="note">
+  <p><strong>Preview.</strong> This is the real SHAIP web app with its real account server, both running inside this browser tab (the server is the same Go code, compiled to WebAssembly). Accounts and devices you create here live only in this tab and are gone when you reload it; nothing is sent anywhere. Connecting to the VPN happens in the iPhone app or the <code>pqanon</code> command-line client, and no payment wallet is connected, so neither is part of this preview.</p>
+</div>
+<div id="app"><div class="boot" id="boot">Starting the account server in your browser…</div></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script>
+/*__WASM_EXEC__*/
+</script>
+<script>
+/*__APP__*/
+</script>
+<script>
+(function () {
+  var boot = document.getElementById("boot");
+  function fail(why) {
+    boot.className = "boot failed";
+    boot.textContent = "The account server could not start in this browser: " + why;
+  }
+  if (typeof WebAssembly !== "object") { fail("this browser has no WebAssembly."); return; }
+  var go = new Go();
+  window.addEventListener("pqanon-ready", function () { window.pqanonStart(); }, { once: true });
+  var load = WebAssembly.instantiateStreaming
+    ? WebAssembly.instantiateStreaming(fetch("pqanon-cp.wasm"), go.importObject).catch(function () {
+        return fetch("pqanon-cp.wasm").then(function (r) { return r.arrayBuffer(); })
+          .then(function (b) { return WebAssembly.instantiate(b, go.importObject); });
+      })
+    : fetch("pqanon-cp.wasm").then(function (r) { return r.arrayBuffer(); })
+        .then(function (b) { return WebAssembly.instantiate(b, go.importObject); });
+  load.then(function (r) {
+    go.run(r.instance);
+    if (window.pqanonAPIError) fail(window.pqanonAPIError);
+  }).catch(function (e) { fail(String(e && e.message || e)); });
+})();
+</script>

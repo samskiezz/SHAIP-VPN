@@ -3,20 +3,61 @@
 export const API_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
+// The hosted preview (web-ui/preview) runs the control plane itself in the
+// page, compiled to WebAssembly, and installs window.pqanonAPI; requests then
+// go to it instead of the network.
+type InPageAPI = (
+  method: string,
+  path: string,
+  authorization: string,
+  body: string,
+) => Promise<{ status: number; body: string }>;
+
+function inPageAPI(): InPageAPI | null {
+  if (typeof window === "undefined") return null;
+  const f = (window as unknown as { pqanonAPI?: InPageAPI }).pqanonAPI;
+  return typeof f === "function" ? f : null;
+}
+
 // The session token lives in sessionStorage: it is gone when the tab closes,
-// so a shared or borrowed computer doesn't stay signed in to the account.
+// so a shared or borrowed computer doesn't stay signed in to the account. In
+// the preview, whose accounts last only as long as the page, it stays in
+// memory; so it does wherever storage is blocked.
+let memoryToken: string | null = null;
+
+function storage(): Storage | null {
+  if (typeof window === "undefined" || inPageAPI()) return null;
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
+}
 
 export function getToken(): string | null {
-  if (typeof window === "undefined") return null;
-  return window.sessionStorage.getItem("token");
+  try {
+    return storage()?.getItem("token") ?? memoryToken;
+  } catch {
+    return memoryToken;
+  }
 }
 
 export function setToken(token: string) {
-  window.sessionStorage.setItem("token", token);
+  memoryToken = token;
+  try {
+    storage()?.setItem("token", token);
+  } catch {
+    /* kept in memory */
+  }
 }
 
 export function clearToken() {
-  window.sessionStorage.removeItem("token");
+  memoryToken = null;
+  try {
+    storage()?.removeItem("token");
+  } catch {
+    /* nothing stored */
+  }
 }
 
 /** Group a 16-digit account number in fours, as it is shown. */
@@ -36,21 +77,32 @@ export async function api<T>(path: string, opts: Options = {}): Promise<T> {
     const tok = getToken();
     if (tok) headers.Authorization = `Bearer ${tok}`;
   }
-  const res = await fetch(`${API_URL}${path}`, {
-    method: opts.method ?? "GET",
-    headers,
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
-  if (!res.ok) {
-    let message = res.statusText;
+  const method = opts.method ?? "GET";
+  const body = opts.body ? JSON.stringify(opts.body) : undefined;
+
+  let status: number;
+  let text: string;
+  const local = inPageAPI();
+  if (local) {
+    const r = await local(method, path, headers.Authorization ?? "", body ?? "");
+    status = r.status;
+    text = r.body;
+  } else {
+    const res = await fetch(`${API_URL}${path}`, { method, headers, body });
+    status = res.status;
+    text = await res.text();
+  }
+
+  if (status < 200 || status >= 300) {
+    let message = `request failed (${status})`;
     try {
-      const data = await res.json();
+      const data = JSON.parse(text);
       if (data?.error) message = data.error;
     } catch {
-      /* ignore */
+      /* not JSON */
     }
     throw new Error(message);
   }
-  if (res.status === 204) return undefined as T;
-  return (await res.json()) as T;
+  if (status === 204 || text === "") return undefined as T;
+  return JSON.parse(text) as T;
 }

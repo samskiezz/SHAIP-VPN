@@ -15,7 +15,7 @@ export default function Nav() {
     router.push("/login");
   };
   return (
-    <nav className="flex items-center gap-6 border-b bg-white px-6 py-3 shadow-sm">
+    <nav className="flex flex-wrap items-center gap-x-6 gap-y-2 border-b bg-white px-6 py-3 shadow-sm">
       <span className="font-mono text-lg font-bold text-brand-dark">PQ·ANON</span>
       <div className="flex gap-4">
         {links.map((l) => (

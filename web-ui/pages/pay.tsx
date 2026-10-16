@@ -88,7 +88,8 @@ export default function Pay() {
         </li>
         <li>
           <span className="font-semibold">4.</span> Redeeming a token grants VPN access. The token
-          carries no link back to the payment, and redemptions are recorded without your IP address.
+          carries no link back to the payment, and a redemption records only a hash of the token and
+          the day: no account, no address, no time of day.
         </li>
       </ol>
 
@@ -101,7 +102,8 @@ export default function Pay() {
           )}
         </h2>
         {err && <p className="mt-2 text-sm text-red-600">Could not load plans: {err}</p>}
-        <table className="mt-3 w-full overflow-hidden rounded-lg border bg-white text-sm shadow-sm">
+        <div className="mt-3 overflow-x-auto">
+        <table className="w-full overflow-hidden rounded-lg border bg-white text-sm shadow-sm">
           <thead className="bg-gray-50 text-left text-gray-500">
             <tr>
               <th className="px-4 py-2">Plan</th>
@@ -114,7 +116,9 @@ export default function Pay() {
             {denoms.map((d) => (
               <tr key={d.id} className="border-t">
                 <td className="px-4 py-2 font-medium">{d.label}</td>
-                <td className="px-4 py-2 text-gray-600">{d.duration_days} days</td>
+                <td className="px-4 py-2 text-gray-600">
+                  {d.duration_days} {d.duration_days === 1 ? "day" : "days"}
+                </td>
                 <td className="px-4 py-2 text-right font-mono">{d.price_xmr} XMR</td>
                 <td className="px-4 py-2 text-right font-mono">{d.price_btc} BTC</td>
               </tr>
@@ -128,6 +132,7 @@ export default function Pay() {
             )}
           </tbody>
         </table>
+        </div>
         <p className="mt-2 text-xs text-gray-500">
           Buy from the app:{" "}
           <code className="rounded bg-gray-100 px-1">pqanon buy --plan month --server &lt;url&gt;</code>

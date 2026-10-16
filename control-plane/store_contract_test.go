@@ -1,3 +1,5 @@
+//go:build !js
+
 package main
 
 // One behavioural contract for every Store implementation. It always runs

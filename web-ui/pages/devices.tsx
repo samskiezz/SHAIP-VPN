@@ -77,7 +77,8 @@ export default function Devices() {
         {devices.length === 0 ? (
           <div className="text-gray-500">No devices enrolled.</div>
         ) : (
-          <table className="w-full max-w-3xl text-left text-sm">
+          <div className="max-w-3xl overflow-x-auto">
+          <table className="w-full text-left text-sm">
             <thead className="text-xs uppercase text-gray-500">
               <tr>
                 <th className="py-2">Device</th>
@@ -107,6 +108,7 @@ export default function Devices() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

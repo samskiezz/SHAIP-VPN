@@ -161,6 +161,19 @@ docker compose up --build
 cd web-ui && npm install && npm run dev   # http://localhost:3000
 ```
 
+### Hosted web preview (no server needed)
+
+`web-ui/preview/build.sh` packages the real web app into one static page: the
+same React pages, with the real control plane compiled to WebAssembly
+(`control-plane/wasm_main.go`) running in the visitor's browser tab with the
+in-memory store and nothing seeded. Sign-up, devices, plans and account
+deletion work on the real code; nothing leaves the tab, and its accounts are
+gone on reload. The VPN connection and payments need the real servers.
+
+```bash
+cd web-ui && npm install && ./preview/build.sh   # → preview/dist/{index.html,pqanon-cp.wasm}
+```
+
 ## Protocol summary
 
 - **PQANON-HS/1 handshake** — 3-message mutually-authenticated handshake. The
