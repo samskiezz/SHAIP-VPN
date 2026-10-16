@@ -12,11 +12,19 @@ struct SetupView: View {
     @State private var pasting = false
     @State private var error: String?
 
+    /// The welcome mesh is art, not a status display (there is no server yet), so it is always
+    /// drawn in full colour; the Connect screen's mesh is the one that follows the tunnel.
+    private static let artOptions: SceneOptions = {
+        var o = SceneOptions()
+        o.hud = false
+        return o
+    }()
+
     var body: some View {
         ZStack(alignment: .bottom) {
             ScreenBackground()
             GeometryReader { geo in
-                SceneView(.net, layout: SceneLayout(cy: 0.5, r: 0.4), options: store.meshOptions)
+                SceneView(.net, layout: SceneLayout(cy: 0.5, r: 0.4), options: Self.artOptions)
                     .frame(width: geo.size.width, height: 540)
                     .offset(y: 30)
                     .accessibilityHidden(true)

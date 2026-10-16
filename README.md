@@ -174,6 +174,20 @@ gone on reload. The VPN connection and payments need the real servers.
 cd web-ui && npm install && ./preview/build.sh   # → preview/dist/{index.html,pqanon-cp.wasm}
 ```
 
+### iPhone app preview (in a browser)
+
+`clients/ios/preview/build.sh` builds the SHAIP iPhone app's screens as one
+self-contained page: Setup, Connect, Traffic, Protection, Server, Settings and
+the lock-screen Live Activity, with the v2 design's glass and the live 3-D mesh
+drawn by `clients/ios/design/shaip-engine.js` itself (the file the iPhone
+renderer is tested against). Config import uses the app's own parsing rules.
+A web page can't open a VPN tunnel, so connecting there runs a simulated
+session inside the page, and the page says so; nothing is stored or sent.
+
+```bash
+clients/ios/preview/build.sh   # → clients/ios/preview/dist/index.html
+```
+
 ## Protocol summary
 
 - **PQANON-HS/1 handshake** — 3-message mutually-authenticated handshake. The

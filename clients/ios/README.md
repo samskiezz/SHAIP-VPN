@@ -85,6 +85,14 @@ The visual design stays: tokens, glass, typography, the orb, the cards and the m
 is now ambient art with no labels. The globe and radar engines remain in SHAIPCore (still verified
 against the reference) but the app doesn't use them.
 
+## Try the screens in a browser
+
+`preview/build.sh` builds these screens as a single web page (`preview/dist/index.html`), with the same
+copy, glass recipe and live mesh, drawn by `design/shaip-engine.js` itself. A web page can't open a VPN
+tunnel, so connecting there plays a simulated session, and the page says so on screen. It is for
+looking at and clicking through the app before a Mac build exists; the numbers in the real app come
+from the tunnel.
+
 ## Build
 
 On a **Mac with Xcode 26** and [rustup](https://rustup.rs):
@@ -156,6 +164,7 @@ What has been checked, and how:
 | `SHAIPWidgets/` | The Live Activity: lock-screen card and the Dynamic Island layouts. |
 | `FFIInterop/` | The Linux harness described above. |
 | `design/` | The v2 handoff as delivered, then fixed. Its sample content is illustrative and not used by the app. |
+| `preview/` | The browser preview of these screens (see above). |
 | `scripts/` | `build-ffi.sh` (Rust → XCFramework) and `engine-vectors.mjs` (render test vectors). |
 
 ## Limits (also shown in the app)
