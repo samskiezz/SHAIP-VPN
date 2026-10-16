@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A privacy client keeps nothing in cloud backup or device transfer:
+     no account number, no token, no config leaves the device this way. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+    </device-transfer>
+</data-extraction-rules>

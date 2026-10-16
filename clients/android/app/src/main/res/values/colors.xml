@@ -1,0 +1,8 @@
+<resources>
+    <!-- Design tokens shared with the web UI and the iOS app
+         (clients/ios/design/HANDOFF.md). -->
+    <color name="bg">#FF04050A</color>
+    <color name="ink">#FFF5F7FC</color>
+    <color name="signal">#FF5CF2FF</color>
+    <color name="black">#FF000000</color>
+</resources>

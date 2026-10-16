@@ -14,7 +14,10 @@ this build environment (a Linux container) does not have:
    Activity code (19 files) has therefore **never been compiled** — it is
    written and reviewed, not built. The first real compile must happen on a Mac.
    This is the honest reason the only thing clickable so far is a browser
-   preview, and why it can feel "fake": there is no `.ipa` yet.
+   preview, and why it can feel "fake": there is no `.ipa` yet. (This limit is
+   iOS-only. The **Android** app in `clients/android` does build here, on
+   Linux, to a real APK — Android needs no Apple toolchain. See the table
+   below.)
 
 2. **There is no server running on the internet.** The VPN server, the account
    service, and the web dashboard all build and run, and are proven end to end
@@ -40,6 +43,8 @@ Everything else below is real.
 | Web product end to end, clicked in a browser (register → dashboard → devices → redeem a code → delete account, plus the safety gates) | **Real** | `web-ui/e2e/run.sh` — 11/11 checks against the real control plane |
 | iOS **core logic** (config parsing, telemetry, render engine) | **Real** | `swift test` (13 tests) — builds on Linux, Foundation-only |
 | iOS ↔ Rust boundary (the app's FFI Swift against a live `pqanond`) | **Real** | `clients/ios/FFIInterop` runs in the battery on Linux |
+| **Android app** (Kotlin + Jetpack Compose, same glass design; login, dashboard, Servers directory, devices, buy-access + code redeem; wired to the real control plane) | **Real — builds to an APK on Linux** | `cd clients/android && ./gradlew assembleDebug` → `app-debug.apk` (no macOS needed) |
+| Android VpnService (owns the TUN + connection lifecycle) | **Real skeleton** | `clients/android/.../vpn/PqanonVpnService.kt`; PQ data plane bridges the Rust core over JNI next (does not black-hole traffic until then) |
 | Full battery | **16 stages, 0 failed** | `scripts/test-all.sh` |
 
 ## What is written but UNVERIFIED (needs a Mac to compile)
