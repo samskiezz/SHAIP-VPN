@@ -14,6 +14,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -35,7 +36,19 @@ func main() {
 		log.Fatalf("crl key: %v", err)
 	}
 
-	srv := &Server{store: store, tokens: tokens, crlPub: crlPub, crlPriv: crlPriv}
+	mint, err := NewMint(os.Getenv("PAY_KEY_DIR"), defaultDenominations())
+	if err != nil {
+		log.Fatalf("e-cash mint: %v", err)
+	}
+	rail := buildRail()
+
+	srv := &Server{
+		store: store, tokens: tokens, crlPub: crlPub, crlPriv: crlPriv,
+		mint: mint, rail: rail, devSettle: os.Getenv("PAY_DEV_SETTLE") == "1",
+	}
+	if srv.devSettle {
+		log.Printf("WARNING: PAY_DEV_SETTLE enabled — /api/pay/dev/settle will mark orders paid without a chain; never set this in production")
+	}
 
 	log.Printf("PQANON-CP/1 control plane listening on %s (store: %s)", addr, label)
 	srvHTTP := &http.Server{
@@ -66,6 +79,14 @@ func routes(srv *Server, label string) http.Handler {
 		r.Post("/auth/login", srv.handleLogin)
 		r.Get("/crl", srv.handleCRL)                   // tunnel servers fetch this unauthenticated
 		r.Get("/public/status", srv.handlePublicStatus) // status pages / uptime monitors
+
+		// Untraceable payments (§20) — deliberately identity-free, so no auth.
+		r.Get("/pay/denominations", srv.handleDenominations)
+		r.Post("/pay/order", srv.handleCreateOrder)
+		r.Get("/pay/order/{id}", srv.handleOrderStatus)
+		r.Post("/pay/collect", srv.handleCollect)
+		r.Post("/pay/redeem", srv.handleRedeem)
+		r.Post("/pay/dev/settle", srv.handleDevSettle) // gated by PAY_DEV_SETTLE
 
 		r.Group(func(r chi.Router) {
 			r.Use(srv.authMiddleware)
@@ -109,6 +130,30 @@ func openTokenSigner(ttl time.Duration) (*TokenSigner, error) {
 	}
 	log.Printf("WARNING: TOKEN_SIGNING_KEY not set — using an ephemeral key; tokens will not survive a restart. Generate one with: openssl rand -base64 32")
 	return NewTokenSigner(ttl)
+}
+
+// buildRail selects the payment backend. With MONERO_WALLET_RPC set it talks to
+// a real monero-wallet-rpc; otherwise it uses the dev rail so the stack runs
+// end-to-end without a live chain (buy→collect→redeem still works; settlement is
+// manual via the gated dev endpoint).
+func buildRail() PaymentRail {
+	if url := os.Getenv("MONERO_WALLET_RPC"); url != "" {
+		account := uint32(atoiOr("MONERO_ACCOUNT_INDEX", 0))
+		minConf := atoiOr("MONERO_MIN_CONF", 10)
+		log.Printf("payments: Monero rail via %s (account %d, min %d confirmations)", url, account, minConf)
+		return NewMoneroRail(url, account, minConf)
+	}
+	log.Printf("payments: DEV rail (no chain). Set MONERO_WALLET_RPC to accept real Monero.")
+	return NewDevRail()
+}
+
+func atoiOr(key string, def int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return def
 }
 
 func openStore() (Store, string) {

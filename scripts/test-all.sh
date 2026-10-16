@@ -87,6 +87,41 @@ cp_e2e() {
   [ "$bad" -eq 0 ]
 }
 
+# --- Untraceable payments: real Rust client ↔ real Go mint (cross-language) ---
+pay_e2e() {
+  cargo build --release -q -p pqanon-client --bin pqanon || return 1
+  ( cd control-plane && go build -o bin/control-plane . ) || return 1
+  local BIN=control-plane/bin/control-plane B=http://127.0.0.1:8098 ok=0 bad=0
+  local W; W=$(mktemp); local KEY; KEY=$(openssl rand -base64 32)
+  PAY_DEV_SETTLE=1 TOKEN_SIGNING_KEY="$KEY" LISTEN_ADDR=:8098 "$BIN" >/tmp/pay_e2e.log 2>&1 &
+  local PID=$!
+  curl -fsS --retry 40 --retry-delay 1 --retry-connrefused "$B/health" >/dev/null || { kill $PID; rm -f "$W"; return 1; }
+  pass() { ok=$((ok+1)); }; fail() { echo "  ✗ $1"; bad=$((bad+1)); }
+
+  ./target/release/pqanon plans --server "$B" | grep -q month && pass || fail "plans"
+  local BUY OID
+  BUY=$(./target/release/pqanon buy --plan month --count 2 --server "$B" --store "$W")
+  OID=$(echo "$BUY" | sed -n 's/^Order \([a-f0-9-]*\) .*/\1/p')
+  [ -n "$OID" ] && pass || fail "buy (no order id)"
+  # Collecting before payment must not hand out tokens.
+  ./target/release/pqanon collect --order "$OID" --server "$B" --store "$W" | grep -q awaiting_payment && pass || fail "collect-before-pay"
+  curl -s -X POST "$B/api/pay/dev/settle" -H 'Content-Type: application/json' -d "{\"order_id\":\"$OID\"}" >/dev/null
+  # Rust unblinds a signature the Go CIRCL mint produced.
+  ./target/release/pqanon collect --order "$OID" --server "$B" --store "$W" | grep -q "Collected 2" && pass || fail "collect/unblind"
+  # Go verifies a Rust-produced RFC 9474 signature and grants access.
+  ./target/release/pqanon redeem --plan month --server "$B" --store "$W" | grep -q "access granted" && pass || fail "redeem (interop)"
+  # Second token still spends; a third does not (wallet now empty).
+  ./target/release/pqanon redeem --plan month --server "$B" --store "$W" | grep -q "access granted" && pass || fail "redeem 2nd token"
+  # The empty-wallet case exits non-zero by design, so capture output first
+  # (a bare `cmd | grep` would trip `set -o pipefail` on the intended error).
+  local EMPTY; EMPTY=$(./target/release/pqanon redeem --plan month --server "$B" --store "$W" 2>&1 || true)
+  echo "$EMPTY" | grep -q "no month tokens" && pass || fail "empty wallet refused"
+
+  kill $PID 2>/dev/null; wait $PID 2>/dev/null; rm -f "$W"
+  echo "  pay E2E: $ok checks passed, $bad failed"
+  [ "$bad" -eq 0 ]
+}
+
 echo "PQ-ANON master test battery — $(date -u +%FT%TZ)"
 
 stage "rust: build (workspace)"              rust_build
@@ -108,6 +143,11 @@ if command -v python3 >/dev/null && command -v openssl >/dev/null; then
   stage "control-plane: live sign-up E2E"    cp_e2e
 else
   skip  "control-plane: live sign-up E2E"    "needs python3 + openssl"
+fi
+if command -v openssl >/dev/null; then
+  stage "pay: untraceable buy→redeem (x-lang)" pay_e2e
+else
+  skip  "pay: untraceable buy→redeem (x-lang)" "needs openssl"
 fi
 
 printf '\n════════════════════════════════════════════════════════\n SUMMARY\n────────────────────────────────────────────────────────\n'

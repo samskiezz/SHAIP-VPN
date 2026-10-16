@@ -64,9 +64,64 @@ enum Cmd {
         #[arg(long)]
         require_signed: bool,
     },
+    /// List the plans (denominations) the mint sells.
+    Plans {
+        #[arg(short, long)]
+        server: String,
+    },
+    /// Buy access anonymously: blind tokens and open an order to pay with Monero.
+    Buy {
+        #[arg(short, long)]
+        server: String,
+        #[arg(short, long)]
+        plan: String,
+        /// How many tokens to buy (each redeems for one access grant).
+        #[arg(short, long, default_value_t = 1)]
+        count: usize,
+        #[arg(long)]
+        store: Option<String>,
+    },
+    /// After paying, collect and unblind the tokens for an order.
+    Collect {
+        #[arg(short, long)]
+        server: String,
+        #[arg(short, long)]
+        order: String,
+        #[arg(long)]
+        store: Option<String>,
+    },
+    /// Show the tokens and pending orders in the local wallet.
+    Tokens {
+        #[arg(long)]
+        store: Option<String>,
+    },
+    /// Redeem a token for a VPN access grant (unlinkable to your payment).
+    Redeem {
+        #[arg(short, long)]
+        server: String,
+        #[arg(short, long)]
+        plan: String,
+        #[arg(long)]
+        store: Option<String>,
+    },
 }
 
-fn main() -> Result<()> {
+fn wallet_path(store: Option<String>) -> std::path::PathBuf {
+    store
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(pqanon::pay_client::default_wallet_path)
+}
+
+fn main() {
+    // Print a clean one-line error (no Rust backtrace) for ordinary user
+    // mistakes like an empty wallet or an unreachable server.
+    if let Err(e) = cli_main() {
+        eprintln!("error: {e:#}");
+        std::process::exit(1);
+    }
+}
+
+fn cli_main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
@@ -91,6 +146,24 @@ fn main() -> Result<()> {
             trust_key,
             require_signed,
         } => resolve_cmd(&name, &server, &rtype, trust_key.as_deref(), require_signed),
+        Cmd::Plans { server } => pqanon::pay_client::plans(&server),
+        Cmd::Buy {
+            server,
+            plan,
+            count,
+            store,
+        } => pqanon::pay_client::buy(&server, &plan, count, &wallet_path(store)),
+        Cmd::Collect {
+            server,
+            order,
+            store,
+        } => pqanon::pay_client::collect(&server, &order, &wallet_path(store)),
+        Cmd::Tokens { store } => pqanon::pay_client::list_tokens(&wallet_path(store)),
+        Cmd::Redeem {
+            server,
+            plan,
+            store,
+        } => pqanon::pay_client::redeem(&server, &plan, &wallet_path(store)),
     }
 }
 

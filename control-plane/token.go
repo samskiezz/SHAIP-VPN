@@ -56,12 +56,18 @@ func NewTokenSignerWithSeed(ttl time.Duration, seed []byte) (*TokenSigner, error
 var b64 = base64.RawURLEncoding
 
 func (t *TokenSigner) Issue(sub, email string) (string, error) {
+	return t.IssueWithTTL(sub, email, t.ttl)
+}
+
+// IssueWithTTL issues a token valid for a custom lifetime — used for paid VPN
+// access grants, whose duration is the purchased plan's, not the default TTL.
+func (t *TokenSigner) IssueWithTTL(sub, email string, ttl time.Duration) (string, error) {
 	now := time.Now()
 	claims := Token{
 		Subject:   sub,
 		Email:     email,
 		IssuedAt:  now.Unix(),
-		ExpiresAt: now.Add(t.ttl).Unix(),
+		ExpiresAt: now.Add(ttl).Unix(),
 	}
 	payload, err := json.Marshal(claims)
 	if err != nil {

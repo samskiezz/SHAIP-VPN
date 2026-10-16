@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"log"
 	"time"
@@ -346,6 +347,70 @@ func (s *PgStore) ListAudit(ctx context.Context, userID string, limit int) ([]Au
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+func (s *PgStore) CreatePayOrder(ctx context.Context, o *PayOrder) error {
+	bt, _ := json.Marshal(o.BlindedTokens)
+	bs, _ := json.Marshal(o.BlindSigs)
+	return s.pool.QueryRow(ctx,
+		`INSERT INTO pay_orders
+		   (denom, rail, address, meta, amount_atomic, status, blinded_tokens, blind_sigs, expires_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+		 RETURNING id, created_at`,
+		o.Denom, o.Rail, o.Address, o.Meta, int64(o.AmountAtomic), o.Status,
+		string(bt), string(bs), o.ExpiresAt).Scan(&o.ID, &o.CreatedAt)
+}
+
+func (s *PgStore) GetPayOrder(ctx context.Context, id string) (*PayOrder, error) {
+	var o PayOrder
+	var amt int64
+	var bt, bs []byte
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, denom, rail, address, meta, amount_atomic, status,
+		        blinded_tokens, blind_sigs, created_at, paid_at, expires_at
+		 FROM pay_orders WHERE id = $1`, id).
+		Scan(&o.ID, &o.Denom, &o.Rail, &o.Address, &o.Meta, &amt, &o.Status,
+			&bt, &bs, &o.CreatedAt, &o.PaidAt, &o.ExpiresAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	o.AmountAtomic = uint64(amt)
+	_ = json.Unmarshal(bt, &o.BlindedTokens)
+	_ = json.Unmarshal(bs, &o.BlindSigs)
+	return &o, nil
+}
+
+func (s *PgStore) UpdatePayOrder(ctx context.Context, o *PayOrder) error {
+	bs, _ := json.Marshal(o.BlindSigs)
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE pay_orders
+		   SET address = $2, meta = $3, status = $4, paid_at = $5, blind_sigs = $6
+		 WHERE id = $1`,
+		o.ID, o.Address, o.Meta, o.Status, o.PaidAt, string(bs))
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *PgStore) SpendToken(ctx context.Context, denom, nonceHash string) error {
+	// Atomic double-spend guard: the unique PK makes a second insert a no-op.
+	tag, err := s.pool.Exec(ctx,
+		`INSERT INTO spent_tokens (denom, nonce_hash) VALUES ($1, $2)
+		 ON CONFLICT (denom, nonce_hash) DO NOTHING`, denom, nonceHash)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrSpent
+	}
+	return nil
 }
 
 func (s *PgStore) ListRevoked(ctx context.Context) ([]RevokedIdentity, error) {

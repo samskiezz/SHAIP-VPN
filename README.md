@@ -22,9 +22,28 @@ ChaCha20-Poly1305, HKDF/HMAC-SHA256, Argon2id).
 | Control plane `PQANON-CP/1` (auth, nodes, connections, CRL) | Go | **Working** | `go test`, live curl |
 | Web UI (dashboard, connections, routing, login) | Next.js/TS | **Working** | `next build`, `tsc` |
 | Postgres schema + in-memory fallback | SQL/Go | **Working** | boots with or without a DB |
+| DNSSEC-validating resolver (`pqanon resolve`) | Rust | **Working** | 14 tests + live against 1.1.1.1 |
+| Untraceable payments: Monero + Chaumian e-cash (`buy`/`collect`/`redeem`) | Rust + Go | **Working** | cross-language buy→redeem E2E |
 
 Everything above compiles and its tests pass. See **Known limitations** for the
 integration work that remains (TUN plumbing, delay queue, cover-traffic driver).
+
+## Payments — untraceable by construction
+
+No cards, no fiat, no identity. Access is bought with **Monero** and redeemed
+through **Chaumian e-cash** (RFC 9474 RSA blind signatures), so the operator
+*cannot* link a payment to the VPN usage it funded — not by policy, by
+cryptography. The mint blind-signs your access tokens without ever seeing them;
+a redeemed token carries no link back to the order that paid for it.
+
+```bash
+pqanon plans   --server <cp-url>                 # day / week / month / quarter, priced in XMR
+pqanon buy     --plan month --server <cp-url>    # prints a one-time Monero address
+pqanon collect --order <id>  --server <cp-url>   # unblinds tokens once the payment confirms
+pqanon redeem  --plan month  --server <cp-url>   # → a VPN access grant, unlinkable to payment
+```
+
+Full design, crypto choices, and threat model: **[docs/payments.md](docs/payments.md)**.
 
 ## Layout
 

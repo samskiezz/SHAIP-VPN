@@ -47,6 +47,28 @@ type AuditEntry struct {
 	At     time.Time `json:"at"`
 }
 
+// ErrSpent is returned when a token nonce has already been redeemed.
+var ErrSpent = errors.New("token already spent")
+
+// PayOrder is one untraceable purchase: a denomination, a payment address, and
+// the buyer's blinded tokens (and, after collection, the blind signatures). It
+// carries no identity — nothing links it to a person or to the tokens once they
+// are unblinded and redeemed.
+type PayOrder struct {
+	ID            string     `json:"id"`
+	Denom         string     `json:"denom"`
+	Rail          string     `json:"rail"`
+	Address       string     `json:"address"`
+	Meta          string     `json:"-"`
+	AmountAtomic  uint64     `json:"amount_atomic"`
+	Status        string     `json:"status"`
+	BlindedTokens [][]byte   `json:"-"`
+	BlindSigs     [][]byte   `json:"-"`
+	CreatedAt     time.Time  `json:"created_at"`
+	PaidAt        *time.Time `json:"paid_at,omitempty"`
+	ExpiresAt     time.Time  `json:"expires_at"`
+}
+
 // Node is a tunnel/mix server participating in the network.
 type Node struct {
 	ID           string    `json:"id"`
@@ -116,6 +138,12 @@ type Store interface {
 	AppendAudit(ctx context.Context, e *AuditEntry) error
 	ListAudit(ctx context.Context, userID string, limit int) ([]AuditEntry, error)
 
+	CreatePayOrder(ctx context.Context, o *PayOrder) error
+	GetPayOrder(ctx context.Context, id string) (*PayOrder, error)
+	UpdatePayOrder(ctx context.Context, o *PayOrder) error
+	// SpendToken records a redeemed nonce, returning ErrSpent if already spent.
+	SpendToken(ctx context.Context, denom, nonceHash string) error
+
 	ListRoutingRules(ctx context.Context, userID string) ([]RoutingRule, error)
 	CreateRoutingRule(ctx context.Context, r *RoutingRule) error
 	DeleteRoutingRule(ctx context.Context, id, userID string) error
@@ -144,6 +172,8 @@ type MemStore struct {
 	apiKeys  map[string]*APIKey // keyed by key id
 	audit    []AuditEntry
 	auditSeq int64
+	orders   map[string]*PayOrder // keyed by order id
+	spent    map[string]bool      // keyed by denom|nonce_hash
 }
 
 func NewMemStore() *MemStore {
@@ -155,6 +185,8 @@ func NewMemStore() *MemStore {
 		settings: make(map[string][]byte),
 		revoked:  make(map[string]*RevokedIdentity),
 		apiKeys:  make(map[string]*APIKey),
+		orders:   make(map[string]*PayOrder),
+		spent:    make(map[string]bool),
 	}
 }
 
@@ -424,6 +456,53 @@ func (m *MemStore) ListAudit(_ context.Context, userID string, limit int) ([]Aud
 		}
 	}
 	return out, nil
+}
+
+func (m *MemStore) CreatePayOrder(_ context.Context, o *PayOrder) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if o.ID == "" {
+		o.ID = uuid.NewString()
+	}
+	if o.CreatedAt.IsZero() {
+		o.CreatedAt = time.Now().UTC()
+	}
+	cp := *o
+	m.orders[o.ID] = &cp
+	return nil
+}
+
+func (m *MemStore) GetPayOrder(_ context.Context, id string) (*PayOrder, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	o, ok := m.orders[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	cp := *o
+	return &cp, nil
+}
+
+func (m *MemStore) UpdatePayOrder(_ context.Context, o *PayOrder) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.orders[o.ID]; !ok {
+		return ErrNotFound
+	}
+	cp := *o
+	m.orders[o.ID] = &cp
+	return nil
+}
+
+func (m *MemStore) SpendToken(_ context.Context, denom, nonceHash string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := denom + "|" + nonceHash
+	if m.spent[key] {
+		return ErrSpent
+	}
+	m.spent[key] = true
+	return nil
 }
 
 func (m *MemStore) ListRevoked(_ context.Context) ([]RevokedIdentity, error) {

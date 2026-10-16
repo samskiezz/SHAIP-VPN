@@ -39,6 +39,8 @@ pub mod delayed_ack;
 pub mod dns_cache;
 pub mod dns_neg;
 pub mod dns_resolver;
+pub mod pay_client;
+pub mod payment;
 pub mod dns_qmin;
 pub mod dns_tcp;
 pub mod entropy;

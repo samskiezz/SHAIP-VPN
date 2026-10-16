@@ -89,6 +89,32 @@ CREATE TABLE IF NOT EXISTS audit_log (
     at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Untraceable payments (§20): orders carry no identity, and spent_tokens is the
+-- double-spend guard for redeemed e-cash nonces.
+CREATE TABLE IF NOT EXISTS pay_orders (
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    denom          TEXT NOT NULL,
+    rail           TEXT NOT NULL,
+    address        TEXT NOT NULL,
+    meta           TEXT NOT NULL DEFAULT '',
+    amount_atomic  BIGINT NOT NULL,
+    status         TEXT NOT NULL DEFAULT 'awaiting_payment'
+                   CHECK (status IN ('awaiting_payment','paid','collected','expired')),
+    blinded_tokens JSONB NOT NULL DEFAULT '[]'::jsonb,
+    blind_sigs     JSONB NOT NULL DEFAULT '[]'::jsonb,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    paid_at        TIMESTAMPTZ,
+    expires_at     TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_pay_orders_open ON pay_orders(status) WHERE status = 'awaiting_payment';
+
+CREATE TABLE IF NOT EXISTS spent_tokens (
+    denom       TEXT NOT NULL,
+    nonce_hash  TEXT NOT NULL,
+    spent_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (denom, nonce_hash)
+);
+
 CREATE INDEX IF NOT EXISTS idx_connections_active ON connections(ended_at) WHERE ended_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_conn_user          ON connections(user_id);
 CREATE INDEX IF NOT EXISTS idx_nodes_status       ON nodes(status);
