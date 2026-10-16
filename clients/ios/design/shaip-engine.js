@@ -228,7 +228,7 @@ function drawRadar(ctx, w, h, G, o, ph, ts, C) {
 }
 
 const STATE = new WeakMap();
-const ease = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+const ease = u => { if (u < .5) return 4 * u * u * u; const v = -2 * u + 2; return 1 - v * v * v / 2; };
 const mixHex = (a, b, t) => { const x = rgb(a), y = rgb(b); return '#' + [0, 1, 2].map(i => Math.round(x[i] + (y[i] - x[i]) * t).toString(16).padStart(2, '0')).join('').toUpperCase(); };
 export function draw(c, ts, o) {
   const st0 = STATE.get(c), rect = c.getBoundingClientRect();

@@ -22,6 +22,7 @@ ChaCha20-Poly1305, HKDF/HMAC-SHA256, Argon2id).
 | `pqanon-mixd` mix node (peels + forwards onion cells) | Rust | **Working** | mix round-trip tests |
 | Control plane `PQANON-CP/1` (auth, nodes, connections, CRL) | Go | **Working** | `go test`, live curl |
 | Web UI (dashboard, connections, routing, login) | Next.js/TS | **Working** | `next build`, `tsc` |
+| iOS app: SHAIP v2 design, 10 screens, Live Activity + Dynamic Island (`clients/ios`) | SwiftUI | **Written** (needs an Xcode 26 build) | `SHAIPCore` package: 11 tests, render engines reproduce the design's `shaip-engine.js` op for op ([clients/ios/README.md](clients/ios/README.md)) |
 | Postgres schema + in-memory fallback | SQL/Go | **Working** | one store contract run against both, incl. real PostgreSQL |
 | Signing-key custody: key files + **PKCS#11 HSM**; persistent daemon identities | Go + Rust | **Working** | real SoftHSM2 token + restart checks ([docs/keys.md](docs/keys.md)) |
 | One-click device enrollment (`/api/enroll`, `pqanon enroll`) + device-cert tunnel admission + CRL revocation | Go + Rust | **Working** | cross-language enroll E2E + handshake tests ([docs/enrollment.md](docs/enrollment.md)) |
@@ -59,6 +60,7 @@ server/         Rust daemons: pqanond (tunnel) + pqanon-mixd (mix node)
 control-plane/  Go REST API (PQANON-CP/1): auth, nodes, connections, CRL
 db/             PostgreSQL schema (§15)
 web-ui/         Next.js dashboard
+clients/ios/    SwiftUI iOS app (SHAIP v2 design), SHAIPCore package, design reference
 examples/       Example server.toml / client.toml
 scripts/        dpi-smoke.sh, run-local.sh
 ```

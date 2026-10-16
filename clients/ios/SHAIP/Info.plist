@@ -2,30 +2,12 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleDisplayName</key>
-  <string>SHAIP</string>
-  <key>CFBundleName</key>
-  <string>SHAIP</string>
-  <key>CFBundleIdentifier</key>
-  <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
-  <key>CFBundlePackageType</key>
-  <string>APPL</string>
-  <key>CFBundleShortVersionString</key>
-  <string>1.0</string>
-  <key>CFBundleVersion</key>
-  <string>1</string>
-  <key>UILaunchScreen</key>
-  <dict/>
-  <key>UIApplicationSceneManifest</key>
-  <dict>
-    <key>UIApplicationSupportsMultipleScenes</key>
-    <false/>
-  </dict>
-  <key>UISupportedInterfaceOrientations</key>
-  <array>
-    <string>UIInterfaceOrientationPortrait</string>
-  </array>
-  <key>UIUserInterfaceStyle</key>
-  <string>Automatic</string>
+  <!-- Merged with the build-generated keys (GENERATE_INFOPLIST_FILE = YES; see project.yml).
+       Keys here have no INFOPLIST_KEY_ build-setting equivalent. -->
+  <key>NSSupportsLiveActivities</key>
+  <true/>
+  <!-- Let animations (the 3-D scenes) run above 60 Hz on ProMotion iPhones. -->
+  <key>CADisableMinimumFrameDurationOnPhone</key>
+  <true/>
 </dict>
 </plist>

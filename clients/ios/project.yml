@@ -1,25 +1,65 @@
-# XcodeGen spec — run `xcodegen generate` on a Mac to produce SHAIP.xcodeproj,
-# then open in Xcode 26 and build to an iOS 26 simulator or device.
+# XcodeGen spec. On a Mac with Xcode 26:  brew install xcodegen && xcodegen generate && open SHAIP.xcodeproj
+#
+# Targets:
+#   SHAIP         the app (SwiftUI, iOS 26, Liquid Glass)
+#   SHAIPWidgets  the Live Activity + Dynamic Island extension (ActivityKit / WidgetKit)
+# Both link the local SHAIPCore package (tokens-as-data, catalogue, telemetry, render engines),
+# which also builds and tests on its own: swift test --package-path SHAIPCore
 name: SHAIP
 options:
   bundleIdPrefix: com.shaip
   deploymentTarget:
     iOS: "26.0"
   createIntermediateGroups: true
+packages:
+  SHAIPCore:
+    path: SHAIPCore
 settings:
   base:
-    SWIFT_VERSION: "5.10"
-    TARGETED_DEVICE_FAMILY: "1"       # iPhone only
+    # Language mode: "5.0" or "6.0" are the valid values (v1 used "5.10", which is not one).
+    SWIFT_VERSION: "5.0"
+    TARGETED_DEVICE_FAMILY: "1"          # iPhone
+    MARKETING_VERSION: "2.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: ""                  # set your team to run on a device
     ENABLE_PREVIEWS: "YES"
-    DEVELOPMENT_TEAM: ""              # set your team to run on a device
 targets:
   SHAIP:
     type: application
     platform: iOS
     sources:
       - path: SHAIP
+      - path: Shared
+    dependencies:
+      - package: SHAIPCore
+      - target: SHAIPWidgets
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.shaip.vpn
+        # Generated Info.plist (includes CFBundleExecutable etc., which v1's hand-written plist
+        # lacked), merged with SHAIP/Info.plist for keys that have no build setting.
+        GENERATE_INFOPLIST_FILE: "YES"
         INFOPLIST_FILE: SHAIP/Info.plist
-        GENERATE_INFOPLIST_FILE: "NO"
+        INFOPLIST_KEY_CFBundleDisplayName: SHAIP
+        INFOPLIST_KEY_UILaunchScreen_Generation: "YES"
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: "YES"
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait
+        INFOPLIST_KEY_UIUserInterfaceStyle: Dark
+        INFOPLIST_KEY_NSFaceIDUsageDescription: "Confirm it's you before opening resources that need step-up verification."
+  SHAIPWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: SHAIPWidgets
+      - path: Shared
+    dependencies:
+      - package: SHAIPCore
+      - sdk: WidgetKit.framework
+      - sdk: SwiftUI.framework
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.shaip.vpn.widgets
+        GENERATE_INFOPLIST_FILE: "YES"
+        INFOPLIST_FILE: SHAIPWidgets/Info.plist
+        INFOPLIST_KEY_CFBundleDisplayName: SHAIP
+        SKIP_INSTALL: "YES"
