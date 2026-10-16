@@ -8,7 +8,10 @@ struct SHAIPApp: App {
     init() {
         // Live Activity intents (lock screen / Dynamic Island) run in this process.
         TunnelIntentBridge.handler = { action in
-            TunnelStore.shared.connected = action == .connect
+            switch action {
+            case .connect: TunnelStore.shared.connect()
+            case .disconnect: TunnelStore.shared.disconnect()
+            }
         }
     }
 
@@ -20,51 +23,60 @@ struct SHAIPApp: App {
                 .preferredColorScheme(.dark)
                 // Dynamic Type scales all non-mono text; capped where the fixed-geometry rows still fit.
                 .dynamicTypeSize(...DynamicTypeSize.accessibility2)
-                .onAppear { store.start() }
+                .task { await store.load() }
+                // pqanon://enroll?t=… links (from the control plane's web page or a QR code).
+                .onOpenURL { url in router.pendingEnrollLink = url.absoluteString }
         }
     }
 }
 
 enum AppTab: Hashable {
-    case connect, network, access, security, settings
+    case connect, traffic, protection, server, settings
 }
 
 @MainActor
 @Observable
 final class Router {
     var tab: AppTab = .connect
+    /// An enrollment link opened from outside the app, waiting for the user.
+    var pendingEnrollLink: String?
 }
 
-/// Five tabs in the native (floating, Liquid Glass) tab bar. Traffic is pushed from the Connect
-/// status card, Nodes from the Network node chip, Team & plan from the Settings avatar.
 struct RootView: View {
     @Environment(TunnelStore.self) private var store
     @Environment(Router.self) private var router
-    @AppStorage("shaip.signedIn") private var signedIn = false
 
     var body: some View {
         @Bindable var router = router
         TabView(selection: $router.tab) {
-            Tab("Connect", systemImage: "checkmark.shield", value: AppTab.connect) {
+            Tab("Connect", systemImage: "power", value: AppTab.connect) {
                 NavigationStack { ConnectView() }
             }
-            Tab("Network", systemImage: "globe", value: AppTab.network) {
-                NavigationStack { NetworkView() }
+            Tab("Traffic", systemImage: "chart.xyaxis.line", value: AppTab.traffic) {
+                NavigationStack { TrafficView() }
             }
-            Tab("Access", systemImage: "qrcode", value: AppTab.access) {
-                NavigationStack { AccessView() }
+            Tab("Protection", systemImage: "lock.shield", value: AppTab.protection) {
+                NavigationStack { ProtectionView() }
             }
-            Tab("Security", systemImage: "scope", value: AppTab.security) {
-                NavigationStack { SecurityView() }
+            Tab("Server", systemImage: "server.rack", value: AppTab.server) {
+                NavigationStack { ServerView() }
             }
             Tab("Settings", systemImage: "slider.horizontal.3", value: AppTab.settings) {
-                NavigationStack { ProtocolView() }
+                NavigationStack { SettingsView() }
             }
         }
         .tint(Tok.signal)
         .sensoryFeedback(.selection, trigger: router.tab)
-        .fullScreenCover(isPresented: Binding(get: { !signedIn }, set: { signedIn = !$0 })) {
-            OnboardingView { signedIn = true }
+        // No server yet: set one up first. Nothing in the app pretends to
+        // work without one.
+        .fullScreenCover(isPresented: Binding(get: { store.loaded && store.config == nil }, set: { _ in })) {
+            SetupView()
+                .environment(store)
+                .environment(router)
+        }
+        .sheet(isPresented: Binding(get: { router.pendingEnrollLink != nil && store.config != nil },
+                                    set: { if !$0 { router.pendingEnrollLink = nil } })) {
+            EnrollSheet(link: router.pendingEnrollLink ?? "")
                 .environment(store)
         }
     }

@@ -3,7 +3,8 @@ import AppIntents
 import SwiftUI
 import WidgetKit
 
-/// Design screen 10: the lock-screen Live Activity and the Dynamic Island.
+/// The lock-screen Live Activity and the Dynamic Island. Every value comes
+/// from the running tunnel (via the app); unknown values show a dash.
 struct TunnelLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: TunnelActivityAttributes.self) { context in
@@ -15,7 +16,7 @@ struct TunnelLiveActivity: Widget {
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(s.connected ? s.city : "Not connected").font(.system(size: 15, weight: .semibold)).foregroundStyle(Tok.ink)
+                        Text(s.server).font(.system(size: 15, weight: .semibold)).foregroundStyle(Tok.ink).lineLimit(1)
                         SessionClock(state: s).font(.system(size: 13, weight: .semibold, design: .monospaced))
                     }
                     .padding(.leading, 4)
@@ -24,36 +25,45 @@ struct TunnelLiveActivity: Widget {
                     VStack(alignment: .trailing, spacing: 2) {
                         Text(s.rttMs.map { "\($0) ms" } ?? "—").font(.system(size: 15, weight: .semibold, design: .monospaced))
                             .foregroundStyle(stateColor(s)).monospacedDigit()
-                        Text(s.downMbps.map { "↓ \($0) Mbps" } ?? "OFFLINE").font(.system(size: 11, weight: .medium, design: .monospaced))
+                        Text(s.downMbps.map { "↓ \(mbps($0)) Mbps" } ?? stateWord(s)).font(.system(size: 11, weight: .medium, design: .monospaced))
                             .foregroundStyle(Tok.dim(0.55))
                     }
                     .padding(.trailing, 4)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    TunnelActionButton(connected: s.connected).padding(.top, 4)
+                    TunnelActionButton(on: s.connected || s.reconnecting).padding(.top, 4)
                 }
             } compactLeading: {
-                ShieldGlyph(connected: s.connected).font(.system(size: 14, weight: .semibold))
+                StateGlyph(state: s).font(.system(size: 14, weight: .semibold))
             } compactTrailing: {
-                // The handoff rendered "—ms" while disconnected.
                 Text(s.rttMs.map { "\($0)ms" } ?? "—").font(.system(size: 12, weight: .semibold, design: .monospaced))
                     .foregroundStyle(stateColor(s)).monospacedDigit()
             } minimal: {
-                ShieldGlyph(connected: s.connected).font(.system(size: 13, weight: .semibold))
+                StateGlyph(state: s).font(.system(size: 13, weight: .semibold))
             }
             .keylineTint(stateColor(s))
         }
     }
 }
 
-private func stateColor(_ s: TunnelActivityAttributes.ContentState) -> Color { s.connected ? Tok.ok : Tok.threat }
+private func stateColor(_ s: TunnelActivityAttributes.ContentState) -> Color {
+    s.connected ? Tok.ok : s.reconnecting ? Tok.warn : Tok.ink2
+}
 
-private struct ShieldGlyph: View {
-    let connected: Bool
+private func stateWord(_ s: TunnelActivityAttributes.ContentState) -> String {
+    s.connected ? "CONNECTED" : s.reconnecting ? "RECONNECTING" : "OFF"
+}
+
+private func mbps(_ v: Double) -> String {
+    v < 1 ? String(format: "%.2f", v) : v < 100 ? String(format: "%.1f", v) : String(format: "%.0f", v)
+}
+
+private struct StateGlyph: View {
+    let state: TunnelActivityAttributes.ContentState
     var body: some View {
-        Image(systemName: connected ? "checkmark.shield" : "shield.slash")
-            .foregroundStyle(connected ? Tok.ok : Tok.threat)
-            .accessibilityLabel(connected ? "Protected" : "Exposed")
+        Image(systemName: state.connected ? "lock.fill" : state.reconnecting ? "arrow.triangle.2.circlepath" : "lock.open")
+            .foregroundStyle(stateColor(state))
+            .accessibilityLabel(state.connected ? "VPN connected" : state.reconnecting ? "VPN reconnecting" : "VPN off")
     }
 }
 
@@ -62,7 +72,7 @@ private struct SessionClock: View {
     let state: TunnelActivityAttributes.ContentState
     var body: some View {
         Group {
-            if state.connected, let start = state.sessionStart {
+            if let start = state.sessionStart, state.connected || state.reconnecting {
                 Text(timerInterval: start...Date.distantFuture, countsDown: false)
             } else {
                 Text("--:--:--")
@@ -74,10 +84,10 @@ private struct SessionClock: View {
 }
 
 private struct TunnelActionButton: View {
-    let connected: Bool
+    let on: Bool
     var body: some View {
         Group {
-            if connected {
+            if on {
                 Button(intent: DisconnectTunnelIntent()) { label }
             } else {
                 Button(intent: ConnectTunnelIntent()) { label }
@@ -87,7 +97,7 @@ private struct TunnelActionButton: View {
     }
 
     private var label: some View {
-        Text(connected ? "Tap to disconnect" : "Tap to connect")
+        Text(on ? "Disconnect" : "Connect")
             .font(.system(size: 14, weight: .semibold))
             .foregroundStyle(Tok.ink)
             .lineLimit(1)
@@ -99,8 +109,8 @@ private struct TunnelActionButton: View {
     }
 }
 
-/// The lock-screen card: app glyph, "Protected · Sydney", node · protocol, the session timer,
-/// DOWN and RTT, and the connect/disconnect intent.
+/// The lock-screen card: state · server, the tunnel address, the session
+/// timer, measured DOWN and RTT, and the connect/disconnect intent.
 struct LockScreenTunnelView: View {
     let state: TunnelActivityAttributes.ContentState
 
@@ -110,20 +120,20 @@ struct LockScreenTunnelView: View {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(LinearGradient(colors: [Tok.signal, Color(hex: 0x3C7D9A)], startPoint: .topLeading, endPoint: .bottomTrailing))
                     .frame(width: 34, height: 34)
-                    .overlay(Image(systemName: "shield").font(.system(size: 17, weight: .bold)).foregroundStyle(Color(hex: 0x03060C)))
+                    .overlay(Image(systemName: "lock").font(.system(size: 16, weight: .bold)).foregroundStyle(Color(hex: 0x03060C)))
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("\(state.connected ? "Protected" : "Exposed") · \(state.connected ? state.city : "Not connected")")
+                    Text("\(state.connected ? "Connected" : state.reconnecting ? "Reconnecting" : "VPN off") · \(state.server)")
                         .font(.system(size: 15, weight: .semibold)).foregroundStyle(Tok.ink).lineLimit(1)
-                    Text("\(state.node) · \(state.proto)").font(.system(size: 10, design: .monospaced)).foregroundStyle(Tok.dim(0.55))
+                    Text("\(state.tunnelAddress ?? "—") · PQANON/1").font(.system(size: 10, design: .monospaced)).foregroundStyle(Tok.dim(0.55))
                 }
                 Spacer(minLength: 8)
                 SessionClock(state: state).font(.system(size: 15, weight: .semibold, design: .monospaced))
             }
             HStack(alignment: .center, spacing: 8) {
-                metric("DOWN", state.downMbps.map(String.init) ?? "—", "Mbps")
+                metric("DOWN", state.downMbps.map(mbps) ?? "—", "Mbps")
                 metric("RTT", state.rttMs.map(String.init) ?? "—", "ms")
-                TunnelActionButton(connected: state.connected).fixedSize()
+                TunnelActionButton(on: state.connected || state.reconnecting).fixedSize()
             }
         }
         .padding(.horizontal, 18).padding(.vertical, 16)
@@ -142,18 +152,12 @@ struct LockScreenTunnelView: View {
     }
 }
 
-#Preview("Lock screen", as: .content, using: TunnelActivityAttributes(workspace: "Acme")) {
+#Preview("Lock screen", as: .content, using: TunnelActivityAttributes(server: "vpn.example.com")) {
     TunnelLiveActivity()
 } contentStates: {
-    TunnelActivityAttributes.ContentState(connected: true, city: "Sydney", node: "SYD-03", proto: "SHAIP MESH",
-                                          sessionStart: Date().addingTimeInterval(-5025), downMbps: 141, rttMs: 14)
-    TunnelActivityAttributes.ContentState(connected: false, city: "Sydney", node: "SYD-03", proto: "SHAIP MESH",
-                                          sessionStart: nil, downMbps: nil, rttMs: nil)
-}
-
-#Preview("Island", as: .dynamicIsland(.expanded), using: TunnelActivityAttributes(workspace: "Acme")) {
-    TunnelLiveActivity()
-} contentStates: {
-    TunnelActivityAttributes.ContentState(connected: true, city: "Sydney", node: "SYD-03", proto: "SHAIP MESH",
-                                          sessionStart: Date().addingTimeInterval(-5025), downMbps: 141, rttMs: 14)
+    TunnelActivityAttributes.ContentState(connected: true, reconnecting: false, server: "vpn.example.com",
+                                          tunnelAddress: "10.77.0.23/24", sessionStart: Date().addingTimeInterval(-5025),
+                                          downMbps: 41.2, rttMs: 23)
+    TunnelActivityAttributes.ContentState(connected: false, reconnecting: false, server: "vpn.example.com",
+                                          tunnelAddress: nil, sessionStart: nil, downMbps: nil, rttMs: nil)
 }

@@ -1,0 +1,4 @@
+module PQAnonFFI {
+    header "pqanon.h"
+    export *
+}

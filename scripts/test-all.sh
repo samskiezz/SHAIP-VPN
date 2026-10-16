@@ -463,7 +463,8 @@ else
 fi
 
 # iOS core: the committed render vectors must still be what design/shaip-engine.js produces, and
-# SHAIPCore's engines must reproduce them op for op (plus catalogue/telemetry checks).
+# SHAIPCore's engines must reproduce them op for op; the config/status/Protection model is tested;
+# and the app's own C-ABI Swift (clients/ios/FFI) drives the Rust core against a live pqanond.
 ios_core() {
   local tmp; tmp=$(mktemp)
   node clients/ios/scripts/engine-vectors.mjs clients/ios/design/shaip-engine.js "$tmp" >/dev/null || return 1
@@ -471,12 +472,27 @@ ios_core() {
     echo "engine-vectors.json is stale: regenerate it with clients/ios/scripts/engine-vectors.mjs"; rm -f "$tmp"; return 1
   fi
   rm -f "$tmp"
-  swift test --package-path clients/ios/SHAIPCore
+  swift test --package-path clients/ios/SHAIPCore || return 1
+  cargo build --release -q -p pqanon-ffi -p pqanon-server || return 1
+  swift build --package-path clients/ios/FFIInterop >/dev/null || return 1
+  local W PQ ED ID SP rc
+  W=$(mktemp -d)
+  ./target/release/pqanond --identity "$W/srv.id" --print-public > "$W/pins" 2>/dev/null
+  PQ=$(sed -n 's/^server_ml_dsa_pub *= *"\(.*\)"/\1/p' "$W/pins")
+  ED=$(sed -n 's/^server_ed_pub *= *"\(.*\)"/\1/p' "$W/pins")
+  ID=$(sed -n 's/^identity_id *= *"\(.*\)"/\1/p' "$W/pins")
+  ./target/release/pqanond --identity "$W/srv.id" --listen 127.0.0.1:47311 > "$W/srv.log" 2>&1 & SP=$!
+  for _ in $(seq 50); do grep -q listening "$W/srv.log" && break; sleep 0.1; done
+  clients/ios/FFIInterop/.build/debug/FFIInterop 127.0.0.1:47311 "$PQ" "$ED" "$W/dev.id" "$ID"; rc=$?
+  kill $SP 2>/dev/null; wait $SP 2>/dev/null; rm -rf "$W"
+  return $rc
 }
-if command -v swift >/dev/null && command -v node >/dev/null; then
-  stage "ios: SHAIPCore engines vs design reference" ios_core
+# Swift 6.0's compiler crashes (signal 11) building the swift-testing suite; 6.1+ is needed.
+swift_ok() { command -v swift >/dev/null && ! swift --version 2>&1 | grep -qE 'Swift version 6\.0(\.|[^0-9])'; }
+if swift_ok && command -v node >/dev/null; then
+  stage "ios: SHAIPCore + Swift↔Rust C ABI vs live pqanond" ios_core
 else
-  skip  "ios: SHAIPCore engines vs design reference" "needs swift + node"
+  skip  "ios: SHAIPCore + Swift↔Rust C ABI vs live pqanond" "needs swift ≥ 6.1 + node"
 fi
 
 printf '\n════════════════════════════════════════════════════════\n SUMMARY\n────────────────────────────────────────────────────────\n'

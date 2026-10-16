@@ -82,6 +82,8 @@ pub struct Status {
     pub info: SessionInfo,
     /// The server's identity id, as matched against the pinned keys.
     pub server_identity: [u8; 16],
+    /// The server's UDP address, as resolved for the current (or last) session.
+    pub server_addr: std::net::SocketAddr,
     /// Since when the link has been continuously up (rekeys do not reset it).
     pub up_since: Option<SystemTime>,
     /// Smoothed keepalive round-trip time of the current session.
@@ -107,6 +109,7 @@ struct Meta {
     state: LinkState,
     info: SessionInfo,
     server_identity: [u8; 16],
+    server_addr: std::net::SocketAddr,
     up_since: Option<SystemTime>,
     finished: TunnelStats,
     reconnects: u32,
@@ -161,6 +164,7 @@ impl Shared {
             m.state = LinkState::Connected;
             m.info = t.info();
             m.server_identity = t.server_identity();
+            m.server_addr = t.server_addr();
             match how {
                 Installed::First => {}
                 Installed::Reconnect => m.reconnects += 1,
@@ -253,6 +257,7 @@ impl ManagedTunnel {
                 state: LinkState::Reconnecting,
                 info: first.info(),
                 server_identity: first.server_identity(),
+                server_addr: first.server_addr(),
                 up_since: None,
                 finished: TunnelStats::default(),
                 reconnects: 0,
@@ -316,6 +321,7 @@ impl ManagedTunnel {
             state: m.state,
             info: m.info,
             server_identity: m.server_identity,
+            server_addr: m.server_addr,
             up_since: m.up_since,
             rtt: current.as_ref().and_then(|(_, t)| t.rtt()),
             stats: m.finished + live,
@@ -323,6 +329,16 @@ impl ManagedTunnel {
             reconnects: m.reconnects,
             rekeys: m.rekeys,
             last_error: m.last_error.clone(),
+        }
+    }
+
+    /// Abandon the current session and negotiate a new one now — e.g. when
+    /// the device moved to another network, where the old session's UDP
+    /// flow can no longer reach the server and waiting for the dead-peer
+    /// timer would leave the user offline for `dead_after`.
+    pub fn reconnect_now(&self, why: &str) {
+        if let Some((gen, _)) = self.shared.current() {
+            self.shared.report(gen, Failure::Error(why.to_string()));
         }
     }
 

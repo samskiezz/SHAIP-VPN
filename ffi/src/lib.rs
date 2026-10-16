@@ -2,10 +2,15 @@
 //!
 //! A native shell — an iOS/macOS Network Extension, an Android `VpnService`, a
 //! Windows service — owns the OS packet interface and calls into this library
-//! to enroll the device and run the tunnel. `pqanon_tunnel_connect` performs
-//! the PQANON-HS/1 handshake and returns once the server has confirmed the
-//! session; `pqanon_tunnel_send` / `pqanon_tunnel_recv` move whole IP packets.
-//! It is the same `pqanon::client` code the CLI runs, not a parallel copy.
+//! to enroll the device and run the tunnel. It is the same `pqanon` code the
+//! CLI runs, not a parallel copy:
+//!
+//! - `pqanon_session_*` is what an app should use: the reconnecting link the
+//!   CLI's `pqanon run` uses (`pqanon::supervisor`), with keepalive RTT,
+//!   dead-peer detection, reconnection and rekeying, and a status snapshot to
+//!   show the user.
+//! - `pqanon_tunnel_*` is one bare session (no keepalive, no reconnect), for
+//!   probes and tests.
 //!
 //! Every entry point is null-safe and panic-safe: a panic becomes an error
 //! return and never unwinds into C. Strings handed to C (errors, ids,
@@ -15,6 +20,7 @@
 
 use pqanon::client::{ClientConfig, Tunnel};
 use pqanon::handshake::PeerPublic;
+use pqanon::supervisor::{LinkState, ManagedTunnel, SupervisorConfig};
 use std::ffi::{c_char, c_int, c_long, CStr, CString};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::Path;
@@ -83,6 +89,100 @@ fn unix_now() -> i64 {
         .unwrap_or(0)
 }
 
+/// The connection arguments shared by `pqanon_tunnel_connect` and
+/// `pqanon_session_start`, copied out of C memory (so they can move to
+/// another thread).
+struct ConnectArgs {
+    server: String,
+    pq_hex: String,
+    ed_hex: String,
+    identity_path: String,
+    device_cert_path: Option<String>,
+    timeout_ms: u32,
+}
+
+impl ConnectArgs {
+    /// # Safety
+    /// String arguments must be NULL or valid NUL-terminated strings.
+    unsafe fn from_c(
+        server: *const c_char,
+        server_ml_dsa_pub_hex: *const c_char,
+        server_ed_pub_hex: *const c_char,
+        identity_path: *const c_char,
+        device_cert_path: *const c_char,
+        timeout_ms: u32,
+    ) -> Result<ConnectArgs, String> {
+        Ok(ConnectArgs {
+            server: arg(server, "server")?.to_string(),
+            pq_hex: arg(server_ml_dsa_pub_hex, "server_ml_dsa_pub_hex")?.to_string(),
+            ed_hex: arg(server_ed_pub_hex, "server_ed_pub_hex")?.to_string(),
+            identity_path: arg(identity_path, "identity_path")?.to_string(),
+            device_cert_path: if device_cert_path.is_null() {
+                None
+            } else {
+                Some(arg(device_cert_path, "device_cert_path")?.to_string())
+            },
+            timeout_ms,
+        })
+    }
+
+    /// Load the pins, the identity (created on first use) and the certificate.
+    fn config(self) -> Result<ClientConfig, String> {
+        let pq = hex::decode(self.pq_hex.trim()).map_err(|e| format!("server_ml_dsa_pub_hex: {e}"))?;
+        let ed = hex::decode(self.ed_hex.trim()).map_err(|e| format!("server_ed_pub_hex: {e}"))?;
+        let server_pub = PeerPublic::from_bytes(&pq, &ed).map_err(|e| format!("server pins: {e:#}"))?;
+        let identity = pqanon::keystore::load_or_create_identity(Path::new(&self.identity_path))
+            .map_err(|e| format!("{e:#}"))?
+            .0;
+        let device_cert = match self.device_cert_path {
+            None => None,
+            Some(p) => Some(
+                std::fs::read_to_string(&p)
+                    .map_err(|e| format!("reading device certificate {p}: {e}"))?
+                    .trim()
+                    .to_string(),
+            ),
+        };
+        Ok(ClientConfig {
+            server: self.server,
+            server_pub,
+            identity,
+            device_cert,
+            handshake_timeout: Duration::from_millis(u64::from(self.timeout_ms.max(1))),
+        })
+    }
+}
+
+/// Run `f` on a thread with a 16 MiB stack and wait for it. ML-DSA-65 key
+/// generation and signing need far more stack than some callers' threads
+/// have (iOS gives secondary threads 512 KiB), and `block_on` runs a future
+/// on the calling thread. A panic is re-raised here, inside the caller's
+/// `guard`.
+fn on_big_stack<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+    match std::thread::Builder::new()
+        .name("pqanon-handshake".into())
+        .stack_size(16 << 20)
+        .spawn(f)
+        .map(|h| h.join())
+    {
+        Ok(Ok(v)) => v,
+        Ok(Err(panic)) => std::panic::resume_unwind(panic),
+        Err(e) => panic!("cannot start a handshake thread: {e}"),
+    }
+}
+
+/// The runtime driving a tunnel's socket. Handshakes (ML-DSA-65 signing)
+/// need more stack than tokio's 2 MiB default on reconnects, which run on
+/// worker threads.
+fn runtime() -> Result<tokio::runtime::Runtime, String> {
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .thread_stack_size(8 << 20)
+        .enable_all()
+        .build()
+        .map_err(|e| format!("runtime: {e}"))
+}
+
 /// Library version (static string; do not free).
 #[no_mangle]
 pub extern "C" fn pqanon_version() -> *const c_char {
@@ -105,40 +205,13 @@ pub unsafe extern "C" fn pqanon_tunnel_connect(
     err: *mut *mut c_char,
 ) -> *mut PqanonTunnel {
     guard(err, std::ptr::null_mut(), || {
-        let server = arg(server, "server")?.to_string();
-        let pq = hex::decode(arg(server_ml_dsa_pub_hex, "server_ml_dsa_pub_hex")?.trim())
-            .map_err(|e| format!("server_ml_dsa_pub_hex: {e}"))?;
-        let ed = hex::decode(arg(server_ed_pub_hex, "server_ed_pub_hex")?.trim())
-            .map_err(|e| format!("server_ed_pub_hex: {e}"))?;
-        let server_pub = PeerPublic::from_bytes(&pq, &ed).map_err(|e| format!("server pins: {e:#}"))?;
-        let identity = pqanon::keystore::load_or_create_identity(Path::new(arg(identity_path, "identity_path")?))
-            .map_err(|e| format!("{e:#}"))?
-            .0;
-        let device_cert = if device_cert_path.is_null() {
-            None
-        } else {
-            let p = arg(device_cert_path, "device_cert_path")?;
-            Some(
-                std::fs::read_to_string(p)
-                    .map_err(|e| format!("reading device certificate {p}: {e}"))?
-                    .trim()
-                    .to_string(),
-            )
-        };
-        let rt = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(2)
-            .enable_all()
-            .build()
-            .map_err(|e| format!("runtime: {e}"))?;
-        let tunnel = rt
-            .block_on(Tunnel::connect(ClientConfig {
-                server,
-                server_pub,
-                identity,
-                device_cert,
-                handshake_timeout: Duration::from_millis(u64::from(timeout_ms.max(1))),
-            }))
-            .map_err(|e| format!("{e:#}"))?;
+        let args = ConnectArgs::from_c(server, server_ml_dsa_pub_hex, server_ed_pub_hex, identity_path, device_cert_path, timeout_ms)?;
+        let (rt, tunnel) = on_big_stack(move || {
+            let cfg = args.config()?;
+            let rt = runtime()?;
+            let tunnel = rt.block_on(Tunnel::connect(cfg)).map_err(|e| format!("{e:#}"))?;
+            Ok::<_, String>((rt, tunnel))
+        })?;
         Ok(Box::into_raw(Box::new(PqanonTunnel { rt, tunnel })))
     })
 }
@@ -246,6 +319,254 @@ pub unsafe extern "C" fn pqanon_tunnel_close(t: *mut PqanonTunnel) {
     }
 }
 
+// --- Reconnecting session (pqanon::supervisor) ------------------------------
+
+/// A link that stays up: reconnects, rekeys, keepalive RTT.
+pub struct PqanonSession {
+    // Declared first so it drops first: its sockets go before their runtime.
+    link: ManagedTunnel,
+    rt: tokio::runtime::Runtime,
+}
+
+/// `PqanonStatus.state` values.
+pub const PQANON_STATE_CONNECTED: i32 = 0;
+pub const PQANON_STATE_RECONNECTING: i32 = 1;
+pub const PQANON_STATE_STOPPED: i32 = 2;
+
+/// A status snapshot (mirrors `pqanon::supervisor::Status`).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PqanonStatus {
+    /// PQANON_STATE_*.
+    pub state: i32,
+    /// Server-assigned tunnel address, host order; 0 if none.
+    pub assigned_ipv4: u32,
+    pub prefix_len: u8,
+    /// The server's tunnel address (the client's gateway); 0 if none.
+    pub gateway_ipv4: u32,
+    /// Resolver to use while connected (reached through the tunnel); 0: none pushed.
+    pub dns_ipv4: u32,
+    /// MTU for the tunnel interface.
+    pub mtu: u16,
+    /// Smoothed keepalive round-trip time in microseconds; 0 until measured.
+    pub rtt_us: u32,
+    /// When the link came up (Unix ms; rekeys do not reset it); 0 while down.
+    pub up_since_unix_ms: u64,
+    pub reconnects: u32,
+    pub rekeys: u32,
+    /// Totals across every session of this link.
+    pub stats: PqanonStats,
+    /// Outbound packets dropped because no session was up.
+    pub dropped_offline: u64,
+    /// The server's identity id (`pqanond --print-public` shows it as
+    /// `identity_id`), proven by the handshake against the pinned keys.
+    pub server_identity: [u8; 16],
+}
+
+/// Connect to a pqanond server, wait for it to confirm the first session, and
+/// keep the link up from then on. Arguments as for `pqanon_tunnel_connect`.
+/// Returns NULL (and `*err`) if the first connection fails — wrong pins, not
+/// admitted, unreachable — so a misconfiguration surfaces at once.
+///
+/// # Safety
+/// String arguments must be NULL or valid NUL-terminated strings;
+/// `device_cert_path` may be NULL. `err` may be NULL or point to a `char *`.
+#[no_mangle]
+pub unsafe extern "C" fn pqanon_session_start(
+    server: *const c_char,
+    server_ml_dsa_pub_hex: *const c_char,
+    server_ed_pub_hex: *const c_char,
+    identity_path: *const c_char,
+    device_cert_path: *const c_char,
+    timeout_ms: u32,
+    err: *mut *mut c_char,
+) -> *mut PqanonSession {
+    guard(err, std::ptr::null_mut(), || {
+        let args = ConnectArgs::from_c(server, server_ml_dsa_pub_hex, server_ed_pub_hex, identity_path, device_cert_path, timeout_ms)?;
+        let (link, rt) = on_big_stack(move || {
+            let cfg = Box::new(args.config()?);
+            let rt = runtime()?;
+            let link = rt
+                .block_on(ManagedTunnel::start(SupervisorConfig::new(*cfg)))
+                .map_err(|e| format!("{e:#}"))?;
+            Ok::<_, String>((link, rt))
+        })?;
+        Ok(Box::into_raw(Box::new(PqanonSession { link, rt })))
+    })
+}
+
+/// Send one IP packet. While the link is reconnecting the packet is dropped
+/// (and counted), never sent elsewhere. Returns 0, or -1 for bad arguments.
+///
+/// # Safety
+/// `s` must come from `pqanon_session_start` and not be freed; `pkt` must
+/// point to `len` readable bytes (or be NULL with `len == 0`).
+#[no_mangle]
+pub unsafe extern "C" fn pqanon_session_send(s: *const PqanonSession, pkt: *const u8, len: usize) -> c_int {
+    guard(std::ptr::null_mut(), -1, || {
+        let s = s.as_ref().ok_or("session is NULL")?;
+        if pkt.is_null() && len > 0 {
+            return Err("pkt is NULL".into());
+        }
+        let data = if len == 0 { &[][..] } else { std::slice::from_raw_parts(pkt, len) };
+        s.rt.block_on(s.link.send(data));
+        Ok(0)
+    })
+}
+
+/// Receive one IP packet into `buf`, across reconnects. Returns its length, 0
+/// if `timeout_ms` elapsed first, or -1 once the session is stopped (or for a
+/// packet larger than `cap`; `PQANON_MAX_PACKET` always suffices).
+///
+/// # Safety
+/// `s` must come from `pqanon_session_start` and not be freed; `buf` must
+/// point to `cap` writable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn pqanon_session_recv(
+    s: *const PqanonSession,
+    buf: *mut u8,
+    cap: usize,
+    timeout_ms: u32,
+    err: *mut *mut c_char,
+) -> c_long {
+    guard(err, -1, || {
+        let s = s.as_ref().ok_or("session is NULL")?;
+        if buf.is_null() {
+            return Err("buf is NULL".into());
+        }
+        let wait = Duration::from_millis(u64::from(timeout_ms));
+        match s.rt.block_on(async { tokio::time::timeout(wait, s.link.recv()).await }) {
+            Err(_) => Ok(0),
+            Ok(Err(e)) => Err(format!("{e:#}")),
+            Ok(Ok(pkt)) => {
+                if pkt.len() > cap {
+                    return Err(format!("a {}-byte packet does not fit a {cap}-byte buffer", pkt.len()));
+                }
+                std::ptr::copy_nonoverlapping(pkt.as_ptr(), buf, pkt.len());
+                Ok(pkt.len() as c_long)
+            }
+        }
+    })
+}
+
+/// Copy a status snapshot into `out`. Returns 0, or -1 if an argument is NULL.
+///
+/// # Safety
+/// `s` must come from `pqanon_session_start` and not be freed; `out` must be
+/// writable.
+#[no_mangle]
+pub unsafe extern "C" fn pqanon_session_status(s: *const PqanonSession, out: *mut PqanonStatus) -> c_int {
+    guard(std::ptr::null_mut(), -1, || {
+        let (Some(s), false) = (s.as_ref(), out.is_null()) else {
+            return Err("NULL argument".into());
+        };
+        let st = s.link.status();
+        let v4 = |a: Option<std::net::Ipv4Addr>| a.map(u32::from).unwrap_or(0);
+        *out = PqanonStatus {
+            state: match st.state {
+                LinkState::Connected => PQANON_STATE_CONNECTED,
+                LinkState::Reconnecting => PQANON_STATE_RECONNECTING,
+                LinkState::Stopped => PQANON_STATE_STOPPED,
+            },
+            assigned_ipv4: v4(st.info.assigned_v4),
+            prefix_len: st.info.prefix_len,
+            gateway_ipv4: v4(st.info.gateway_v4),
+            dns_ipv4: v4(st.info.dns_v4),
+            mtu: st.info.effective_mtu(),
+            rtt_us: st.rtt.map(|r| r.as_micros().min(u128::from(u32::MAX)) as u32).unwrap_or(0),
+            up_since_unix_ms: st
+                .up_since
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0),
+            reconnects: st.reconnects,
+            rekeys: st.rekeys,
+            stats: PqanonStats {
+                packets_sent: st.stats.packets_sent,
+                bytes_sent: st.stats.bytes_sent,
+                packets_received: st.stats.packets_received,
+                bytes_received: st.stats.bytes_received,
+                packets_dropped: st.stats.packets_dropped,
+            },
+            dropped_offline: st.dropped_offline,
+            server_identity: st.server_identity,
+        };
+        Ok(0)
+    })
+}
+
+/// The server's UDP address as resolved and used (e.g. `"203.0.113.7:443"`),
+/// for the OS's tunnel-endpoint setting. Free it; NULL on bad arguments.
+///
+/// # Safety
+/// `s` must come from `pqanon_session_start` and not be freed.
+#[no_mangle]
+pub unsafe extern "C" fn pqanon_session_server_addr(s: *const PqanonSession) -> *mut c_char {
+    match s.as_ref() {
+        Some(s) => to_c(s.link.status().server_addr.to_string()),
+        None => std::ptr::null_mut(),
+    }
+}
+
+/// Why the last session ended or the last attempt failed (free it), or NULL.
+///
+/// # Safety
+/// `s` must come from `pqanon_session_start` and not be freed.
+#[no_mangle]
+pub unsafe extern "C" fn pqanon_session_last_error(s: *const PqanonSession) -> *mut c_char {
+    s.as_ref()
+        .and_then(|s| s.link.status().last_error)
+        .map(to_c)
+        .unwrap_or(std::ptr::null_mut())
+}
+
+/// Renegotiate now (call when the device changes networks; waiting for the
+/// dead-peer timer would leave the user offline meanwhile). Returns 0, or -1
+/// if `s` is NULL.
+///
+/// # Safety
+/// `s` must come from `pqanon_session_start` and not be freed.
+#[no_mangle]
+pub unsafe extern "C" fn pqanon_session_reconnect(s: *const PqanonSession) -> c_int {
+    match s.as_ref() {
+        Some(s) => {
+            s.link.reconnect_now("the network changed");
+            0
+        }
+        None => -1,
+    }
+}
+
+/// Close the session (telling the server) and stop reconnecting. Blocked and
+/// later `pqanon_session_recv` calls return -1. The session stays allocated:
+/// free it with `pqanon_session_free` once no other thread is inside a
+/// `pqanon_session_*` call. NULL is a no-op.
+///
+/// # Safety
+/// `s` must be NULL or come from `pqanon_session_start` and not be freed.
+#[no_mangle]
+pub unsafe extern "C" fn pqanon_session_stop(s: *const PqanonSession) {
+    if let Some(s) = s.as_ref() {
+        let _ = catch_unwind(AssertUnwindSafe(|| s.rt.block_on(s.link.stop())));
+    }
+}
+
+/// Free a session (stopping it first if needed). No other thread may be
+/// inside a `pqanon_session_*` call on it. NULL is a no-op.
+///
+/// # Safety
+/// `s` must be NULL or come from `pqanon_session_start`, freed only once.
+#[no_mangle]
+pub unsafe extern "C" fn pqanon_session_free(s: *mut PqanonSession) {
+    if !s.is_null() {
+        let _ = catch_unwind(AssertUnwindSafe(|| {
+            let s = Box::from_raw(s);
+            s.rt.block_on(s.link.stop());
+            drop(s);
+        }));
+    }
+}
+
 /// Verify a `pqanon://enroll` link (or bare token) against the pinned
 /// enrollment-authority key, locally — what a deep-link handler checks before
 /// asking the user to confirm. Returns 0 and sets `*account_out`, or -1.
@@ -299,17 +620,16 @@ pub unsafe extern "C" fn pqanon_enroll(
         let authority = pqanon::enroll_client::parse_pin(arg(authority_pub_hex, "authority_pub_hex")?, "authority key")
             .map_err(|e| e.to_string())?;
         let ca = pqanon::enroll_client::parse_pin(arg(ca_pub_hex, "ca_pub_hex")?, "CA key").map_err(|e| e.to_string())?;
-        let done = pqanon::enroll_client::enroll(
-            arg(link, "link")?,
-            arg(server, "server")?,
-            &authority,
-            &ca,
-            Path::new(arg(identity_path, "identity_path")?),
-            if name.is_null() { "device" } else { arg(name, "name")? },
-            None,
-        )
-        .map_err(|e| format!("{e:#}"))?;
-        Ok(to_c(hex::encode(done.cert.device_id)))
+        let (link, server) = (arg(link, "link")?.to_string(), arg(server, "server")?.to_string());
+        let identity = arg(identity_path, "identity_path")?.to_string();
+        let name = if name.is_null() { "device".to_string() } else { arg(name, "name")?.to_string() };
+        // Creating the identity on first use is ML-DSA-65 key generation.
+        let device_id = on_big_stack(move || {
+            pqanon::enroll_client::enroll(&link, &server, &authority, &ca, Path::new(&identity), &name, None)
+                .map(|done| hex::encode(done.cert.device_id))
+                .map_err(|e| format!("{e:#}"))
+        })?;
+        Ok(to_c(device_id))
     })
 }
 

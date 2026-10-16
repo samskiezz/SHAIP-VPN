@@ -1,10 +1,17 @@
-# XcodeGen spec. On a Mac with Xcode 26:  brew install xcodegen && xcodegen generate && open SHAIP.xcodeproj
+# XcodeGen spec. On a Mac with Xcode 26 and rustup:
+#   brew install xcodegen
+#   ./scripts/build-ffi.sh          # the Rust core → Frameworks/PQAnonFFI.xcframework
+#   xcodegen generate && open SHAIP.xcodeproj
 #
 # Targets:
 #   SHAIP         the app (SwiftUI, iOS 26, Liquid Glass)
+#   SHAIPTunnel   the Packet Tunnel extension: the VPN itself, running the Rust core (pqanon-ffi)
 #   SHAIPWidgets  the Live Activity + Dynamic Island extension (ActivityKit / WidgetKit)
-# Both link the local SHAIPCore package (tokens-as-data, catalogue, telemetry, render engines),
-# which also builds and tests on its own: swift test --package-path SHAIPCore
+# All link the local SHAIPCore package (config parsing, status model, rates, the Protection report,
+# render engines), which also builds and tests on its own: swift test --package-path SHAIPCore
+#
+# Running on a device needs a development team with the Network Extensions capability
+# (packet-tunnel-provider) and an App Group; set DEVELOPMENT_TEAM below.
 name: SHAIP
 options:
   bundleIdPrefix: com.shaip
@@ -16,7 +23,7 @@ packages:
     path: SHAIPCore
 settings:
   base:
-    # Language mode: "5.0" or "6.0" are the valid values (v1 used "5.10", which is not one).
+    # Language mode: "5.0" or "6.0" are the valid values.
     SWIFT_VERSION: "5.0"
     TARGETED_DEVICE_FAMILY: "1"          # iPhone
     MARKETING_VERSION: "2.0"
@@ -30,14 +37,23 @@ targets:
     sources:
       - path: SHAIP
       - path: Shared
+      - path: FFI
     dependencies:
       - package: SHAIPCore
+      - framework: Frameworks/PQAnonFFI.xcframework
+        embed: false                      # a static library
+      - target: SHAIPTunnel
       - target: SHAIPWidgets
+      - sdk: NetworkExtension.framework
+    entitlements:
+      path: SHAIP/SHAIP.entitlements
+      properties:
+        com.apple.developer.networking.networkextension: [packet-tunnel-provider]
+        com.apple.security.application-groups: [group.com.shaip.vpn]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.shaip.vpn
-        # Generated Info.plist (includes CFBundleExecutable etc., which v1's hand-written plist
-        # lacked), merged with SHAIP/Info.plist for keys that have no build setting.
+        # Generated Info.plist merged with SHAIP/Info.plist for keys that have no build setting.
         GENERATE_INFOPLIST_FILE: "YES"
         INFOPLIST_FILE: SHAIP/Info.plist
         INFOPLIST_KEY_CFBundleDisplayName: SHAIP
@@ -45,7 +61,37 @@ targets:
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: "YES"
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait
         INFOPLIST_KEY_UIUserInterfaceStyle: Dark
-        INFOPLIST_KEY_NSFaceIDUsageDescription: "Confirm it's you before opening resources that need step-up verification."
+  SHAIPTunnel:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: SHAIPTunnel
+      - path: FFI
+      - path: Shared/AppGroup.swift
+    dependencies:
+      - package: SHAIPCore
+      - framework: Frameworks/PQAnonFFI.xcframework
+        embed: false
+      - sdk: NetworkExtension.framework
+    entitlements:
+      path: SHAIPTunnel/SHAIPTunnel.entitlements
+      properties:
+        com.apple.developer.networking.networkextension: [packet-tunnel-provider]
+        com.apple.security.application-groups: [group.com.shaip.vpn]
+    preBuildScripts:
+      # Rebuilds the Rust core when its sources changed (cargo is incremental).
+      - name: Build Rust core (pqanon-ffi)
+        script: '"$PROJECT_DIR/scripts/build-ffi.sh"'
+        basedOnDependencyAnalysis: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.shaip.vpn.tunnel
+        GENERATE_INFOPLIST_FILE: "YES"
+        INFOPLIST_FILE: SHAIPTunnel/Info.plist
+        INFOPLIST_KEY_CFBundleDisplayName: SHAIP Tunnel
+        SKIP_INSTALL: "YES"
+        # The script writes into the source tree.
+        ENABLE_USER_SCRIPT_SANDBOXING: "NO"
   SHAIPWidgets:
     type: app-extension
     platform: iOS

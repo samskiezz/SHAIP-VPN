@@ -2,22 +2,29 @@ import ActivityKit
 import AppIntents
 import Foundation
 
-/// The lock-screen Live Activity and Dynamic Island for a tunnel session (design screen 10).
-/// The app updates it at most every 15 s; the session clock ticks on its own via
+/// The lock-screen Live Activity and Dynamic Island for a tunnel session.
+/// Every value is real: the app fills it from the tunnel extension's status.
+/// It updates at most every 15 s; the session clock ticks on its own via
 /// `Text(timerInterval:)`, so it never needs per-second updates.
 struct TunnelActivityAttributes: ActivityAttributes {
     struct ContentState: Codable, Hashable {
+        /// A confirmed session is carrying traffic right now.
         var connected: Bool
-        var city: String
-        var node: String
-        /// Protocol name, uppercased as the design shows it ("SHAIP MESH").
-        var proto: String
+        /// The tunnel is negotiating a new session (traffic is held meanwhile).
+        var reconnecting: Bool
+        /// The server's name as configured.
+        var server: String
+        /// The tunnel address the server assigned, if any.
+        var tunnelAddress: String?
         var sessionStart: Date?
-        var downMbps: Int?
+        /// Measured download rate.
+        var downMbps: Double?
+        /// Measured keepalive round-trip time.
         var rttMs: Int?
     }
 
-    var workspace: String
+    /// The server label, for the activity's static part.
+    var server: String
 }
 
 enum TunnelIntentAction: Sendable {
@@ -30,7 +37,7 @@ enum TunnelIntentBridge {
     static var handler: (@MainActor (TunnelIntentAction) -> Void)?
 }
 
-/// "Tap to disconnect" on the lock screen and in the expanded island.
+/// "Disconnect" on the lock screen and in the expanded island.
 struct DisconnectTunnelIntent: LiveActivityIntent {
     static let title: LocalizedStringResource = "Disconnect VPN"
 
@@ -40,7 +47,7 @@ struct DisconnectTunnelIntent: LiveActivityIntent {
     }
 }
 
-/// "Tap to connect", shown while the tunnel is down.
+/// "Connect", shown while the tunnel is down.
 struct ConnectTunnelIntent: LiveActivityIntent {
     static let title: LocalizedStringResource = "Connect VPN"
 

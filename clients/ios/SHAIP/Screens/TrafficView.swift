@@ -2,20 +2,20 @@ import SwiftUI
 import Charts
 import SHAIPCore
 
-/// 05 Traffic: live throughput (48 samples at 1 Hz, 0–220 Mbps), session tiles and per-app usage.
+/// Traffic: the measured throughput (48 samples at 1 Hz, from the tunnel's
+/// byte counters), session totals, and the tunnel's own health counters.
 struct TrafficView: View {
     @Environment(TunnelStore.self) private var store
 
     var body: some View {
-        let on = store.connected, t = store.telemetry
+        let on = store.connected, snap = store.snapshot
         ScreenScaffold(blobs: [AmbientBlob(color: Tok.signal, size: 440, x: -200, y: 40, opacity: 0.14)]) {
             VStack(spacing: 10) {
                 LargeTitle(title: "Traffic") {
                     HStack(spacing: 6) {
-                        GlowDot(color: on ? Tok.ok : Tok.threat)
-                        // The handoff said LIVE even while disconnected.
-                        Text("\(on ? "LIVE" : "OFFLINE") · \(store.node.id)").mono(10, .medium).em(0.14, of: 10)
-                            .foregroundStyle(on ? Tok.ok : Tok.threat)
+                        GlowDot(color: on ? Tok.ok : Tok.ink2)
+                        Text(on ? "LIVE · \(store.config?.label.uppercased() ?? "")" : store.stateLabel).mono(10, .medium).em(0.14, of: 10)
+                            .foregroundStyle(on ? Tok.ok : Tok.ink2).lineLimit(1)
                     }
                     .accessibilityElement(children: .combine)
                 }
@@ -26,18 +26,17 @@ struct TrafficView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Eyebrow("THROUGHPUT ↓", size: 9, tracking: 0.16, color: Tok.dim(0.45))
                             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                Text(on ? Format.fixed(t.downMbps, 1) : "0.0").ui(52, .semibold, relativeTo: .largeTitle).em(-0.045, of: 52)
+                                Text(on ? Format.mbps(store.downMbps) : "0.00").ui(52, .semibold, relativeTo: .largeTitle).em(-0.045, of: 52)
                                     .monospacedDigit().foregroundStyle(Tok.ink).contentTransition(.numericText())
                                 Text("Mbps").mono(13, .medium).foregroundStyle(Tok.ink2)
                             }
                         }
                         .accessibilityElement(children: .combine)
-                        .accessibilityLabel("Download \(on ? Format.fixed(t.downMbps, 1) : "0") megabits per second")
+                        .accessibilityLabel("Download \(on ? Format.mbps(store.downMbps) : "0") megabits per second")
                         Spacer()
                         VStack(alignment: .trailing, spacing: 6) {
-                            Text("↑ \(on ? Format.fixed(t.upMbps, 1) : "0.0")").mono(11, .medium).foregroundStyle(Tok.steelInk).monospacedDigit()
-                            // The real window peak (the handoff hard-coded 212.4, above the curve's maximum).
-                            Text("PK \(Format.fixed(store.history.peak, 1))").mono(11, .medium).foregroundStyle(Tok.dim(0.45)).monospacedDigit()
+                            Text("↑ \(on ? Format.mbps(store.upMbps) : "0.00")").mono(11, .medium).foregroundStyle(Tok.steelInk).monospacedDigit()
+                            Text("PK \(Format.mbps(store.history.peak))").mono(11, .medium).foregroundStyle(Tok.dim(0.45)).monospacedDigit()
                         }
                         .padding(.top, 2)
                     }
@@ -53,40 +52,28 @@ struct TrafficView: View {
                 .glassCard(30)
 
                 HStack(spacing: 8) {
-                    tile("SESSION", on ? Format.fixed(t.sessionGB, 2) : "0.00", "GB")
-                    tile("JITTER", on ? Format.fixed(t.jitterMs, 1) : "—", "ms")
-                    tile("PACKETS", on ? Format.fixed(t.packetsM, 2) : "0.00", "M")
+                    let sent = Format.bytes(snap?.bytesSent ?? 0), received = Format.bytes(snap?.bytesReceived ?? 0)
+                    tile("SENT", snap == nil ? "—" : sent.value, sent.unit)
+                    tile("RECEIVED", snap == nil ? "—" : received.value, received.unit)
+                    tile("PACKETS", snap.map { Format.count($0.packetsSent + $0.packetsReceived) } ?? "—", "")
                 }
 
                 VStack(spacing: 0) {
-                    ForEach(Array(Catalog.apps.enumerated()), id: \.element.id) { i, app in
-                        VStack(alignment: .leading, spacing: 7) {
-                            HStack(alignment: .firstTextBaseline) {
-                                Text(app.name).ui(14, .semibold).foregroundStyle(Tok.ink)
-                                Text(app.host).mono(10, .regular).foregroundStyle(Tok.dim(0.4)).lineLimit(1)
-                                Spacer(minLength: 8)
-                                Text(app.value).mono(12, .medium).foregroundStyle(Tok.ink)
-                            }
-                            GeometryReader { g in
-                                ZStack(alignment: .leading) {
-                                    Capsule().fill(Color.white.opacity(0.07))
-                                    Capsule().fill(Tok.tone(app.tone)).frame(width: g.size.width * app.share)
-                                        .shadow(color: Tok.tone(app.tone), radius: 4)
-                                }
-                            }
-                            .frame(height: 3)
-                        }
-                        .padding(.vertical, 11)
-                        .overlay(alignment: .top) { if i > 0 { Hairline() } }
-                        .accessibilityElement(children: .combine)
-                    }
+                    row("Round-trip time", store.rttMs.map { "\($0) ms" } ?? "—", "Keepalive ping to the server and back", first: true)
+                    row("Reconnects", snap.map { "\($0.reconnects)" } ?? "—", "Sessions re-established after a failure")
+                    row("Rekeys", snap.map { "\($0.rekeys)" } ?? "—", "Sessions replaced by a fresh handshake")
+                    row("Rejected packets", snap.map { Format.count($0.packetsRejected) } ?? "—",
+                        "Arrived but failed authentication (replays, tampering, strays)")
+                    row("Held while reconnecting", snap.map { Format.count($0.droppedOffline) } ?? "—",
+                        "Dropped inside the tunnel, not sent around it")
+                    row("IPv6 blocked", snap.map { Format.count($0.ipv6Dropped) } ?? "—", "The tunnel carries IPv4 only")
                 }
-                .padding(.horizontal, 16).padding(.vertical, 4)
+                .padding(.horizontal, 16).padding(.vertical, 2)
                 .glassCard(26, .tile)
             }
         }
         .animation(.easeInOut(duration: 0.55), value: on)
-        .pushedScreenChrome()
+        .toolbar(.hidden, for: .navigationBar)
     }
 
     private func tile(_ label: String, _ value: String, _ unit: String) -> some View {
@@ -101,6 +88,20 @@ struct TrafficView: View {
         .padding(.horizontal, 14).padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .glassCard(22, .tile)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func row(_ title: String, _ value: String, _ detail: String, first: Bool = false) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).ui(14, .semibold).foregroundStyle(Tok.ink)
+                Text(detail).ui(11).foregroundStyle(Tok.dim(0.45)).fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            Text(value).mono(13, .medium).foregroundStyle(Tok.ink).monospacedDigit()
+        }
+        .padding(.vertical, 10)
+        .overlay(alignment: .top) { if !first { Hairline() } }
         .accessibilityElement(children: .combine)
     }
 }
@@ -122,6 +123,7 @@ private struct ThroughputChart: View {
 
     var body: some View {
         let data = samples
+        let top = history.scale
         ZStack {
             // Glow: the same line, thicker and blurred (σ 3), under the crisp layers.
             Chart(data) { s in
@@ -131,7 +133,7 @@ private struct ThroughputChart: View {
                     .foregroundStyle(Tok.signal)
             }
             .chartXScale(domain: 0.0...47.0)
-            .chartYScale(domain: 0.0...220.0)
+            .chartYScale(domain: 0.0...top)
             .chartXAxis(.hidden)
             .chartYAxis(.hidden)
             .chartLegend(.hidden)
@@ -155,10 +157,10 @@ private struct ThroughputChart: View {
                     .foregroundStyle(Tok.steel)
             }
             .chartXScale(domain: 0.0...47.0)
-            .chartYScale(domain: 0.0...220.0)
+            .chartYScale(domain: 0.0...top)
             .chartLegend(.hidden)
             .chartYAxis {
-                AxisMarks(values: [55.0, 110.0, 165.0]) { _ in
+                AxisMarks(values: [top / 4, top / 2, top * 3 / 4]) { _ in
                     AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [2, 3])).foregroundStyle(Color.white.opacity(0.07))
                 }
             }
@@ -170,6 +172,6 @@ private struct ThroughputChart: View {
         }
         .accessibilityElement()
         .accessibilityLabel("Throughput, last 48 seconds")
-        .accessibilityValue("Peak \(Format.fixed(history.peak, 1)) megabits per second")
+        .accessibilityValue("Peak \(Format.mbps(history.peak)) megabits per second")
     }
 }

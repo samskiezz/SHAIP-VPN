@@ -5,17 +5,41 @@
  * usage: smoke <server> <ml_dsa_hex> <ed_hex> <identity> <cert|-> [<link> <authority_hex>]
  *
  * Expects an echo-mode server: each packet sent must come back byte-identical.
+ * Covers the bare tunnel and the reconnecting session (status, keepalive RTT,
+ * a forced reconnect, stop/free).
  */
+#define _POSIX_C_SOURCE 200809L /* nanosleep under -std=c11 */
 #include "pqanon.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 static int fail(const char *what, char *err) {
     fprintf(stderr, "FFI FAIL: %s: %s\n", what, err ? err : "(no message)");
     pqanon_string_free(err);
     return 1;
+}
+
+static void nap_ms(long ms) {
+    struct timespec ts = { ms / 1000, (ms % 1000) * 1000000L };
+    nanosleep(&ts, NULL);
+}
+
+/* Send a packet on a session and expect it back (echo server); retries cover
+ * a reconnect in progress. 0 on success. */
+static int session_echo(PqanonSession *s, uint8_t tag) {
+    static uint8_t buf[PQANON_MAX_PACKET];
+    uint8_t pkt[200];
+    memset(pkt, tag, sizeof pkt);
+    for (int attempt = 0; attempt < 20; attempt++) {
+        if (pqanon_session_send(s, pkt, sizeof pkt) != 0) return -1;
+        long n = pqanon_session_recv(s, buf, sizeof buf, 500, NULL);
+        if (n == (long)sizeof pkt && memcmp(buf, pkt, sizeof pkt) == 0) return 0;
+        if (n < 0) return -1;
+    }
+    return -1;
 }
 
 int main(int argc, char **argv) {
@@ -63,6 +87,43 @@ int main(int argc, char **argv) {
     if (s.packets_sent != 3 || s.packets_received != 3 || s.bytes_sent != s.bytes_received)
         return fail("stats mismatch", NULL);
     pqanon_tunnel_close(t);
+
+    /* The reconnecting session: what an app's network extension uses. */
+    PqanonSession *ss = pqanon_session_start(argv[1], argv[2], argv[3], argv[4], cert, 5000, &err);
+    if (!ss) return fail("session start", err);
+    PqanonStatus st;
+    if (pqanon_session_status(ss, &st) != 0 || st.state != PQANON_STATE_CONNECTED)
+        return fail("session not connected", NULL);
+    if (st.mtu == 0 || st.mtu > 1370) return fail("session MTU", NULL);
+    char *addr = pqanon_session_server_addr(ss);
+    if (!addr || strcmp(addr, argv[1]) != 0) return fail("server address", addr);
+    pqanon_string_free(addr);
+    if (session_echo(ss, 1) != 0) return fail("session echo", NULL);
+    for (int i = 0; i < 40 && (pqanon_session_status(ss, &st), st.rtt_us == 0); i++) nap_ms(100);
+    if (st.rtt_us == 0) return fail("no keepalive RTT measured", NULL);
+    int zero_id = 1;
+    for (int i = 0; i < 16; i++) zero_id &= st.server_identity[i] == 0;
+    if (zero_id) return fail("no server identity", NULL);
+    printf("session: connected, mtu %u, keepalive RTT %.2f ms, server %02x%02x%02x%02x…\n", st.mtu, st.rtt_us / 1000.0,
+           st.server_identity[0], st.server_identity[1], st.server_identity[2], st.server_identity[3]);
+
+    /* A network change: renegotiate now; packets flow on the new session. */
+    if (pqanon_session_reconnect(ss) != 0) return fail("reconnect", NULL);
+    for (int i = 0; i < 100 && (pqanon_session_status(ss, &st), st.reconnects < 1 || st.state != PQANON_STATE_CONNECTED); i++)
+        nap_ms(100);
+    if (st.reconnects != 1 || st.state != PQANON_STATE_CONNECTED) return fail("did not reconnect", pqanon_session_last_error(ss));
+    if (session_echo(ss, 2) != 0) return fail("echo after reconnect", NULL);
+    printf("session: reconnected (#%u), packets flow\n", st.reconnects);
+
+    pqanon_session_stop(ss);
+    if (pqanon_session_recv(ss, buf, sizeof buf, 1000, &err) != -1) return fail("recv after stop", err);
+    pqanon_string_free(err);
+    err = NULL;
+    pqanon_session_status(ss, &st);
+    if (st.state != PQANON_STATE_STOPPED) return fail("not stopped", NULL);
+    printf("session: stopped; sent %llu, received %llu packets in total\n",
+           (unsigned long long)st.stats.packets_sent, (unsigned long long)st.stats.packets_received);
+    pqanon_session_free(ss);
 
     if (argc >= 8) {
         char *account = NULL;
