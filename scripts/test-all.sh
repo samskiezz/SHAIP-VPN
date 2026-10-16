@@ -451,6 +451,23 @@ else
   skip  "stake: bond → directory → equivocation slash (x-lang)" "needs python3"
 fi
 
+# iOS core: the committed render vectors must still be what design/shaip-engine.js produces, and
+# SHAIPCore's engines must reproduce them op for op (plus catalogue/telemetry checks).
+ios_core() {
+  local tmp; tmp=$(mktemp)
+  node clients/ios/scripts/engine-vectors.mjs clients/ios/design/shaip-engine.js "$tmp" >/dev/null || return 1
+  if ! cmp -s "$tmp" clients/ios/SHAIPCore/Tests/SHAIPCoreTests/Fixtures/engine-vectors.json; then
+    echo "engine-vectors.json is stale: regenerate it with clients/ios/scripts/engine-vectors.mjs"; rm -f "$tmp"; return 1
+  fi
+  rm -f "$tmp"
+  swift test --package-path clients/ios/SHAIPCore
+}
+if command -v swift >/dev/null && command -v node >/dev/null; then
+  stage "ios: SHAIPCore engines vs design reference" ios_core
+else
+  skip  "ios: SHAIPCore engines vs design reference" "needs swift + node"
+fi
+
 printf '\n════════════════════════════════════════════════════════\n SUMMARY\n────────────────────────────────────────────────────────\n'
 for i in "${!NAMES[@]}"; do
   case "${STATUSES[$i]}" in
