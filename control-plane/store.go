@@ -6,10 +6,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+
+	"pqanon/control-plane/staking"
 )
 
 // ErrNotFound is returned when a record does not exist.
@@ -106,15 +109,68 @@ type Device struct {
 
 // Node is a tunnel/mix server participating in the network.
 type Node struct {
-	ID           string    `json:"id"`
-	Name         string    `json:"name"`
-	Address      string    `json:"address"`
-	PublicKey    []byte    `json:"-"`
-	PublicKeyHex string    `json:"public_key"`
-	Status       string    `json:"status"`
-	StakeSats    int64     `json:"stake_sats"`
-	DelayMeanMs  int       `json:"delay_mean_ms"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Address      string `json:"address"`
+	PublicKey    []byte `json:"-"`
+	PublicKeyHex string `json:"public_key"`
+	// EdPub is the node's Ed25519 key: it signs the node's per-epoch
+	// descriptors, so it is what slashing evidence is verified against.
+	EdPub        []byte `json:"-"`
+	EdPubHex     string `json:"ed_pub,omitempty"`
+	MixPub       []byte `json:"-"` // X25519 onion key (mix role)
+	MixPubHex    string `json:"mix_pub,omitempty"`
+	Role         string `json:"role"`
+	CapacityMbps int    `json:"capacity_mbps"`
+	Region       string `json:"region"`
+	OwnerID      string `json:"-"`
+	Status       string `json:"status"`
+	// StakeSats is the bonded stake: paid bonds, minus unbonded and slashed
+	// amounts. It is never set directly by an API caller.
+	StakeSats   int64      `json:"stake_sats"`
+	JailedAt    *time.Time `json:"jailed_at,omitempty"`
+	DelayMeanMs int        `json:"delay_mean_ms"`
+	CreatedAt   time.Time  `json:"created_at"`
+}
+
+// BondWatchWindow bounds how long an unpaid bond is still checked for payment.
+const BondWatchWindow = 7 * 24 * time.Hour
+
+// Staking errors.
+var (
+	ErrInsufficientStake = errors.New("insufficient bonded stake")
+	ErrAlreadySlashed    = errors.New("node already slashed for this epoch")
+)
+
+// StakeBond is one payment that bonds stake to a node. It counts only once its
+// charge is paid (status "active").
+type StakeBond struct {
+	ID         string     `json:"id"`
+	NodeID     string     `json:"node_id"`
+	AmountSats int64      `json:"amount_sats"`
+	Rail       string     `json:"rail"`
+	Quote      RailQuote  `json:"-"`
+	Status     string     `json:"status"` // awaiting_payment | active
+	CreatedAt  time.Time  `json:"created_at"`
+	CreditedAt *time.Time `json:"credited_at,omitempty"`
+}
+
+// Unbonding is stake leaving a node. It stays slashable until ReleaseAt.
+type Unbonding struct {
+	ID         int64     `json:"id"`
+	NodeID     string    `json:"-"`
+	AmountSats int64     `json:"amount_sats"`
+	ReleaseAt  time.Time `json:"release_at"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+// SlashEvent records one slash: at most one per (node, epoch).
+type SlashEvent struct {
+	NodeID      string    `json:"-"`
+	Epoch       uint64    `json:"epoch"`
+	SlashedSats int64     `json:"slashed_sats"`
+	Evidence    string    `json:"evidence"`
+	At          time.Time `json:"at"`
 }
 
 // Connection is an active or historical tunnel session.
@@ -201,6 +257,26 @@ type Store interface {
 	RevokeDevice(ctx context.Context, id, userID string) error
 	ListRevokedDevices(ctx context.Context) ([]Device, error)
 
+	CreateBond(ctx context.Context, b *StakeBond) error
+	GetBond(ctx context.Context, id string) (*StakeBond, error)
+	ListBonds(ctx context.Context, nodeID string) ([]StakeBond, error)
+	// ListAwaitingBonds returns unpaid bonds from the last BondWatchWindow, for
+	// the bond watcher (older unpaid charges have long expired on their rail).
+	ListAwaitingBonds(ctx context.Context) ([]StakeBond, error)
+	// CreditBond activates an awaiting bond and adds it to the node's bonded
+	// stake, exactly once: a second call reports false and changes nothing.
+	CreditBond(ctx context.Context, id string, now time.Time) (bool, error)
+	// Unbond moves amount from bonded stake into an unbonding entry released at
+	// releaseAt, or fails with ErrInsufficientStake and changes nothing.
+	Unbond(ctx context.Context, nodeID string, amount int64, releaseAt time.Time) error
+	ListUnbondings(ctx context.Context, nodeID string) ([]Unbonding, error)
+	// Slash atomically removes percent of the node's bonded stake and of every
+	// unbonding entry not yet released, jails the node, and records the event.
+	// It returns the amount slashed, or ErrAlreadySlashed for a repeat (node,
+	// epoch), changing nothing.
+	Slash(ctx context.Context, nodeID string, epoch uint64, percent int, evidence string, now time.Time) (int64, error)
+	ListSlashes(ctx context.Context, nodeID string) ([]SlashEvent, error)
+
 	Close()
 }
 
@@ -223,6 +299,10 @@ type MemStore struct {
 	spent    map[string]bool         // keyed by denom|nonce_hash
 	enroll   map[string]*EnrollToken // keyed by token id
 	devices  map[string]*Device      // keyed by device id
+	bonds    map[string]*StakeBond   // keyed by bond id
+	unbonds  []Unbonding
+	unbondSq int64
+	slashes  map[string]*SlashEvent // keyed by node id|epoch
 }
 
 func NewMemStore() *MemStore {
@@ -238,6 +318,8 @@ func NewMemStore() *MemStore {
 		spent:    make(map[string]bool),
 		enroll:   make(map[string]*EnrollToken),
 		devices:  make(map[string]*Device),
+		bonds:    make(map[string]*StakeBond),
+		slashes:  make(map[string]*SlashEvent),
 	}
 }
 
@@ -371,6 +453,15 @@ func (m *MemStore) CreateNode(_ context.Context, n *Node) error {
 	if n.Status == "" {
 		n.Status = "offline"
 	}
+	// Mirror the database column defaults so both stores behave alike.
+	if n.Role == "" {
+		n.Role = "mix"
+	}
+	if n.CapacityMbps == 0 {
+		n.CapacityMbps = 100
+	}
+	n.EdPubHex = hex.EncodeToString(n.EdPub)
+	n.MixPubHex = hex.EncodeToString(n.MixPub)
 	n.CreatedAt = time.Now().UTC()
 	cp := *n
 	m.nodes[n.ID] = &cp
@@ -645,14 +736,162 @@ func (m *MemStore) ListRevokedDevices(_ context.Context) ([]Device, error) {
 	return out, nil
 }
 
+func (m *MemStore) CreateBond(_ context.Context, b *StakeBond) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.nodes[b.NodeID]; !ok {
+		return ErrNotFound
+	}
+	if b.ID == "" {
+		b.ID = uuid.NewString()
+	}
+	if b.Status == "" {
+		b.Status = "awaiting_payment"
+	}
+	b.CreatedAt = time.Now().UTC()
+	cp := *b
+	m.bonds[b.ID] = &cp
+	return nil
+}
+
+func (m *MemStore) GetBond(_ context.Context, id string) (*StakeBond, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	b, ok := m.bonds[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	cp := *b
+	return &cp, nil
+}
+
+func (m *MemStore) ListBonds(_ context.Context, nodeID string) ([]StakeBond, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]StakeBond, 0)
+	for _, b := range m.bonds {
+		if b.NodeID == nodeID {
+			out = append(out, *b)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	return out, nil
+}
+
+func (m *MemStore) ListAwaitingBonds(_ context.Context) ([]StakeBond, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	since := time.Now().Add(-BondWatchWindow)
+	out := make([]StakeBond, 0)
+	for _, b := range m.bonds {
+		if b.Status == "awaiting_payment" && b.CreatedAt.After(since) {
+			out = append(out, *b)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	return out, nil
+}
+
+func (m *MemStore) CreditBond(_ context.Context, id string, now time.Time) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	b, ok := m.bonds[id]
+	if !ok {
+		return false, ErrNotFound
+	}
+	if b.Status != "awaiting_payment" {
+		return false, nil
+	}
+	n, ok := m.nodes[b.NodeID]
+	if !ok {
+		return false, ErrNotFound
+	}
+	t := now.UTC()
+	b.Status, b.CreditedAt = "active", &t
+	n.StakeSats += b.AmountSats
+	return true, nil
+}
+
+func (m *MemStore) Unbond(_ context.Context, nodeID string, amount int64, releaseAt time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n, ok := m.nodes[nodeID]
+	if !ok {
+		return ErrNotFound
+	}
+	if amount <= 0 || n.StakeSats < amount {
+		return ErrInsufficientStake
+	}
+	n.StakeSats -= amount
+	m.unbondSq++
+	m.unbonds = append(m.unbonds, Unbonding{
+		ID: m.unbondSq, NodeID: nodeID, AmountSats: amount, ReleaseAt: releaseAt.UTC(), CreatedAt: time.Now().UTC(),
+	})
+	return nil
+}
+
+func (m *MemStore) ListUnbondings(_ context.Context, nodeID string) ([]Unbonding, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]Unbonding, 0)
+	for _, u := range m.unbonds {
+		if u.NodeID == nodeID {
+			out = append(out, u)
+		}
+	}
+	return out, nil
+}
+
+func (m *MemStore) Slash(_ context.Context, nodeID string, epoch uint64, percent int, evidence string, now time.Time) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n, ok := m.nodes[nodeID]
+	if !ok {
+		return 0, ErrNotFound
+	}
+	key := nodeID + "|" + strconv.FormatUint(epoch, 10)
+	if _, done := m.slashes[key]; done {
+		return 0, ErrAlreadySlashed
+	}
+	cut := staking.SlashCut(n.StakeSats, percent)
+	n.StakeSats -= cut
+	total := cut
+	for i := range m.unbonds {
+		u := &m.unbonds[i]
+		if u.NodeID == nodeID && u.ReleaseAt.After(now) {
+			c := staking.SlashCut(u.AmountSats, percent)
+			u.AmountSats -= c
+			total += c
+		}
+	}
+	if n.JailedAt == nil {
+		t := now.UTC()
+		n.JailedAt = &t
+	}
+	m.slashes[key] = &SlashEvent{NodeID: nodeID, Epoch: epoch, SlashedSats: total, Evidence: evidence, At: now.UTC()}
+	return total, nil
+}
+
+func (m *MemStore) ListSlashes(_ context.Context, nodeID string) ([]SlashEvent, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]SlashEvent, 0)
+	for _, s := range m.slashes {
+		if s.NodeID == nodeID {
+			out = append(out, *s)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Epoch < out[j].Epoch })
+	return out, nil
+}
+
 // SeedDemo inserts a couple of nodes so a fresh in-memory instance isn't empty.
+// They carry no stake: stake only ever comes from paid bonds.
 func (m *MemStore) SeedDemo() {
 	_ = m.CreateNode(context.Background(), &Node{
-		Name: "tokyo-01", Address: "203.0.113.10:443", Status: "online",
-		StakeSats: 1_000_000, DelayMeanMs: 50,
+		Name: "tokyo-01", Address: "203.0.113.10:443", Status: "online", DelayMeanMs: 50,
 	})
 	_ = m.CreateNode(context.Background(), &Node{
-		Name: "frankfurt-01", Address: "198.51.100.20:443", Status: "online",
-		StakeSats: 750_000, DelayMeanMs: 50,
+		Name: "frankfurt-01", Address: "198.51.100.20:443", Status: "online", DelayMeanMs: 50,
 	})
 }

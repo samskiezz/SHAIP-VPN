@@ -149,6 +149,16 @@ enum Cmd {
         #[arg(long, default_value_t = 3000)]
         timeout_ms: u64,
     },
+    /// Fetch the signed directory consensus, verify it against pinned authority
+    /// keys, and list the nodes it admits (only bonded, unjailed nodes).
+    Directory {
+        /// The directory URL (…/api/directory).
+        #[arg(long)]
+        url: String,
+        /// A pinned authority as NAME=HEXKEY (repeatable).
+        #[arg(long = "authority", required = true)]
+        authorities: Vec<String>,
+    },
     /// Fetch the control plane's signed CRL, verify it against a pinned key,
     /// and list what it revokes.
     Crl {
@@ -233,6 +243,7 @@ fn cli_main() -> Result<()> {
             cert_out,
         } => enroll_cmd(&link, &server, &authority_key, &ca_key, &identity, &name, cert_out.as_deref()),
         Cmd::Crl { url, pubkey, max_age } => crl_cmd(&url, &pubkey, max_age),
+        Cmd::Directory { url, authorities } => directory_cmd(&url, &authorities),
         Cmd::Probe {
             config,
             count,
@@ -268,6 +279,42 @@ fn enroll_cmd(
         done.cert.account
     );
     println!("certificate: {} (valid until unix {})", done.cert_path.display(), done.cert.expires_at);
+    Ok(())
+}
+
+fn directory_cmd(url: &str, authorities: &[String]) -> Result<()> {
+    use std::io::Read;
+    let mut registry = std::collections::BTreeMap::new();
+    for a in authorities {
+        let (name, key) = a
+            .split_once('=')
+            .ok_or_else(|| anyhow::anyhow!("--authority must be NAME=HEXKEY, got {a:?}"))?;
+        registry.insert(name.to_string(), pqanon::enroll_client::parse_pin(key, "--authority key")?);
+    }
+    let resp = ureq::get(url)
+        .timeout(std::time::Duration::from_secs(10))
+        .call()
+        .map_err(|e| anyhow::anyhow!("GET {url}: {e}"))?;
+    let mut body = Vec::new();
+    resp.into_reader().take(8 << 20).read_to_end(&mut body)?;
+    let consensus = pqanon::directory::parse(&body).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let now = pqanon::crl::format_rfc3339_utc(
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs() as i64,
+    );
+    let valid = pqanon::directory::verify(&consensus, &registry, &now)
+        .map_err(|e| anyhow::anyhow!("directory rejected: {e}"))?;
+    println!(
+        "directory verified: {} node(s), {valid}/{} authority signature(s), valid until {}",
+        consensus.nodes.len(),
+        consensus.threshold,
+        consensus.valid_until
+    );
+    for n in &consensus.nodes {
+        println!(
+            "node {} addr {} role {} region {} capacity {} Mbit/s ed25519 {}",
+            n.name, n.address, n.role, n.region, n.capacity_mbps, n.ed25519_hex
+        );
+    }
     Ok(())
 }
 

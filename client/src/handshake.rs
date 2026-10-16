@@ -139,6 +139,25 @@ impl Identity {
             .to_bytes()
     }
 
+    /// Sign a node descriptor body (§ staking). Only bodies carrying the
+    /// descriptor's domain prefix are signed, so this narrow API can never be
+    /// used to sign a handshake transcript or an enrollment proof.
+    pub fn sign_node_descriptor(&self, body: &[u8]) -> Result<[u8; 64]> {
+        if !body.starts_with(&crate::descriptor::body_prefix()) {
+            bail!("refusing to sign: not a node descriptor body");
+        }
+        Ok(self.ed.sign(body).to_bytes())
+    }
+
+    /// An identity with a fixed Ed25519 key (fresh ML-DSA keys), so tests can
+    /// reproduce signatures pinned by the Go side.
+    #[cfg(test)]
+    pub(crate) fn with_ed_seed_for_test(seed: [u8; 32]) -> Self {
+        let mut id = Self::generate();
+        id.ed = EdSigningKey::from_bytes(&seed);
+        id
+    }
+
     /// Serialize the full secret identity for storage:
     /// `magic || Ed25519 seed (32) || ML-DSA-65 signing key || ML-DSA-65 verifying key`.
     ///

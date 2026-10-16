@@ -64,11 +64,20 @@ Rust tests `cross_language_digest_matches_go` and `cross_language_signature_veri
 recompute the same digest from the same bytes and verify the same signature. If
 the format ever changes, both sides change together.
 
+## Serving and fetching
+
+The control plane serves a live consensus at `GET /api/directory`. It is signed
+by its directory-authority key (`DIRECTORY_SIGNER`, or `KEY_DIR/directory.key`,
+HSM-capable) and lists only nodes with enough **paid, bonded stake** that are
+not jailed for equivocation (see [staking.md](staking.md)).
+`pqanon directory --url … --authority NAME=HEX` fetches it, verifies it with the
+Rust verifier above, and lists the admitted nodes. The battery's `stake` stage
+checks a node appearing once bonded and disappearing once slashed.
+
 ## Not yet wired
 
-- Authority-to-authority voting/liveness (who proposes, how a minority-offline
-  quorum still publishes) and the HTTP fetch/refresh loop. The signed-document
-  format, threshold signing, and verification — the security-critical core — are
-  done and tested; the transport around them is ordinary plumbing.
+- Authority-to-authority voting/liveness: who proposes, and how a quorum with a
+  minority offline still publishes. One control plane signs with threshold 1
+  today; the format and the verifier already handle N-of-M.
 - Feeding the verified node list into mix path selection (which already has
   `client/src/mix_reputation.rs` for per-node weighting).

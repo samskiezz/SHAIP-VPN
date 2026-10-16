@@ -207,11 +207,16 @@ func (s *Server) handleEnrollKeys(w http.ResponseWriter, _ *http.Request) {
 	if !s.enrollmentReady(w) {
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{
+	keys := map[string]string{
 		"enroll_authority_pub": hex.EncodeToString(s.enrollPub),
 		"device_ca_pub":        hex.EncodeToString(s.deviceCAPub),
 		"crl_pub":              hex.EncodeToString(s.crlPub),
-	})
+	}
+	if s.directory != nil {
+		keys["directory_authority"] = s.directory.Name
+		keys["directory_pub"] = hex.EncodeToString(s.directory.Pub)
+	}
+	writeJSON(w, http.StatusOK, keys)
 }
 
 func (s *Server) handleListDevices(w http.ResponseWriter, r *http.Request) {

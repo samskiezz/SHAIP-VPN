@@ -60,7 +60,26 @@ func main() {
 	if err != nil {
 		log.Fatalf("device-CA signer: %v", err)
 	}
-	log.Printf("signing keys: token=%s crl=%s enroll-authority=%s device-ca=%s", tokenSrc, crlSrc, enrollSrc, caSrc)
+	dirKey, dirSrc, err := resolveSigner("directory", "DIRECTORY_SIGNER", "")
+	if err != nil {
+		log.Fatalf("directory signer: %v", err)
+	}
+	dirPub, err := keystore.Ed25519Public(dirKey)
+	if err != nil {
+		log.Fatalf("directory signer: %v", err)
+	}
+	log.Printf("signing keys: token=%s crl=%s enroll-authority=%s device-ca=%s directory=%s",
+		tokenSrc, crlSrc, enrollSrc, caSrc, dirSrc)
+
+	stake := defaultStakeParams()
+	stake.MinSats = int64(atoiOr("STAKE_MIN_SATS", int(stake.MinSats)))
+	stake.UnbondingPeriod = time.Duration(atoiOr("STAKE_UNBONDING_HOURS", int(stake.UnbondingPeriod/time.Hour))) * time.Hour
+	stake.SlashPercent = atoiOr("STAKE_SLASH_PERCENT", stake.SlashPercent)
+	if stake.SlashPercent < 1 || stake.SlashPercent > 100 {
+		log.Fatalf("STAKE_SLASH_PERCENT must be 1..100")
+	}
+	log.Printf("staking: min %d sats to be listed, %s unbonding, %d%% slash on equivocation",
+		stake.MinSats, stake.UnbondingPeriod, stake.SlashPercent)
 
 	// E-cash denomination keys are RSA blind-signing keys (RFC 9474), which the
 	// Ed25519 keystore does not hold; they live under PAY_KEY_DIR, defaulting to
@@ -78,12 +97,18 @@ func main() {
 	srv := &Server{
 		store: store, tokens: tokens, crlPub: crlPub, crlSigner: crlKey,
 		enrollSigner: enrollKey, enrollPub: enrollPub, deviceCASigner: caKey, deviceCAPub: caPub,
+		stake: stake,
+		directory: &DirectoryAuthority{
+			Name: envOr("DIRECTORY_AUTHORITY_NAME", "cp-1"), Signer: dirKey, Pub: dirPub,
+		},
 		mint: mint, rails: rails, defaultRail: defaultRail,
 		devSettle: os.Getenv("PAY_DEV_SETTLE") == "1",
 	}
 	if srv.devSettle {
 		log.Printf("WARNING: PAY_DEV_SETTLE enabled — /api/pay/dev/settle will mark orders paid without a chain; never set this in production")
 	}
+
+	go srv.watchBonds(context.Background(), time.Duration(atoiOr("STAKE_WATCH_SECS", 30))*time.Second)
 
 	log.Printf("PQANON-CP/1 control plane listening on %s (store: %s)", addr, label)
 	srvHTTP := &http.Server{
@@ -114,7 +139,7 @@ func routes(srv *Server, label string) http.Handler {
 	r.Route("/api", func(r chi.Router) {
 		r.Post("/auth/register", srv.handleRegister)
 		r.Post("/auth/login", srv.handleLogin)
-		r.Get("/crl", srv.handleCRL)                   // tunnel servers fetch this unauthenticated
+		r.Get("/crl", srv.handleCRL)                    // tunnel servers fetch this unauthenticated
 		r.Get("/public/status", srv.handlePublicStatus) // status pages / uptime monitors
 
 		// Untraceable payments (§20) — deliberately identity-free, so no auth.
@@ -128,6 +153,12 @@ func routes(srv *Server, label string) http.Handler {
 		// One-click enrollment: the token authorizes the claim, so no session.
 		r.Post("/enroll/claim", srv.handleEnrollClaim)
 		r.Get("/enroll/keys", srv.handleEnrollKeys)
+
+		// Staking: status, slashing evidence, and the directory are public.
+		r.Get("/stake/{id}", srv.handleStakeStatus)
+		r.Post("/stake/slash", srv.handleStakeSlash)
+		r.Post("/stake/dev/settle", srv.handleStakeDevSettle) // gated by PAY_DEV_SETTLE
+		r.Get("/directory", srv.handleDirectory)
 
 		r.Group(func(r chi.Router) {
 			r.Use(srv.authMiddleware)
@@ -155,6 +186,8 @@ func routes(srv *Server, label string) http.Handler {
 			r.Post("/enroll/issue", srv.handleEnrollIssue)
 			r.Get("/devices", srv.handleListDevices)
 			r.Delete("/devices/{id}", srv.handleRevokeDevice)
+			r.Post("/stake/{id}/bond", srv.handleStakeBond)
+			r.Post("/stake/{id}/unbond", srv.handleStakeUnbond)
 		})
 	})
 	return r

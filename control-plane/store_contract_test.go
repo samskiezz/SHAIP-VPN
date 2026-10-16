@@ -267,6 +267,101 @@ func storeContract(t *testing.T, st Store) {
 		}
 	})
 
+	t.Run("staking", func(t *testing.T) {
+		owner := mkUser(t, st)
+		pub, _, _ := ed25519.GenerateKey(rand.Reader)
+		n := &Node{Name: "stake-" + randHex(3), Address: "203.0.113.1:443", PublicKey: pub, EdPub: pub,
+			Role: "mix", Region: "CH", OwnerID: owner}
+		if err := st.CreateNode(ctx, n); err != nil || n.ID == "" {
+			t.Fatalf("CreateNode must report the new id: %v %q", err, n.ID)
+		}
+		got, err := st.GetNode(ctx, n.ID)
+		if err != nil || got.OwnerID != owner || got.EdPubHex != hex.EncodeToString(pub) || got.StakeSats != 0 || got.Role != "mix" {
+			t.Fatalf("node round trip: %v %+v", err, got)
+		}
+		if err := st.CreateBond(ctx, &StakeBond{NodeID: "00000000-0000-0000-0000-000000000000", AmountSats: 1, Rail: "dev"}); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("bond for a missing node: %v", err)
+		}
+
+		// A bond is credited exactly once, even when checks race.
+		b := &StakeBond{NodeID: n.ID, AmountSats: 200_000, Rail: "dev", Quote: RailQuote{Address: "dev:x"}}
+		if err := st.CreateBond(ctx, b); err != nil {
+			t.Fatal(err)
+		}
+		if aw, _ := st.ListAwaitingBonds(ctx); !containsBond(aw, b.ID) {
+			t.Fatal("an unpaid bond must be awaiting")
+		}
+		var wg sync.WaitGroup
+		credits := make([]bool, 8)
+		for i := range credits {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				credits[i], _ = st.CreditBond(ctx, b.ID, time.Now().UTC())
+			}(i)
+		}
+		wg.Wait()
+		wins := 0
+		for _, c := range credits {
+			if c {
+				wins++
+			}
+		}
+		if node, _ := st.GetNode(ctx, n.ID); wins != 1 || node.StakeSats != 200_000 {
+			t.Fatalf("credit races: wins=%d stake=%d, want 1 and 200000", wins, node.StakeSats)
+		}
+		if aw, _ := st.ListAwaitingBonds(ctx); containsBond(aw, b.ID) {
+			t.Fatal("a credited bond is no longer awaiting")
+		}
+
+		// Unbonding: over-unbond refused and changes nothing; one entry already
+		// released (no longer slashable), one still locked.
+		if err := st.Unbond(ctx, n.ID, 999_999, time.Now()); !errors.Is(err, ErrInsufficientStake) {
+			t.Fatalf("over-unbond: %v", err)
+		}
+		if err := st.Unbond(ctx, n.ID, 40_000, time.Now().Add(-time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.Unbond(ctx, n.ID, 60_000, time.Now().Add(24*time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+		if node, _ := st.GetNode(ctx, n.ID); node.StakeSats != 100_000 {
+			t.Fatalf("bonded after unbonding = %d, want 100000", node.StakeSats)
+		}
+
+		// Slash 50%: bonded 100k → 50k cut, locked unbonding 60k → 30k cut; the
+		// released 40k is untouched. The node is jailed; a repeat changes nothing.
+		cut, err := st.Slash(ctx, n.ID, 9, 50, "evidence", time.Now().UTC())
+		if err != nil || cut != 80_000 {
+			t.Fatalf("slash: cut=%d err=%v, want 80000", cut, err)
+		}
+		node, _ := st.GetNode(ctx, n.ID)
+		if node.StakeSats != 50_000 || node.JailedAt == nil {
+			t.Fatalf("after slash: stake=%d jailed=%v", node.StakeSats, node.JailedAt)
+		}
+		us, _ := st.ListUnbondings(ctx, n.ID)
+		var released, locked int64
+		for _, u := range us {
+			if u.ReleaseAt.Before(time.Now()) {
+				released += u.AmountSats
+			} else {
+				locked += u.AmountSats
+			}
+		}
+		if released != 40_000 || locked != 30_000 {
+			t.Fatalf("unbondings after slash: released=%d locked=%d, want 40000 and 30000", released, locked)
+		}
+		if _, err := st.Slash(ctx, n.ID, 9, 50, "again", time.Now().UTC()); !errors.Is(err, ErrAlreadySlashed) {
+			t.Fatalf("repeat slash: %v", err)
+		}
+		if node, _ := st.GetNode(ctx, n.ID); node.StakeSats != 50_000 {
+			t.Fatal("a refused repeat slash must change nothing")
+		}
+		if sl, _ := st.ListSlashes(ctx, n.ID); len(sl) != 1 || sl[0].Epoch != 9 || sl[0].SlashedSats != 80_000 {
+			t.Fatalf("slash record: %+v", sl)
+		}
+	})
+
 	t.Run("payments", func(t *testing.T) {
 		o := &PayOrder{
 			Denom: "month", Rail: "dev", Address: "dev:" + randHex(4), AmountAtomic: 125,
@@ -293,6 +388,15 @@ func storeContract(t *testing.T, st Store) {
 			t.Fatalf("double spend: %v", err)
 		}
 	})
+}
+
+func containsBond(bs []StakeBond, id string) bool {
+	for _, b := range bs {
+		if b.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 func revokedAt(t *testing.T, st Store, id string) time.Time {

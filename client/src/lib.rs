@@ -19,6 +19,7 @@ pub mod client;
 pub mod crl;
 pub mod dataplane;
 pub mod decoy;
+pub mod descriptor;
 pub mod directory;
 pub mod dnssec;
 pub mod enroll_client;

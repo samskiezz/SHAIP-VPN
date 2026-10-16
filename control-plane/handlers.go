@@ -33,6 +33,9 @@ type Server struct {
 	enrollPub      ed25519.PublicKey
 	deviceCASigner crypto.Signer
 	deviceCAPub    ed25519.PublicKey
+	// Staking rules, and this control plane as a directory authority.
+	stake     StakeParams
+	directory *DirectoryAuthority
 	// Untraceable payments (§20): the e-cash mint and the payment rails.
 	mint        *Mint
 	rails       map[string]PaymentRail // by name: "monero", "btcpay", "dev"
@@ -168,13 +171,23 @@ func (s *Server) handleListNodes(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, nodes)
 }
 
+// validNodeRoles are the roles a directory lists.
+var validNodeRoles = map[string]bool{"mix": true, "entry": true, "exit": true, "gateway": true}
+
+// handleCreateNode registers a node under the caller as its operator. Stake is
+// never self-declared: it accrues only from paid bonds (POST /api/stake/{id}/bond).
 func (s *Server) handleCreateNode(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Name        string `json:"name"`
-		Address     string `json:"address"`
-		PublicKey   string `json:"public_key"`
-		StakeSats   int64  `json:"stake_sats"`
-		DelayMeanMs int    `json:"delay_mean_ms"`
+		Name         string `json:"name"`
+		Address      string `json:"address"`
+		PublicKey    string `json:"public_key"`
+		EdPub        string `json:"ed_pub"`  // the node's Ed25519 key (signs its descriptors)
+		MixPub       string `json:"mix_pub"` // X25519 onion key, for the mix role
+		Role         string `json:"role"`
+		CapacityMbps int    `json:"capacity_mbps"`
+		Region       string `json:"region"`
+		StakeSats    int64  `json:"stake_sats"`
+		DelayMeanMs  int    `json:"delay_mean_ms"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		errJSON(w, http.StatusBadRequest, "bad request")
@@ -184,14 +197,51 @@ func (s *Server) handleCreateNode(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, http.StatusBadRequest, "name and address required")
 		return
 	}
+	// The directory's canonical form is whitespace-delimited.
+	if strings.ContainsAny(body.Name+body.Address, " \t\r\n") {
+		errJSON(w, http.StatusBadRequest, "name and address may not contain whitespace")
+		return
+	}
+	if body.StakeSats != 0 {
+		errJSON(w, http.StatusBadRequest, "stake_sats cannot be set directly; bond stake via POST /api/stake/{id}/bond")
+		return
+	}
 	pub, err := hex.DecodeString(body.PublicKey)
 	if err != nil {
 		errJSON(w, http.StatusBadRequest, "public_key must be hex")
 		return
 	}
+	edPub, err := hex.DecodeString(body.EdPub)
+	if err != nil || (len(edPub) != 0 && len(edPub) != ed25519.PublicKeySize) {
+		errJSON(w, http.StatusBadRequest, "ed_pub must be a hex Ed25519 public key")
+		return
+	}
+	mixPub, err := hex.DecodeString(body.MixPub)
+	if err != nil || (len(mixPub) != 0 && len(mixPub) != 32) {
+		errJSON(w, http.StatusBadRequest, "mix_pub must be a hex X25519 public key")
+		return
+	}
+	role := body.Role
+	if role == "" {
+		role = "mix"
+	}
+	if !validNodeRoles[role] {
+		errJSON(w, http.StatusBadRequest, "role must be mix, entry, exit, or gateway")
+		return
+	}
+	region := strings.ToUpper(strings.TrimSpace(body.Region))
+	if region != "" && (len(region) != 2 || strings.Trim(region, "ABCDEFGHIJKLMNOPQRSTUVWXYZ") != "") {
+		errJSON(w, http.StatusBadRequest, "region must be an ISO 3166 alpha-2 code")
+		return
+	}
+	if body.CapacityMbps < 0 {
+		errJSON(w, http.StatusBadRequest, "capacity_mbps must be positive")
+		return
+	}
 	n := &Node{
 		Name: body.Name, Address: body.Address, PublicKey: pub,
-		PublicKeyHex: body.PublicKey, StakeSats: body.StakeSats,
+		PublicKeyHex: body.PublicKey, EdPub: edPub, MixPub: mixPub, Role: role,
+		CapacityMbps: body.CapacityMbps, Region: region, OwnerID: userID(r),
 		DelayMeanMs: body.DelayMeanMs,
 	}
 	if err := s.store.CreateNode(r.Context(), n); err != nil {

@@ -25,9 +25,13 @@ func newTestServer(t *testing.T) (*Server, http.Handler, *MemStore) {
 	}
 	enrollPub, enrollPriv, _ := ed25519.GenerateKey(rand.Reader)
 	caPub, caPriv, _ := ed25519.GenerateKey(rand.Reader)
+	dirPub, dirPriv, _ := ed25519.GenerateKey(rand.Reader)
 	srv := &Server{
 		store: store, tokens: tokens, crlPub: pub, crlSigner: priv,
 		enrollSigner: enrollPriv, enrollPub: enrollPub, deviceCASigner: caPriv, deviceCAPub: caPub,
+		stake:     defaultStakeParams(),
+		directory: &DirectoryAuthority{Name: "cp-test", Signer: dirPriv, Pub: dirPub},
+		rails:     map[string]PaymentRail{"dev": NewDevRail()}, defaultRail: "dev", devSettle: true,
 	}
 	return srv, routes(srv, "memory"), store
 }

@@ -25,6 +25,7 @@ ChaCha20-Poly1305, HKDF/HMAC-SHA256, Argon2id).
 | Postgres schema + in-memory fallback | SQL/Go | **Working** | one store contract run against both, incl. real PostgreSQL |
 | Signing-key custody: key files + **PKCS#11 HSM**; persistent daemon identities | Go + Rust | **Working** | real SoftHSM2 token + restart checks ([docs/keys.md](docs/keys.md)) |
 | One-click device enrollment (`/api/enroll`, `pqanon enroll`) + device-cert tunnel admission + CRL revocation | Go + Rust | **Working** | cross-language enroll E2E + handshake tests ([docs/enrollment.md](docs/enrollment.md)) |
+| Node staking: paid bonds, unbonding, permissionless slashing on signed-descriptor equivocation, stake-gated signed directory | Go + Rust | **Working** | store contract (real PostgreSQL) + cross-language stake E2E ([docs/staking.md](docs/staking.md)) |
 | DNSSEC resolver: RSA/ECDSA/Ed25519 RRSIG + chain-of-trust + real IANA root anchors | Rust | **Working** | 19 unit tests + live anchor check |
 | Untraceable payments: Monero + Bitcoin/Lightning + Chaumian e-cash (`buy`/`collect`/`redeem`) | Rust + Go | **Working** | cross-language buy→redeem E2E |
 | Live TLS 1.3 decoy (`pqanon-decoy`, `pqanond --decoy`) | Rust | **Working** | openssl/curl + 2 integration tests |

@@ -82,6 +82,36 @@ struct Cli {
     /// How often to refresh the CRL, in seconds.
     #[arg(long, default_value_t = 60)]
     crl_refresh_secs: u64,
+
+    /// Sign this node's descriptor for one epoch with its identity key, print
+    /// it, and exit. A node publishes ONE per epoch: two different descriptors
+    /// for the same epoch are equivocation and get its stake slashed.
+    #[arg(long, requires_all = ["node_id", "epoch", "advertise"])]
+    sign_descriptor: bool,
+
+    /// The control plane's id for this node (with --sign-descriptor).
+    #[arg(long)]
+    node_id: Option<String>,
+
+    /// The epoch the descriptor is for (with --sign-descriptor).
+    #[arg(long)]
+    epoch: Option<u64>,
+
+    /// The public address to advertise (with --sign-descriptor).
+    #[arg(long)]
+    advertise: Option<String>,
+
+    /// Advertised capacity in Mbit/s (with --sign-descriptor).
+    #[arg(long, default_value_t = 0)]
+    capacity_mbps: u32,
+
+    /// Advertised ISO 3166 region (with --sign-descriptor).
+    #[arg(long, default_value = "")]
+    region: String,
+
+    /// Advertised X25519 mix key, hex (with --sign-descriptor).
+    #[arg(long)]
+    mix_pub: Option<String>,
 }
 
 /// A CRL older than this is treated as a replay (the control plane signs a
@@ -203,8 +233,8 @@ async fn main() -> Result<()> {
             }
             id
         }
-        None if cli.print_public => anyhow::bail!(
-            "--print-public needs --identity: an ephemeral identity changes on every run, so there is nothing to pin"
+        None if cli.print_public || cli.sign_descriptor => anyhow::bail!(
+            "--print-public / --sign-descriptor need --identity: an ephemeral identity changes on every run"
         ),
         None => {
             tracing::warn!("no --identity: using an ephemeral server identity that clients cannot pin across restarts");
@@ -216,6 +246,23 @@ async fn main() -> Result<()> {
         println!("identity_id       = \"{}\"", hex16(identity.identity_id()));
         println!("server_ml_dsa_pub = \"{}\"", pqanon::hex_util::encode(&p.pq_bytes()));
         println!("server_ed_pub     = \"{}\"", pqanon::hex_util::encode(&p.ed_bytes()));
+        return Ok(());
+    }
+    if cli.sign_descriptor {
+        let mut x25519 = [0u8; 32];
+        if let Some(h) = &cli.mix_pub {
+            x25519 = pqanon::hex_util::decode_32(h).map_err(|e| anyhow::anyhow!("--mix-pub: {e}"))?;
+        }
+        let d = pqanon::descriptor::NodeDescriptor {
+            node_id: cli.node_id.clone().unwrap_or_default(),
+            epoch: cli.epoch.unwrap_or_default(),
+            address: cli.advertise.clone().unwrap_or_default(),
+            x25519,
+            ed25519: identity.public().ed_bytes(),
+            capacity_mbps: cli.capacity_mbps,
+            region: cli.region.to_uppercase(),
+        };
+        println!("{}", pqanon::descriptor::sign(&identity, &d)?);
         return Ok(());
     }
     let policy = device_policy(&cli).await?;

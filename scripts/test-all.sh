@@ -50,7 +50,7 @@ hsm_pkcs11() {
 
   # 1. The keystore's PKCS#11 test must actually run against the token.
   OUT=$(cd control-plane && PQANON_TEST_PKCS11_MODULE="$SOFTHSM_MODULE" PQANON_TEST_PKCS11_TOKEN=pqanon-ci \
-    PQANON_TEST_PKCS11_PIN=1234 go test -count=1 -run 'TestPKCS11' -v ./keystore/ 2>&1)
+    PQANON_TEST_PKCS11_PIN=1234 go test -count=1 -timeout 120s -run 'TestPKCS11' -v ./keystore/ 2>&1)
   echo "$OUT" | grep -E '^(--- |ok|FAIL)'
   if echo "$OUT" | grep -q -- '--- PASS: TestPKCS11SoftHSM' && ! echo "$OUT" | grep -q -- '--- SKIP'; then
     ok=$((ok+1)); else echo "  ✗ PKCS#11 test did not run and pass"; bad=$((bad+1)); fi
@@ -101,7 +101,7 @@ pg_contract() {
     -l "$D/log" -w start >/dev/null || { rm -rf "$D"; return 1; }
   ${RUN[@]+"${RUN[@]}"} "$PG_BIN/createdb" -h "$D" -p 55432 -U pqanon pqanon_test
   OUT=$(cd control-plane && PQANON_TEST_DATABASE_URL="postgres:///pqanon_test?host=$D&port=55432&user=pqanon" \
-    go test -count=1 -race -run 'TestStoreContractPostgres' -v . 2>&1)
+    go test -count=1 -race -timeout 180s -run 'TestStoreContractPostgres' -v . 2>&1)
   ${RUN[@]+"${RUN[@]}"} "$PG_BIN/pg_ctl" -D "$D/data" -m fast -w stop >/dev/null 2>&1
   rm -rf "$D"
   echo "$OUT" | grep -E '^(--- |    --- |ok|FAIL)'
@@ -323,6 +323,81 @@ tunnel_e2e() {
   [ "$bad" -eq 0 ]
 }
 
+# --- Staking: paid bond → signed directory → equivocation slashed (real node key) ---
+stake_e2e() {
+  cargo build --release -q -p pqanon-client --bin pqanon -p pqanon-server || return 1
+  ( cd control-plane && go build -o bin/control-plane . ) || return 1
+  local BIN=control-plane/bin/control-plane CLI=./target/release/pqanon D=./target/release/pqanond
+  local B=http://127.0.0.1:8091 KD W ok=0 bad=0 PID
+  KD=$(mktemp -d); W=$(mktemp -d)
+  pass() { ok=$((ok+1)); }; fail() { echo "  ✗ $1"; bad=$((bad+1)); }
+  j() { python3 -c "import sys,json;print(json.load(sys.stdin)$1)" 2>/dev/null; }
+  code() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
+  PAY_DEV_SETTLE=1 KEY_DIR="$KD" LISTEN_ADDR=:8091 STAKE_MIN_SATS=100000 STAKE_SLASH_PERCENT=50 STAKE_WATCH_SECS=1 \
+    "$BIN" >/tmp/stake_cp.log 2>&1 & PID=$!
+  curl -fsS --retry 40 --retry-delay 1 --retry-connrefused "$B/health" >/dev/null || { kill $PID; rm -rf "$KD" "$W"; return 1; }
+
+  local KEYS DIRNAME DIRPUB TOK TOK2 ED NODE BOND DA DB DF1 DF2 OUT ST
+  KEYS=$(curl -s "$B/api/enroll/keys")
+  DIRNAME=$(echo "$KEYS" | j "['directory_authority']"); DIRPUB=$(echo "$KEYS" | j "['directory_pub']")
+  local H='Content-Type: application/json'
+  for u in op other; do
+    curl -s -X POST "$B/api/auth/register" -H "$H" -d "{\"email\":\"$u@stake.co\",\"password\":\"password123\"}" >/dev/null
+  done
+  TOK=$(curl -s -X POST "$B/api/auth/login" -H "$H" -d '{"email":"op@stake.co","password":"password123"}' | j "['token']")
+  TOK2=$(curl -s -X POST "$B/api/auth/login" -H "$H" -d '{"email":"other@stake.co","password":"password123"}' | j "['token']")
+  local A="Authorization: Bearer $TOK"
+
+  # The node's key is the real pqanond identity's Ed25519 key.
+  $D --identity "$W/node.id" --print-public > "$W/pins" 2>/dev/null
+  ED=$(sed -n 's/^server_ed_pub *= *"\(.*\)"/\1/p' "$W/pins")
+  [ "$(code -X POST "$B/api/nodes" -H "$A" -H "$H" -d "{\"name\":\"liar\",\"address\":\"x:1\",\"public_key\":\"$ED\",\"stake_sats\":5000000}")" = 400 ] \
+    && pass || fail "self-declared stake accepted"
+  NODE=$(curl -s -X POST "$B/api/nodes" -H "$A" -H "$H" -d "{\"name\":\"zrh-01\",\"address\":\"203.0.113.5:443\",\"public_key\":\"$ED\",\"ed_pub\":\"$ED\",\"role\":\"mix\",\"region\":\"CH\",\"capacity_mbps\":500}" | j "['id']")
+  [ ${#NODE} -eq 36 ] && pass || fail "register node: $NODE"
+
+  # Unbonded: absent from the directory, as verified by the Rust client.
+  OUT=$($CLI directory --url "$B/api/directory" --authority "$DIRNAME=$DIRPUB" 2>&1 || true)
+  echo "$OUT" | grep -q "directory verified: 0 node" && pass || fail "unbonded node listed: $OUT"
+  [ "$(code -X POST "$B/api/stake/$NODE/bond" -H "Authorization: Bearer $TOK2" -H "$H" -d '{"amount_sats":200000,"rail":"dev"}')" = 403 ] \
+    && pass || fail "non-operator bonded"
+
+  # Bond, pay on the dev rail, and let the bond watcher (not a status poll) credit it.
+  BOND=$(curl -s -X POST "$B/api/stake/$NODE/bond" -H "$A" -H "$H" -d '{"amount_sats":200000,"rail":"dev"}' | j "['bond_id']")
+  curl -s -X POST "$B/api/stake/dev/settle" -H "$H" -d "{\"bond_id\":\"$BOND\"}" >/dev/null
+  sleep 2.5
+  OUT=$($CLI directory --url "$B/api/directory" --authority "$DIRNAME=$DIRPUB" 2>&1 || true)
+  echo "$OUT" | grep -q "node zrh-01 addr 203.0.113.5:443 role mix region CH capacity 500 Mbit/s ed25519 $ED" \
+    && pass || fail "bonded node not in the verified directory: $OUT"
+  [ "$(code -X POST "$B/api/stake/$NODE/unbond" -H "$A" -H "$H" -d '{"amount_sats":50000}')" = 200 ] && pass || fail "unbond"
+
+  # The operator equivocates: its node key signs two different descriptors for epoch 42.
+  DA=$($D --identity "$W/node.id" --sign-descriptor --node-id "$NODE" --epoch 42 --advertise 203.0.113.5:443 --region CH --capacity-mbps 500 2>/dev/null)
+  DB=$($D --identity "$W/node.id" --sign-descriptor --node-id "$NODE" --epoch 42 --advertise 198.51.100.9:443 --region CH --capacity-mbps 500 2>/dev/null)
+  # Not evidence: the same descriptor twice, or descriptors signed by someone else's key.
+  [ "$(code -X POST "$B/api/stake/slash" -H "$H" -d "{\"descriptor_a\":\"$DA\",\"descriptor_b\":\"$DA\"}")" = 400 ] && pass || fail "identical descriptors slashed"
+  DF1=$($D --identity "$W/forger.id" --sign-descriptor --node-id "$NODE" --epoch 42 --advertise 192.0.2.1:1 2>/dev/null)
+  DF2=$($D --identity "$W/forger.id" --sign-descriptor --node-id "$NODE" --epoch 42 --advertise 192.0.2.2:1 2>/dev/null)
+  [ "$(code -X POST "$B/api/stake/slash" -H "$H" -d "{\"descriptor_a\":\"$DF1\",\"descriptor_b\":\"$DF2\"}")" = 400 ] && pass || fail "forged evidence slashed"
+
+  # Real evidence, submitted by anyone (no auth): 50% of 150k bonded + 50k unbonding.
+  OUT=$(curl -s -X POST "$B/api/stake/slash" -H "$H" -d "{\"descriptor_a\":\"$DA\",\"descriptor_b\":\"$DB\"}")
+  [ "$(echo "$OUT" | j "['slashed_sats']")" = 100000 ] && pass || fail "slash: $OUT"
+  [ "$(code -X POST "$B/api/stake/slash" -H "$H" -d "{\"descriptor_a\":\"$DB\",\"descriptor_b\":\"$DA\"}")" = 409 ] && pass || fail "repeat slash accepted"
+  ST=$(curl -s "$B/api/stake/$NODE")
+  [ "$(echo "$ST" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['bonded_sats'],d['unbonding_sats'],d['jailed'],sep=',')" 2>/dev/null)" = "75000,25000,True" ] \
+    && pass || fail "stake after slash: $ST"
+  # Jailed: gone from the directory; and the directory is refused under the wrong pin.
+  OUT=$($CLI directory --url "$B/api/directory" --authority "$DIRNAME=$DIRPUB" 2>&1 || true)
+  echo "$OUT" | grep -q "directory verified: 0 node" && pass || fail "jailed node still listed: $OUT"
+  if $CLI directory --url "$B/api/directory" --authority "$DIRNAME=$ED" >/dev/null 2>&1; then
+    fail "directory accepted under the wrong pinned key"; else pass; fi
+
+  kill $PID 2>/dev/null; wait $PID 2>/dev/null; rm -rf "$KD" "$W"
+  echo "  stake E2E: $ok checks passed, $bad failed"
+  [ "$bad" -eq 0 ]
+}
+
 echo "PQ-ANON master test battery — $(date -u +%FT%TZ)"
 
 stage "rust: build (workspace)"              rust_build
@@ -369,6 +444,11 @@ if command -v python3 >/dev/null && command -v cc >/dev/null; then
   stage "tunnel: client facade + C ABI vs device-bound pqanond" tunnel_e2e
 else
   skip  "tunnel: client facade + C ABI vs device-bound pqanond" "needs python3 + a C compiler"
+fi
+if command -v python3 >/dev/null; then
+  stage "stake: bond → directory → equivocation slash (x-lang)" stake_e2e
+else
+  skip  "stake: bond → directory → equivocation slash (x-lang)" "needs python3"
 fi
 
 printf '\n════════════════════════════════════════════════════════\n SUMMARY\n────────────────────────────────────────────────────────\n'

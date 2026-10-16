@@ -140,6 +140,49 @@ CREATE TABLE IF NOT EXISTS devices (
     revoked_at     TIMESTAMPTZ
 );
 
+-- Node staking (docs/staking.md). Stake is bonded by paying a real charge, is
+-- locked through an unbonding period during which it stays slashable, and is
+-- slashed only on cryptographic proof of equivocation (two conflicting signed
+-- descriptors for one epoch). nodes.stake_sats is the bonded total, kept in step
+-- with this ledger; only bonded, unjailed nodes enter the signed directory.
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS owner_id      UUID REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS role          TEXT NOT NULL DEFAULT 'mix';
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS capacity_mbps INT  NOT NULL DEFAULT 100;
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS region        TEXT NOT NULL DEFAULT '';
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS jailed_at     TIMESTAMPTZ;
+
+CREATE TABLE IF NOT EXISTS stake_bonds (
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    node_id        UUID NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+    amount_sats    BIGINT NOT NULL CHECK (amount_sats > 0),
+    rail           TEXT NOT NULL,
+    address        TEXT NOT NULL,
+    meta           TEXT NOT NULL DEFAULT '',
+    amount_label   TEXT NOT NULL DEFAULT '',
+    uri            TEXT NOT NULL DEFAULT '',
+    status         TEXT NOT NULL DEFAULT 'awaiting_payment'
+                   CHECK (status IN ('awaiting_payment','active')),
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    credited_at    TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS stake_unbondings (
+    id             BIGSERIAL PRIMARY KEY,
+    node_id        UUID NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+    amount_sats    BIGINT NOT NULL CHECK (amount_sats >= 0),
+    release_at     TIMESTAMPTZ NOT NULL,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS slash_events (
+    node_id        UUID NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+    epoch          BIGINT NOT NULL,
+    slashed_sats   BIGINT NOT NULL,
+    evidence       TEXT NOT NULL,                  -- the two conflicting descriptors
+    at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (node_id, epoch)                   -- one slash per equivocation
+);
+
 CREATE INDEX IF NOT EXISTS idx_connections_active ON connections(ended_at) WHERE ended_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_conn_user          ON connections(user_id);
 CREATE INDEX IF NOT EXISTS idx_nodes_status       ON nodes(status);
@@ -147,3 +190,5 @@ CREATE INDEX IF NOT EXISTS idx_apikeys_user       ON api_keys(user_id);
 CREATE INDEX IF NOT EXISTS idx_audit_user         ON audit_log(user_id, at DESC);
 CREATE INDEX IF NOT EXISTS idx_devices_user       ON devices(user_id);
 CREATE INDEX IF NOT EXISTS idx_devices_revoked    ON devices(revoked_at) WHERE revoked_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_bonds_node         ON stake_bonds(node_id);
+CREATE INDEX IF NOT EXISTS idx_unbondings_node    ON stake_unbondings(node_id, release_at);

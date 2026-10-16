@@ -8,9 +8,12 @@ import (
 	"log"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"pqanon/control-plane/staking"
 )
 
 // PgStore is the Postgres-backed Store (schema in db/schema.sql).
@@ -152,10 +155,26 @@ func (s *PgStore) SetSettings(ctx context.Context, userID string, raw []byte) er
 	return err
 }
 
+// nodeColumns is the node projection shared by every node query.
+const nodeColumns = `id, name, address, public_key, ed_pub, COALESCE(mix_pubkey, ''::bytea), role,
+	capacity_mbps, region, COALESCE(owner_id::text, ''), status, stake_sats, jailed_at,
+	delay_mean_ms, created_at`
+
+func scanNode(row pgx.Row) (*Node, error) {
+	var n Node
+	if err := row.Scan(&n.ID, &n.Name, &n.Address, &n.PublicKey, &n.EdPub, &n.MixPub, &n.Role,
+		&n.CapacityMbps, &n.Region, &n.OwnerID, &n.Status, &n.StakeSats, &n.JailedAt,
+		&n.DelayMeanMs, &n.CreatedAt); err != nil {
+		return nil, err
+	}
+	n.PublicKeyHex = hex.EncodeToString(n.PublicKey)
+	n.EdPubHex = hex.EncodeToString(n.EdPub)
+	n.MixPubHex = hex.EncodeToString(n.MixPub)
+	return &n, nil
+}
+
 func (s *PgStore) ListNodes(ctx context.Context) ([]Node, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT id, name, address, public_key, status, stake_sats, delay_mean_ms, created_at
-		 FROM nodes ORDER BY name`)
+	rows, err := s.pool.Query(ctx, `SELECT `+nodeColumns+` FROM nodes ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -163,26 +182,49 @@ func (s *PgStore) ListNodes(ctx context.Context) ([]Node, error) {
 
 	var out []Node
 	for rows.Next() {
-		var n Node
-		if err := rows.Scan(&n.ID, &n.Name, &n.Address, &n.PublicKey,
-			&n.Status, &n.StakeSats, &n.DelayMeanMs, &n.CreatedAt); err != nil {
+		n, err := scanNode(rows)
+		if err != nil {
 			return nil, err
 		}
-		n.PublicKeyHex = hex.EncodeToString(n.PublicKey)
-		out = append(out, n)
+		out = append(out, *n)
 	}
 	return out, rows.Err()
 }
 
+// CreateNode inserts a node and reports its generated id (until this returned
+// it, POST /api/nodes answered with an empty id in Postgres mode).
 func (s *PgStore) CreateNode(ctx context.Context, n *Node) error {
 	if n.Status == "" {
 		n.Status = "offline"
 	}
-	_, err := s.pool.Exec(ctx,
-		`INSERT INTO nodes (name, address, public_key, ed_pub, status, stake_sats, delay_mean_ms)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		n.Name, n.Address, n.PublicKey, n.PublicKey, n.Status, n.StakeSats, maxInt(n.DelayMeanMs, 50))
-	return err
+	if n.Role == "" {
+		n.Role = "mix"
+	}
+	if n.CapacityMbps == 0 {
+		n.CapacityMbps = 100
+	}
+	var owner any
+	if n.OwnerID != "" {
+		owner = n.OwnerID
+	}
+	nonNil := func(b []byte) []byte {
+		if b == nil {
+			return []byte{}
+		}
+		return b
+	}
+	err := s.pool.QueryRow(ctx,
+		`INSERT INTO nodes (name, address, public_key, ed_pub, mix_pubkey, role, capacity_mbps,
+		                    region, owner_id, status, stake_sats, delay_mean_ms)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id, created_at`,
+		n.Name, n.Address, nonNil(n.PublicKey), nonNil(n.EdPub), n.MixPub, n.Role, n.CapacityMbps,
+		n.Region, owner, n.Status, n.StakeSats, maxInt(n.DelayMeanMs, 50)).Scan(&n.ID, &n.CreatedAt)
+	if err != nil {
+		return err
+	}
+	n.EdPubHex = hex.EncodeToString(n.EdPub)
+	n.MixPubHex = hex.EncodeToString(n.MixPub)
+	return nil
 }
 
 func (s *PgStore) DeleteNode(ctx context.Context, id string) error {
@@ -239,19 +281,23 @@ func (s *PgStore) EndConnection(ctx context.Context, id string) error {
 }
 
 func (s *PgStore) GetNode(ctx context.Context, id string) (*Node, error) {
-	var n Node
-	err := s.pool.QueryRow(ctx,
-		`SELECT id, name, address, public_key, status, stake_sats, delay_mean_ms, created_at
-		 FROM nodes WHERE id = $1`, id).
-		Scan(&n.ID, &n.Name, &n.Address, &n.PublicKey, &n.Status, &n.StakeSats, &n.DelayMeanMs, &n.CreatedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
+	n, err := scanNode(s.pool.QueryRow(ctx, `SELECT `+nodeColumns+` FROM nodes WHERE id = $1`, id))
+	if errors.Is(err, pgx.ErrNoRows) || isBadUUID(err) {
 		return nil, ErrNotFound
 	}
-	if err != nil {
-		return nil, err
-	}
-	n.PublicKeyHex = hex.EncodeToString(n.PublicKey)
-	return &n, nil
+	return n, err
+}
+
+// isBadUUID reports a malformed id: for a lookup that simply means "no such row".
+func isBadUUID(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "22P02"
+}
+
+// isFKViolation reports a foreign-key violation (the referenced row is missing).
+func isFKViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23503"
 }
 
 func (s *PgStore) GetConnection(ctx context.Context, id string) (*Connection, error) {
@@ -536,6 +582,273 @@ func (s *PgStore) queryDevices(ctx context.Context, sql string, args ...any) ([]
 		}
 		d.EdPubHex = hex.EncodeToString(d.EdPub)
 		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// ---- staking ---------------------------------------------------------------
+
+const bondColumns = `id, node_id, amount_sats, rail, address, meta, amount_label, uri, status, created_at, credited_at`
+
+func scanBond(row pgx.Row) (*StakeBond, error) {
+	var b StakeBond
+	err := row.Scan(&b.ID, &b.NodeID, &b.AmountSats, &b.Rail, &b.Quote.Address, &b.Quote.Meta,
+		&b.Quote.AmountLabel, &b.Quote.URI, &b.Status, &b.CreatedAt, &b.CreditedAt)
+	return &b, err
+}
+
+func (s *PgStore) CreateBond(ctx context.Context, b *StakeBond) error {
+	if b.ID == "" {
+		b.ID = uuid.NewString()
+	}
+	if b.Status == "" {
+		b.Status = "awaiting_payment"
+	}
+	err := s.pool.QueryRow(ctx,
+		`INSERT INTO stake_bonds (id, node_id, amount_sats, rail, address, meta, amount_label, uri, status)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING created_at`,
+		b.ID, b.NodeID, b.AmountSats, b.Rail, b.Quote.Address, b.Quote.Meta, b.Quote.AmountLabel,
+		b.Quote.URI, b.Status).Scan(&b.CreatedAt)
+	if isFKViolation(err) || isBadUUID(err) {
+		return ErrNotFound
+	}
+	return err
+}
+
+func (s *PgStore) GetBond(ctx context.Context, id string) (*StakeBond, error) {
+	b, err := scanBond(s.pool.QueryRow(ctx, `SELECT `+bondColumns+` FROM stake_bonds WHERE id = $1`, id))
+	if errors.Is(err, pgx.ErrNoRows) || isBadUUID(err) {
+		return nil, ErrNotFound
+	}
+	return b, err
+}
+
+func (s *PgStore) ListBonds(ctx context.Context, nodeID string) ([]StakeBond, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT `+bondColumns+` FROM stake_bonds WHERE node_id = $1 ORDER BY created_at`, nodeID)
+	if isBadUUID(err) {
+		return []StakeBond{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]StakeBond, 0)
+	for rows.Next() {
+		b, err := scanBond(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *b)
+	}
+	return out, rows.Err()
+}
+
+func (s *PgStore) ListAwaitingBonds(ctx context.Context) ([]StakeBond, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT `+bondColumns+` FROM stake_bonds
+		 WHERE status = 'awaiting_payment' AND created_at > $1 ORDER BY created_at LIMIT 10000`,
+		time.Now().Add(-BondWatchWindow))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]StakeBond, 0)
+	for rows.Next() {
+		b, err := scanBond(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *b)
+	}
+	return out, rows.Err()
+}
+
+// CreditBond flips the bond to active and adds it to the node's stake in one
+// transaction. The conditional UPDATE makes crediting exactly-once even under
+// concurrent status checks.
+func (s *PgStore) CreditBond(ctx context.Context, id string, now time.Time) (bool, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback(ctx)
+	var nodeID string
+	var amount int64
+	err = tx.QueryRow(ctx,
+		`UPDATE stake_bonds SET status = 'active', credited_at = $2
+		 WHERE id = $1 AND status = 'awaiting_payment' RETURNING node_id, amount_sats`, id, now).
+		Scan(&nodeID, &amount)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// Check on the transaction's own connection: taking a second pool
+		// connection while holding this one deadlocks once concurrent claims
+		// exhaust the pool.
+		var one int
+		if gerr := tx.QueryRow(ctx, `SELECT 1 FROM stake_bonds WHERE id = $1`, id).Scan(&one); gerr != nil {
+			if errors.Is(gerr, pgx.ErrNoRows) || isBadUUID(gerr) {
+				return false, ErrNotFound
+			}
+			return false, gerr
+		}
+		return false, nil // already credited
+	}
+	if err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE nodes SET stake_sats = stake_sats + $2 WHERE id = $1`, nodeID, amount); err != nil {
+		return false, err
+	}
+	return true, tx.Commit(ctx)
+}
+
+func (s *PgStore) Unbond(ctx context.Context, nodeID string, amount int64, releaseAt time.Time) error {
+	if amount <= 0 {
+		return ErrInsufficientStake
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	tag, err := tx.Exec(ctx,
+		`UPDATE nodes SET stake_sats = stake_sats - $2 WHERE id = $1 AND stake_sats >= $2`, nodeID, amount)
+	if isBadUUID(err) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		// Same connection as the transaction (see CreditBond).
+		var one int
+		if gerr := tx.QueryRow(ctx, `SELECT 1 FROM nodes WHERE id = $1`, nodeID).Scan(&one); gerr != nil {
+			if errors.Is(gerr, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			return gerr
+		}
+		return ErrInsufficientStake
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO stake_unbondings (node_id, amount_sats, release_at) VALUES ($1, $2, $3)`,
+		nodeID, amount, releaseAt); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (s *PgStore) ListUnbondings(ctx context.Context, nodeID string) ([]Unbonding, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, node_id, amount_sats, release_at, created_at FROM stake_unbondings
+		 WHERE node_id = $1 ORDER BY id`, nodeID)
+	if isBadUUID(err) {
+		return []Unbonding{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]Unbonding, 0)
+	for rows.Next() {
+		var u Unbonding
+		if err := rows.Scan(&u.ID, &u.NodeID, &u.AmountSats, &u.ReleaseAt, &u.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
+// Slash records the (node, epoch) event first — its primary key makes a repeat
+// a no-op — then cuts the bonded stake and every unreleased unbonding and
+// jails the node, all in one transaction.
+func (s *PgStore) Slash(ctx context.Context, nodeID string, epoch uint64, percent int, evidence string, now time.Time) (int64, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx)
+	tag, err := tx.Exec(ctx,
+		`INSERT INTO slash_events (node_id, epoch, slashed_sats, evidence, at) VALUES ($1, $2, 0, $3, $4)
+		 ON CONFLICT (node_id, epoch) DO NOTHING`, nodeID, int64(epoch), evidence, now)
+	if isFKViolation(err) || isBadUUID(err) {
+		return 0, ErrNotFound
+	}
+	if err != nil {
+		return 0, err
+	}
+	if tag.RowsAffected() == 0 {
+		return 0, ErrAlreadySlashed
+	}
+	var bonded int64
+	if err := tx.QueryRow(ctx, `SELECT stake_sats FROM nodes WHERE id = $1 FOR UPDATE`, nodeID).Scan(&bonded); err != nil {
+		return 0, err
+	}
+	total := staking.SlashCut(bonded, percent)
+	if _, err := tx.Exec(ctx,
+		`UPDATE nodes SET stake_sats = stake_sats - $2, jailed_at = COALESCE(jailed_at, $3) WHERE id = $1`,
+		nodeID, total, now); err != nil {
+		return 0, err
+	}
+	// Collect first: pgx cannot run statements while a result set is open.
+	type entry struct {
+		id     int64
+		amount int64
+	}
+	var pending []entry
+	rows, err := tx.Query(ctx,
+		`SELECT id, amount_sats FROM stake_unbondings WHERE node_id = $1 AND release_at > $2 FOR UPDATE`,
+		nodeID, now)
+	if err != nil {
+		return 0, err
+	}
+	for rows.Next() {
+		var e entry
+		if err := rows.Scan(&e.id, &e.amount); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		pending = append(pending, e)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	for _, e := range pending {
+		c := staking.SlashCut(e.amount, percent)
+		if _, err := tx.Exec(ctx, `UPDATE stake_unbondings SET amount_sats = amount_sats - $2 WHERE id = $1`, e.id, c); err != nil {
+			return 0, err
+		}
+		total += c
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE slash_events SET slashed_sats = $3 WHERE node_id = $1 AND epoch = $2`,
+		nodeID, int64(epoch), total); err != nil {
+		return 0, err
+	}
+	return total, tx.Commit(ctx)
+}
+
+func (s *PgStore) ListSlashes(ctx context.Context, nodeID string) ([]SlashEvent, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT node_id, epoch, slashed_sats, evidence, at FROM slash_events
+		 WHERE node_id = $1 ORDER BY epoch`, nodeID)
+	if isBadUUID(err) {
+		return []SlashEvent{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]SlashEvent, 0)
+	for rows.Next() {
+		var e SlashEvent
+		var ep int64
+		if err := rows.Scan(&e.NodeID, &ep, &e.SlashedSats, &e.Evidence, &e.At); err != nil {
+			return nil, err
+		}
+		e.Epoch = uint64(ep)
+		out = append(out, e)
 	}
 	return out, rows.Err()
 }

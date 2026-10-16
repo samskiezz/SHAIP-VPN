@@ -51,6 +51,11 @@ var (
 		Help: "Device enrollment events, by result (issued/claimed/rejected).",
 	}, []string{"result"})
 
+	mStake = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "pqanon", Subsystem: "cp", Name: "stake_events_total",
+		Help: "Staking events, by kind (bond_opened/bond_credited/slashed/slash_rejected).",
+	}, []string{"kind"})
+
 	startTime = time.Now()
 	_         = promauto.NewGaugeFunc(prometheus.GaugeOpts{
 		Namespace: "pqanon", Subsystem: "cp", Name: "uptime_seconds",
