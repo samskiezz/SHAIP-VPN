@@ -15,10 +15,12 @@
 //! and necessarily uses libc.
 
 pub mod bloom;
+pub mod crl;
 pub mod dataplane;
 pub mod decoy;
 pub mod directory;
 pub mod dnssec;
+pub mod enroll_client;
 pub mod enrollment;
 pub mod handshake;
 pub mod i18n;

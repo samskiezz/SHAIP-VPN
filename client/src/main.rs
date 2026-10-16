@@ -112,6 +112,44 @@ enum Cmd {
         #[arg(long)]
         store: Option<String>,
     },
+    /// Enroll this device from a pqanon://enroll link: verify it against the
+    /// pinned enrollment-authority key, prove possession of this device's
+    /// identity key, and store the device certificate the control plane issues.
+    Enroll {
+        /// The pqanon://enroll?t=… link (or the bare PQE1 token).
+        link: String,
+        /// Control-plane base URL.
+        #[arg(short, long)]
+        server: String,
+        /// Pinned enrollment-authority public key (hex), shipped with the client.
+        #[arg(long)]
+        authority_key: String,
+        /// Pinned device-CA public key (hex), shipped with the client.
+        #[arg(long)]
+        ca_key: String,
+        /// This device's identity file (created 0600 if absent).
+        #[arg(long)]
+        identity: String,
+        /// Label for this device in the account's device list.
+        #[arg(long, default_value = "device")]
+        name: String,
+        /// Where to store the certificate (default: <identity>.cert).
+        #[arg(long)]
+        cert_out: Option<String>,
+    },
+    /// Fetch the control plane's signed CRL, verify it against a pinned key,
+    /// and list what it revokes.
+    Crl {
+        /// The CRL URL (…/api/crl).
+        #[arg(long)]
+        url: String,
+        /// Pinned CRL public key (hex).
+        #[arg(long)]
+        pubkey: String,
+        /// Reject a list older than this many seconds.
+        #[arg(long, default_value_t = 600)]
+        max_age: i64,
+    },
 }
 
 fn wallet_path(store: Option<String>) -> std::path::PathBuf {
@@ -173,7 +211,65 @@ fn cli_main() -> Result<()> {
             plan,
             store,
         } => pqanon::pay_client::redeem(&server, &plan, &wallet_path(store)),
+        Cmd::Enroll {
+            link,
+            server,
+            authority_key,
+            ca_key,
+            identity,
+            name,
+            cert_out,
+        } => enroll_cmd(&link, &server, &authority_key, &ca_key, &identity, &name, cert_out.as_deref()),
+        Cmd::Crl { url, pubkey, max_age } => crl_cmd(&url, &pubkey, max_age),
     }
+}
+
+fn enroll_cmd(
+    link: &str,
+    server: &str,
+    authority_key: &str,
+    ca_key: &str,
+    identity: &str,
+    name: &str,
+    cert_out: Option<&str>,
+) -> Result<()> {
+    use pqanon::enroll_client::{enroll, parse_pin};
+    let authority = parse_pin(authority_key, "--authority-key")?;
+    let ca = parse_pin(ca_key, "--ca-key")?;
+    let done = enroll(
+        link,
+        server,
+        &authority,
+        &ca,
+        std::path::Path::new(identity),
+        name,
+        cert_out.map(std::path::Path::new),
+    )?;
+    println!(
+        "Enrolled device {} for account {}",
+        hex::encode(done.cert.device_id),
+        done.cert.account
+    );
+    println!("certificate: {} (valid until unix {})", done.cert_path.display(), done.cert.expires_at);
+    Ok(())
+}
+
+fn crl_cmd(url: &str, pubkey: &str, max_age: i64) -> Result<()> {
+    let pinned = pqanon::enroll_client::parse_pin(pubkey, "--pubkey")?;
+    let crl = pqanon::crl::fetch(url, &pinned, max_age)?;
+    println!("CRL verified (issued at unix {})", crl.issued_at);
+    let mut devices: Vec<String> = crl.revoked_devices.iter().map(hex::encode).collect();
+    devices.sort();
+    for d in &devices {
+        println!("revoked device {d}");
+    }
+    let mut ids: Vec<&String> = crl.revoked_identities.iter().collect();
+    ids.sort();
+    for i in ids {
+        println!("revoked identity {i}");
+    }
+    println!("{} revoked device(s), {} revoked identit(ies)", devices.len(), crl.revoked_identities.len());
+    Ok(())
 }
 
 /// Resolve `name` through the DNSSEC-validating resolver over UDP.
@@ -425,6 +521,17 @@ fn run(config: &str, route: &str) -> Result<()> {
         }
     };
 
+    // Device certificate from `pqanon enroll`, for device-bound servers.
+    let device_cert = match gstr("client", "device_cert") {
+        Some(path) => Some(
+            std::fs::read_to_string(&path)
+                .map_err(|e| anyhow::anyhow!("reading [client].device_cert {path}: {e}"))?
+                .trim()
+                .to_string(),
+        ),
+        None => None,
+    };
+
     let tun_name = gstr("client", "tun_device").unwrap_or_else(|| "pqanon-c0".into());
     let (tun_ip, tun_prefix) =
         parse_cidr(&gstr("client", "tun_address").unwrap_or_else(|| "10.77.0.2/24".into()))?;
@@ -443,6 +550,9 @@ fn run(config: &str, route: &str) -> Result<()> {
         // --- PQANON-HS/1 handshake over UDP (plain-framed, pre-key) ---
         let conn: u64 = rand::random();
         let mut hs = ClientHandshake::new(id, server_pub, conn);
+        if let Some(cert) = device_cert {
+            hs.set_device_cert(cert);
+        }
         sock.send(&hs.client_hello([0u8; 32])?.to_plain()).await?;
 
         let mut buf = vec![0u8; 65536];

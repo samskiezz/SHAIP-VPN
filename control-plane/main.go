@@ -44,7 +44,23 @@ func main() {
 	if err != nil {
 		log.Fatalf("crl signer: %v", err)
 	}
-	log.Printf("signing keys: token=%s crl=%s", tokenSrc, crlSrc)
+	enrollKey, enrollSrc, err := resolveSigner("enroll-authority", "ENROLL_AUTHORITY_SIGNER", "")
+	if err != nil {
+		log.Fatalf("enrollment-authority signer: %v", err)
+	}
+	enrollPub, err := keystore.Ed25519Public(enrollKey)
+	if err != nil {
+		log.Fatalf("enrollment-authority signer: %v", err)
+	}
+	caKey, caSrc, err := resolveSigner("device-ca", "DEVICE_CA_SIGNER", "")
+	if err != nil {
+		log.Fatalf("device-CA signer: %v", err)
+	}
+	caPub, err := keystore.Ed25519Public(caKey)
+	if err != nil {
+		log.Fatalf("device-CA signer: %v", err)
+	}
+	log.Printf("signing keys: token=%s crl=%s enroll-authority=%s device-ca=%s", tokenSrc, crlSrc, enrollSrc, caSrc)
 
 	// E-cash denomination keys are RSA blind-signing keys (RFC 9474), which the
 	// Ed25519 keystore does not hold; they live under PAY_KEY_DIR, defaulting to
@@ -61,6 +77,7 @@ func main() {
 
 	srv := &Server{
 		store: store, tokens: tokens, crlPub: crlPub, crlSigner: crlKey,
+		enrollSigner: enrollKey, enrollPub: enrollPub, deviceCASigner: caKey, deviceCAPub: caPub,
 		mint: mint, rails: rails, defaultRail: defaultRail,
 		devSettle: os.Getenv("PAY_DEV_SETTLE") == "1",
 	}
@@ -108,6 +125,10 @@ func routes(srv *Server, label string) http.Handler {
 		r.Post("/pay/redeem", srv.handleRedeem)
 		r.Post("/pay/dev/settle", srv.handleDevSettle) // gated by PAY_DEV_SETTLE
 
+		// One-click enrollment: the token authorizes the claim, so no session.
+		r.Post("/enroll/claim", srv.handleEnrollClaim)
+		r.Get("/enroll/keys", srv.handleEnrollKeys)
+
 		r.Group(func(r chi.Router) {
 			r.Use(srv.authMiddleware)
 			r.Get("/nodes", srv.handleListNodes)
@@ -131,6 +152,9 @@ func routes(srv *Server, label string) http.Handler {
 			r.Post("/apikeys", srv.handleCreateAPIKey)
 			r.Delete("/apikeys/{id}", srv.handleDeleteAPIKey)
 			r.Get("/audit", srv.handleListAudit)
+			r.Post("/enroll/issue", srv.handleEnrollIssue)
+			r.Get("/devices", srv.handleListDevices)
+			r.Delete("/devices/{id}", srv.handleRevokeDevice)
 		})
 	})
 	return r

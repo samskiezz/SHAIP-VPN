@@ -21,7 +21,9 @@ ChaCha20-Poly1305, HKDF/HMAC-SHA256, Argon2id).
 | `pqanon-mixd` mix node (peels + forwards onion cells) | Rust | **Working** | mix round-trip tests |
 | Control plane `PQANON-CP/1` (auth, nodes, connections, CRL) | Go | **Working** | `go test`, live curl |
 | Web UI (dashboard, connections, routing, login) | Next.js/TS | **Working** | `next build`, `tsc` |
-| Postgres schema + in-memory fallback | SQL/Go | **Working** | boots with or without a DB |
+| Postgres schema + in-memory fallback | SQL/Go | **Working** | one store contract run against both, incl. real PostgreSQL |
+| Signing-key custody: key files + **PKCS#11 HSM**; persistent daemon identities | Go + Rust | **Working** | real SoftHSM2 token + restart checks ([docs/keys.md](docs/keys.md)) |
+| One-click device enrollment (`/api/enroll`, `pqanon enroll`) + device-cert tunnel admission + CRL revocation | Go + Rust | **Working** | cross-language enroll E2E + handshake tests ([docs/enrollment.md](docs/enrollment.md)) |
 | DNSSEC resolver: RSA/ECDSA/Ed25519 RRSIG + chain-of-trust + real IANA root anchors | Rust | **Working** | 19 unit tests + live anchor check |
 | Untraceable payments: Monero + Bitcoin/Lightning + Chaumian e-cash (`buy`/`collect`/`redeem`) | Rust + Go | **Working** | cross-language buy→redeem E2E |
 | Live TLS 1.3 decoy (`pqanon-decoy`, `pqanond --decoy`) | Rust | **Working** | openssl/curl + 2 integration tests |
@@ -98,8 +100,11 @@ cd web-ui && npm install && npm run dev   # http://localhost:3000
   session secret `ss_mix` is derived from **both** ML-KEM-768 and X25519, so
   breaking either alone is insufficient. Both sides sign the transcript with
   long-term ML-DSA-65 **and** Ed25519 keys. The client's long-term verifying
-  keys travel inside the obfuscated CLIENT_FINISH, so the server authenticates
-  against a pinned `identity_id` set with no identifier ever in cleartext.
+  keys (and its device certificate, for a device-bound server) travel inside
+  CLIENT_FINISH, AEAD-sealed under a key derived from `ss_mix`, so the server
+  authenticates against a pinned `identity_id` set or an enrolled device
+  certificate with no identifier ever in cleartext (regression-tested on the
+  wire bytes).
 - **PQANON/1 envelope** — 22-byte header bound as AEAD associated data; any
   tamper with `epoch/conn_id/seq/type/length` breaks authentication. Nonces are
   deterministic (`epoch||seq`) and never repeat within an epoch; directional
@@ -147,6 +152,8 @@ done and tested:
 - Handshake messages are currently plain-framed (not morphed): the morph key
   derives from `ss_mix`, which doesn't exist until the handshake completes. A
   bootstrap morph key (from the pinned server key) is the intended fix.
+  CLIENT_FINISH's *contents* are AEAD-sealed, but its frame, like the hellos',
+  is still recognizable to DPI.
 - Large (~7 KB) handshake messages need UDP fragmentation for real paths.
 - Not yet implemented: the stateless cookie/anti-probing path (§10), the mix
   delay queue + Bloom replay filter (§10.5), the cover-traffic rate controller

@@ -12,14 +12,21 @@
 //! info = "PQANON-HS/1")`. Breaking either KEM alone is insufficient.
 //!
 //! Both sides mutually authenticate by signing the transcript with long-term
-//! ML-DSA-65 **and** Ed25519 keys. The client's long-term verifying keys travel
-//! inside the (obfuscated) CLIENT_FINISH so the server can both check the
-//! `identity_id` against its authorized set and verify the signatures — no
-//! identifier ever appears in cleartext on the wire.
+//! ML-DSA-65 **and** Ed25519 keys. The client's long-term verifying keys (and,
+//! for a device-bound server, its device certificate) travel inside
+//! CLIENT_FINISH, which is AEAD-sealed under a key derived from `ss_mix`. The
+//! server can check the `identity_id` against its authorized set (or verify the
+//! device certificate) and the signatures, while no identifier ever appears in
+//! cleartext on the wire.
 
+use crate::enrollment::DeviceCert;
 use crate::kdf;
 use crate::wire::{Envelope, MsgType};
 use anyhow::{anyhow, bail, Result};
+use chacha20poly1305::{
+    aead::{Aead, Payload},
+    ChaCha20Poly1305, Key, Nonce,
+};
 use ed25519_dalek::{
     Signer as EdSigner, SigningKey as EdSigningKey, Verifier as EdVerifier,
     VerifyingKey as EdVerifyingKey,
@@ -119,6 +126,17 @@ impl Identity {
         let pq_sig: DsaSignature<MlDsa65> = self.pq_sk.sign(transcript);
         let ed_sig = self.ed.sign(transcript);
         (pq_sig.encode().to_vec(), ed_sig.to_bytes())
+    }
+
+    /// Proof of possession for an enrollment claim: an Ed25519 signature over
+    /// `PQANON-ENROLL-CLAIM-V1:<token>`, byte-for-byte what the control plane
+    /// verifies. The ASCII prefix keeps it from being valid anywhere else this
+    /// key signs — a handshake transcript starts with a length-prefixed ML-KEM
+    /// key, never with this text.
+    pub fn sign_enrollment_claim(&self, token: &str) -> [u8; 64] {
+        self.ed
+            .sign(format!("PQANON-ENROLL-CLAIM-V1:{token}").as_bytes())
+            .to_bytes()
     }
 
     /// Serialize the full secret identity for storage:
@@ -249,6 +267,8 @@ pub struct Established {
     pub k_s2c: [u8; 32],
     /// The peer's `identity_id` (server learns the client's; client knows the server's).
     pub peer_id: [u8; 16],
+    /// On a device-bound server: the client's verified device certificate.
+    pub device: Option<DeviceCert>,
 }
 
 fn finish_from_ss(ss_mix: [u8; 32], peer_id: [u8; 16]) -> Established {
@@ -259,7 +279,83 @@ fn finish_from_ss(ss_mix: [u8; 32], peer_id: [u8; 16]) -> Established {
         k_c2s,
         k_s2c,
         peer_id,
+        device: None,
     }
+}
+
+// ---------------------------------------------------------------------------
+// Sealed CLIENT_FINISH
+// ---------------------------------------------------------------------------
+//
+// CLIENT_FINISH carries the client's long-term public keys and, on a device-
+// bound server, its device certificate — all of which identify the user. It is
+// therefore AEAD-sealed under a key derived from `ss_mix`, which a passive
+// observer never learns. The key is unique to this handshake and seals exactly
+// one message, so a fixed nonce is safe.
+
+fn finish_cipher(ss_mix: &[u8; 32]) -> ChaCha20Poly1305 {
+    // Scoped: at module level KeyInit would make HMAC's `new_from_slice`
+    // ambiguous (HMAC implements both KeyInit and Mac).
+    use chacha20poly1305::KeyInit;
+    let key = kdf::hkdf::<32>(ss_mix, None, b"PQANON-HS/1 client-finish");
+    ChaCha20Poly1305::new(Key::from_slice(&key))
+}
+
+fn finish_aad(hs_conn_id: u64) -> Vec<u8> {
+    let mut aad = b"PQANON-HS/1 CLIENT_FINISH".to_vec();
+    aad.extend_from_slice(&hs_conn_id.to_be_bytes());
+    aad
+}
+
+fn seal_finish(ss_mix: &[u8; 32], hs_conn_id: u64, inner: &[u8]) -> Result<Vec<u8>> {
+    let aad = finish_aad(hs_conn_id);
+    finish_cipher(ss_mix)
+        .encrypt(Nonce::from_slice(&[0u8; 12]), Payload { msg: inner, aad: &aad })
+        .map_err(|_| anyhow!("CLIENT_FINISH seal failed"))
+}
+
+fn open_finish(ss_mix: &[u8; 32], hs_conn_id: u64, sealed: &[u8]) -> Result<Vec<u8>> {
+    let aad = finish_aad(hs_conn_id);
+    finish_cipher(ss_mix)
+        .decrypt(Nonce::from_slice(&[0u8; 12]), Payload { msg: sealed, aad: &aad })
+        .map_err(|_| anyhow!("CLIENT_FINISH does not open (tampered, or a different ss_mix)"))
+}
+
+// ---------------------------------------------------------------------------
+// Device-certificate admission (one-click enrollment)
+// ---------------------------------------------------------------------------
+
+/// Reports whether a device id is revoked (fed from the signed CRL).
+pub type RevocationCheck = std::sync::Arc<dyn Fn(&[u8; 16]) -> bool + Send + Sync>;
+
+/// Admission by device certificate. A device-bound server admits a client only
+/// if it presents a certificate, signed by the pinned device CA, that binds the
+/// same Ed25519 key that signs the handshake transcript — and the device is not
+/// revoked. A replayed certificate is useless without that key.
+#[derive(Clone)]
+pub struct DevicePolicy {
+    /// The pinned device-CA key (the control plane's `/api/enroll/keys`).
+    pub ca: EdVerifyingKey,
+    /// True for a revoked device id.
+    pub is_revoked: RevocationCheck,
+}
+
+fn admit_device(policy: &DevicePolicy, cert: Option<&[u8]>, client: &PeerPublic) -> Result<DeviceCert> {
+    let cert = cert.ok_or_else(|| anyhow!("client presented no device certificate"))?;
+    let cert = std::str::from_utf8(cert).map_err(|_| anyhow!("device certificate is not text"))?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let dc = crate::enrollment::verify_device_cert(&policy.ca, cert, now)
+        .map_err(|e| anyhow!("device certificate rejected: {e}"))?;
+    if dc.device_pub != client.ed_bytes() {
+        bail!("device certificate is bound to a different key");
+    }
+    if (policy.is_revoked)(&dc.device_id) {
+        bail!("device has been revoked");
+    }
+    Ok(dc)
 }
 
 fn now_ms() -> u64 {
@@ -283,6 +379,7 @@ pub struct ClientHandshake {
     eph_x: Option<EphemeralSecret>,
     transcript: Vec<u8>,
     ss_mix: Option<[u8; 32]>,
+    device_cert: Option<String>,
 }
 
 impl ClientHandshake {
@@ -299,7 +396,15 @@ impl ClientHandshake {
             eph_x: None,
             transcript: Vec::new(),
             ss_mix: None,
+            device_cert: None,
         }
+    }
+
+    /// Present this device certificate to a device-bound server. It must bind
+    /// this identity's Ed25519 key (the server checks); it travels inside the
+    /// sealed CLIENT_FINISH, never in cleartext.
+    pub fn set_device_cert(&mut self, cert: impl Into<String>) {
+        self.device_cert = Some(cert.into());
     }
 
     /// Message 1 — CLIENT_HELLO (§6.2).
@@ -395,12 +500,16 @@ impl ClientHandshake {
         let mac_bytes = mac.finalize().into_bytes();
 
         let pub_ = self.id.public();
-        let mut payload = Vec::new();
-        put_field(&mut payload, &pub_.pq_bytes());
-        put_field(&mut payload, &pub_.ed_bytes());
-        put_field(&mut payload, &pq_sig);
-        put_field(&mut payload, &ed_sig);
-        put_field(&mut payload, &mac_bytes);
+        let mut inner = Vec::new();
+        put_field(&mut inner, &pub_.pq_bytes());
+        put_field(&mut inner, &pub_.ed_bytes());
+        put_field(&mut inner, &pq_sig);
+        put_field(&mut inner, &ed_sig);
+        put_field(&mut inner, &mac_bytes);
+        if let Some(cert) = &self.device_cert {
+            put_field(&mut inner, cert.as_bytes());
+        }
+        let payload = seal_finish(&ss_mix, self.hs_conn_id, &inner)?;
 
         let env = Envelope {
             msg_type: MsgType::ClientFinish,
@@ -432,6 +541,8 @@ pub struct ServerHandshake {
     client_nonce: [u8; 32],
     transcript: Vec<u8>,
     ss_mix: Option<[u8; 32]>,
+    /// When set, admission is by device certificate instead of `authorized`.
+    device_policy: Option<DevicePolicy>,
 }
 
 impl ServerHandshake {
@@ -452,6 +563,7 @@ impl ServerHandshake {
             client_nonce: [0u8; 32],
             transcript: Vec::new(),
             ss_mix: None,
+            device_policy: None,
         }
     }
 
@@ -460,6 +572,14 @@ impl ServerHandshake {
     pub fn new_open(id: Identity, hs_conn_id: u64) -> Self {
         let mut s = Self::new(id, Vec::new(), hs_conn_id);
         s.allow_any = true;
+        s
+    }
+
+    /// Admit clients by enrolled device certificate (see [`DevicePolicy`])
+    /// rather than by a static allow-list of identity ids.
+    pub fn new_device_bound(id: Identity, policy: DevicePolicy, hs_conn_id: u64) -> Self {
+        let mut s = Self::new(id, Vec::new(), hs_conn_id);
+        s.device_policy = Some(policy);
         s
     }
 
@@ -562,19 +682,31 @@ impl ServerHandshake {
             bail!("expected CLIENT_FINISH");
         }
         let ss_mix = self.ss_mix.ok_or_else(|| anyhow!("no ss_mix"))?;
-        let p = &env.payload;
-        let mut r = FieldReader::new(p);
+        let inner = open_finish(&ss_mix, self.hs_conn_id, &env.payload)?;
+        let mut r = FieldReader::new(&inner);
         let client_pq_vk = r.take()?;
         let client_ed_vk = r.take()?;
         let pq_sig = r.take()?;
         let ed_sig = r.take()?;
         let mac = r.take()?;
+        let cert = if r.consumed() < inner.len() { Some(r.take()?) } else { None };
+        if r.consumed() != inner.len() {
+            bail!("trailing bytes in CLIENT_FINISH");
+        }
 
         let client = PeerPublic::from_bytes(client_pq_vk, client_ed_vk)?;
         let client_id = client.identity_id();
-        if !self.allow_any && !self.authorized.contains(&client_id) {
-            bail!("client identity not authorized");
-        }
+        let device = match &self.device_policy {
+            // The transcript signature verified below proves the client holds
+            // the key the certificate binds.
+            Some(policy) => Some(admit_device(policy, cert, &client)?),
+            None => {
+                if !self.allow_any && !self.authorized.contains(&client_id) {
+                    bail!("client identity not authorized");
+                }
+                None
+            }
+        };
 
         // Client signed over the transcript as it stood at CLIENT_FINISH time,
         // i.e. (client_hello || server_hello). The server's transcript matches.
@@ -587,7 +719,9 @@ impl ServerHandshake {
             .verify_slice(mac)
             .map_err(|_| anyhow!("handshake MAC mismatch"))?;
 
-        Ok(finish_from_ss(ss_mix, client_id))
+        let mut est = finish_from_ss(ss_mix, client_id);
+        est.device = device;
+        Ok(est)
     }
 }
 
@@ -711,6 +845,134 @@ mod tests {
         spliced[n - vk_len..].copy_from_slice(&b[n - vk_len..]);
         let err = Identity::from_secret_bytes(&spliced).err().unwrap().to_string();
         assert!(err.contains("do not match"), "{err}");
+    }
+
+    /// Run a handshake up to the server's CLIENT_FINISH verdict, returning the
+    /// CLIENT_FINISH bytes exactly as framed on the wire.
+    fn finish_over_wire(
+        client: &mut ClientHandshake,
+        server: &mut ServerHandshake,
+    ) -> (Vec<u8>, Result<Established>) {
+        let hello = client.client_hello([0u8; 32]).unwrap();
+        server.recv_client_hello(&hello, false).unwrap();
+        let shello = server.server_hello().unwrap();
+        client.recv_server_hello(&shello).unwrap();
+        let (fin, _) = client.client_finish().unwrap();
+        let wire = fin.to_plain();
+        let fin = Envelope::from_plain(&wire).unwrap();
+        (wire.clone(), server.recv_client_finish(&fin))
+    }
+
+    fn unix_now() -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
+    }
+
+    fn policy(ca: &EdSigningKey, revoked: Vec<[u8; 16]>) -> DevicePolicy {
+        DevicePolicy {
+            ca: ca.verifying_key(),
+            is_revoked: std::sync::Arc::new(move |id| revoked.contains(id)),
+        }
+    }
+
+    fn cert_for(ca: &EdSigningKey, id: &Identity, device_id: [u8; 16], expires_in: i64) -> String {
+        let now = unix_now();
+        crate::enrollment::test_issuer::device_cert(
+            ca,
+            device_id,
+            "acct-test",
+            id.public().ed_bytes(),
+            now - 60,
+            now + expires_in,
+        )
+    }
+
+    #[test]
+    fn client_finish_hides_identity_and_certificate_on_the_wire() {
+        let server_id = Identity::generate();
+        let client_id = Identity::generate();
+        let ca = EdSigningKey::generate(&mut OsRng);
+        let cert = cert_for(&ca, &client_id, [3; 16], 3600);
+        let ed = client_id.public().ed_bytes();
+        let pq = client_id.public().pq_bytes();
+
+        let mut c = ClientHandshake::new(client_id, server_id.public(), 5);
+        c.set_device_cert(cert.clone());
+        let mut s = ServerHandshake::new_device_bound(server_id, policy(&ca, vec![]), 5);
+        let (wire, res) = finish_over_wire(&mut c, &mut s);
+        res.expect("enrolled device admitted");
+
+        let contains = |needle: &[u8]| wire.windows(needle.len()).any(|w| w == needle);
+        assert!(!contains(&ed), "Ed25519 identity key leaked onto the wire");
+        assert!(!contains(&pq[..64]), "ML-DSA identity key leaked onto the wire");
+        assert!(!contains(cert.as_bytes()), "device certificate leaked onto the wire");
+        assert!(!contains(b"acct-test"), "account id leaked onto the wire");
+    }
+
+    #[test]
+    fn tampered_client_finish_is_rejected() {
+        let server_id = Identity::generate();
+        let client_id = Identity::generate();
+        let authorized = vec![client_id.identity_id()];
+        let mut c = ClientHandshake::new(client_id, server_id.public(), 6);
+        let mut s = ServerHandshake::new(server_id, authorized, 6);
+        let hello = c.client_hello([0u8; 32]).unwrap();
+        s.recv_client_hello(&hello, false).unwrap();
+        let shello = s.server_hello().unwrap();
+        c.recv_server_hello(&shello).unwrap();
+        let (mut fin, _) = c.client_finish().unwrap();
+        let last = fin.payload.len() - 1;
+        fin.payload[last] ^= 0x01;
+        let err = s.recv_client_finish(&fin).err().unwrap().to_string();
+        assert!(err.contains("does not open"), "{err}");
+    }
+
+    #[test]
+    fn device_bound_server_admits_an_enrolled_device() {
+        let server_id = Identity::generate();
+        let client_id = Identity::generate();
+        let ca = EdSigningKey::generate(&mut OsRng);
+        let mut c = ClientHandshake::new(client_id.clone(), server_id.public(), 7);
+        c.set_device_cert(cert_for(&ca, &client_id, [0x42; 16], 3600));
+        let mut s = ServerHandshake::new_device_bound(server_id, policy(&ca, vec![]), 7);
+        let (_, res) = finish_over_wire(&mut c, &mut s);
+        let est = res.expect("admitted");
+        let dev = est.device.expect("device recorded");
+        assert_eq!(dev.device_id, [0x42; 16]);
+        assert_eq!(dev.account, "acct-test");
+        assert_eq!(est.peer_id, client_id.identity_id());
+    }
+
+    #[test]
+    fn device_bound_server_refuses_unenrolled_mismatched_foreign_revoked_or_expired() {
+        let ca = EdSigningKey::generate(&mut OsRng);
+        let other_ca = EdSigningKey::generate(&mut OsRng);
+        let refuse = |cert: Option<String>, revoked: Vec<[u8; 16]>, client_id: Identity, want: &str| {
+            let server_id = Identity::generate();
+            let mut c = ClientHandshake::new(client_id, server_id.public(), 8);
+            if let Some(cert) = cert {
+                c.set_device_cert(cert);
+            }
+            let mut s = ServerHandshake::new_device_bound(server_id, policy(&ca, revoked), 8);
+            let (_, res) = finish_over_wire(&mut c, &mut s);
+            let err = res.expect_err("must be refused").to_string();
+            assert!(err.contains(want), "want {want:?}, got {err:?}");
+        };
+
+        let id = Identity::generate();
+        // No certificate at all.
+        refuse(None, vec![], id.clone(), "no device certificate");
+        // A valid certificate, but for another device's key.
+        let other = Identity::generate();
+        refuse(Some(cert_for(&ca, &other, [1; 16], 3600)), vec![], id.clone(), "different key");
+        // Signed by a CA this server does not pin.
+        refuse(Some(cert_for(&other_ca, &id, [1; 16], 3600)), vec![], id.clone(), "rejected");
+        // Revoked.
+        refuse(Some(cert_for(&ca, &id, [9; 16], 3600)), vec![[9; 16]], id.clone(), "revoked");
+        // Expired.
+        refuse(Some(cert_for(&ca, &id, [1; 16], -30)), vec![], id, "rejected");
     }
 
     #[test]

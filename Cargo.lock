@@ -1347,6 +1347,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "ed25519-dalek",
  "pqanon-client",
  "rand 0.8.8",
  "tokio",

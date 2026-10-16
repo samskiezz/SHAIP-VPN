@@ -261,9 +261,65 @@ pub fn parse_enroll_url(url: &str) -> Result<String, EnrollError> {
     Err(EnrollError::BadFormat("no t= parameter".into()))
 }
 
+/// A test-only issuer, so other modules' tests (the handshake's device-cert
+/// admission) can mint certificates relative to "now" instead of embedding
+/// dates that eventually expire. `test_issuer_reproduces_go_vector` pins it
+/// byte-for-byte to the Go issuer, so it cannot drift from the real format.
+#[cfg(test)]
+pub(crate) mod test_issuer {
+    use super::*;
+    use ed25519_dalek::{Signer, SigningKey};
+
+    fn put_lp(out: &mut Vec<u8>, b: &[u8]) {
+        out.extend_from_slice(&(b.len() as u16).to_be_bytes());
+        out.extend_from_slice(b);
+    }
+
+    fn wrap(label: &str, body: &[u8], ca: &SigningKey) -> String {
+        let sig = ca.sign(body);
+        format!("{label}.{}.{}", B64URL.encode(body), B64URL.encode(sig.to_bytes()))
+    }
+
+    pub(crate) fn device_cert(
+        ca: &SigningKey,
+        device_id: [u8; 16],
+        account: &str,
+        device_pub: [u8; 32],
+        issued_at: i64,
+        expires_at: i64,
+    ) -> String {
+        let mut b = Vec::new();
+        put_lp(&mut b, MAGIC_CERT);
+        b.push(VERSION);
+        b.extend_from_slice(&device_id);
+        put_lp(&mut b, account.as_bytes());
+        b.extend_from_slice(&device_pub);
+        b.extend_from_slice(&(issued_at as u64).to_be_bytes());
+        b.extend_from_slice(&(expires_at as u64).to_be_bytes());
+        wrap(LABEL_CERT, &b, ca)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_issuer_reproduces_go_vector() {
+        // Same inputs as the Go vector: device-CA seed 0x22, device seed 0x33,
+        // device id 0xcd.., account "acct-demo", 2026-02-01 .. 2027-02-01.
+        let ca = ed25519_dalek::SigningKey::from_bytes(&[0x22; 32]);
+        let dev = ed25519_dalek::SigningKey::from_bytes(&[0x33; 32]).verifying_key();
+        let cert = test_issuer::device_cert(
+            &ca,
+            [0xcd; 16],
+            "acct-demo",
+            dev.to_bytes(),
+            1_769_904_000,
+            1_801_440_000,
+        );
+        assert_eq!(cert, DEVICE_CERT, "test issuer must match the Go issuer byte-for-byte");
+    }
 
     // Exact artifacts emitted by the Go issuer's TestCrossLanguageVector
     // (control-plane/enrollment). If the wire format ever changes, the Go test's

@@ -117,8 +117,32 @@ CREATE TABLE IF NOT EXISTS spent_tokens (
     PRIMARY KEY (denom, nonce_hash)
 );
 
+-- One-click device enrollment (docs/enrollment.md): an issued token is claimed
+-- at most once and binds one device's Ed25519 identity key to the account.
+-- Revoked devices are published in the signed CRL so tunnel servers refuse them.
+CREATE TABLE IF NOT EXISTS enroll_tokens (
+    token_id       TEXT PRIMARY KEY,                -- hex of the token's 16-byte id
+    user_id        UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    issued_at      TIMESTAMPTZ NOT NULL,
+    expires_at     TIMESTAMPTZ NOT NULL,
+    claimed_at     TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS devices (
+    id             TEXT PRIMARY KEY,                -- hex of the 16-byte device id
+    user_id        UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name           TEXT NOT NULL DEFAULT '',
+    ed_pub         BYTEA NOT NULL UNIQUE,           -- the device's Ed25519 identity key
+    token_id       TEXT NOT NULL REFERENCES enroll_tokens(token_id),
+    cert_expires   TIMESTAMPTZ NOT NULL,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    revoked_at     TIMESTAMPTZ
+);
+
 CREATE INDEX IF NOT EXISTS idx_connections_active ON connections(ended_at) WHERE ended_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_conn_user          ON connections(user_id);
 CREATE INDEX IF NOT EXISTS idx_nodes_status       ON nodes(status);
 CREATE INDEX IF NOT EXISTS idx_apikeys_user       ON api_keys(user_id);
 CREATE INDEX IF NOT EXISTS idx_audit_user         ON audit_log(user_id, at DESC);
+CREATE INDEX IF NOT EXISTS idx_devices_user       ON devices(user_id);
+CREATE INDEX IF NOT EXISTS idx_devices_revoked    ON devices(revoked_at) WHERE revoked_at IS NOT NULL;

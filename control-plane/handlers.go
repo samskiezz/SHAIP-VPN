@@ -5,6 +5,7 @@ import (
 	"crypto"
 	"crypto/ed25519"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -25,6 +26,13 @@ type Server struct {
 	// pin crlPub, so it must be stable: resolve it from a key file or HSM.
 	crlPub    ed25519.PublicKey
 	crlSigner crypto.Signer
+	// One-click enrollment: tokens are signed by the enrollment authority and
+	// device certificates by the device CA. Clients pin enrollPub; tunnel
+	// servers pin deviceCAPub.
+	enrollSigner   crypto.Signer
+	enrollPub      ed25519.PublicKey
+	deviceCASigner crypto.Signer
+	deviceCAPub    ed25519.PublicKey
 	// Untraceable payments (§20): the e-cash mint and the payment rails.
 	mint        *Mint
 	rails       map[string]PaymentRail // by name: "monero", "btcpay", "dev"
@@ -340,10 +348,12 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 
 // --- CRL (§7) ---
 
-// handleCRL serves the signed certificate revocation list. The payload is the
-// JSON list of revoked identity_ids; the signature is Ed25519 over that payload.
-// (A production CRL also carries an ML-DSA-65 signature; the signing key wiring
-// for the PQ half is the same pattern.)
+// handleCRL serves the signed certificate revocation list: revoked identity_ids
+// and revoked enrolled devices. The signature is Ed25519 over the payload bytes,
+// which are also served verbatim as `crl_b64` so a verifier in any language
+// checks exactly the signed bytes instead of re-serializing JSON. (A production
+// CRL also carries an ML-DSA-65 signature; the signing key wiring for the PQ
+// half is the same pattern.)
 func (s *Server) handleCRL(w http.ResponseWriter, r *http.Request) {
 	revoked, err := s.store.ListRevoked(r.Context())
 	if err != nil {
@@ -358,9 +368,22 @@ func (s *Server) handleCRL(w http.ResponseWriter, r *http.Request) {
 			"revoked_at":  rv.RevokedAt.UTC().Format(time.RFC3339),
 		})
 	}
+	devs, err := s.store.ListRevokedDevices(r.Context())
+	if err != nil {
+		errJSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	revokedDevices := make([]map[string]any, 0, len(devs))
+	for _, d := range devs {
+		revokedDevices = append(revokedDevices, map[string]any{
+			"device_id":  d.ID,
+			"revoked_at": d.RevokedAt.UTC().Format(time.RFC3339),
+		})
+	}
 	payload, _ := json.Marshal(map[string]any{
-		"issued_at": time.Now().UTC().Format(time.RFC3339),
-		"revoked":   ids,
+		"issued_at":       time.Now().UTC().Format(time.RFC3339),
+		"revoked":         ids,
+		"revoked_devices": revokedDevices,
 	})
 	sig, err := keystore.Sign(s.crlSigner, payload)
 	if err != nil {
@@ -369,6 +392,7 @@ func (s *Server) handleCRL(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"crl":           json.RawMessage(payload),
+		"crl_b64":       base64.StdEncoding.EncodeToString(payload),
 		"ed25519_sig":   hex.EncodeToString(sig),
 		"ed25519_pub":   hex.EncodeToString(s.crlPub),
 		"signature_alg": "Ed25519 (ML-DSA-65 co-signature: see §7)",

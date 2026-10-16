@@ -46,6 +46,11 @@ var (
 		Help: "Token redemptions, by denomination and result (ok/spent/invalid).",
 	}, []string{"denom", "result"})
 
+	mEnrollments = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "pqanon", Subsystem: "cp", Name: "enrollments_total",
+		Help: "Device enrollment events, by result (issued/claimed/rejected).",
+	}, []string{"result"})
+
 	startTime = time.Now()
 	_         = promauto.NewGaugeFunc(prometheus.GaugeOpts{
 		Namespace: "pqanon", Subsystem: "cp", Name: "uptime_seconds",

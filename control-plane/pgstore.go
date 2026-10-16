@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -430,6 +431,111 @@ func (s *PgStore) ListRevoked(ctx context.Context) ([]RevokedIdentity, error) {
 			return nil, err
 		}
 		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (s *PgStore) CreateEnrollToken(ctx context.Context, t *EnrollToken) error {
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO enroll_tokens (token_id, user_id, issued_at, expires_at)
+		 VALUES ($1, $2, $3, $4)`,
+		t.TokenID, t.UserID, t.IssuedAt, t.ExpiresAt)
+	return err
+}
+
+// ClaimEnrollment consumes the token and inserts the device in one
+// transaction. The row lock (FOR UPDATE) serializes concurrent claims of the
+// same token, so exactly one succeeds; any failure rolls back both writes.
+func (s *PgStore) ClaimEnrollment(ctx context.Context, tokenID string, now time.Time, d *Device) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx) // no-op once committed
+
+	var owner string
+	var claimed *time.Time
+	var expires time.Time
+	err = tx.QueryRow(ctx,
+		`SELECT user_id::text, claimed_at, expires_at FROM enroll_tokens
+		 WHERE token_id = $1 FOR UPDATE`, tokenID).Scan(&owner, &claimed, &expires)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	switch {
+	case owner != d.UserID:
+		return ErrNotFound
+	case claimed != nil:
+		return ErrTokenClaimed
+	case now.After(expires):
+		return ErrTokenExpired
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE enroll_tokens SET claimed_at = $2 WHERE token_id = $1`, tokenID, now); err != nil {
+		return err
+	}
+	err = tx.QueryRow(ctx,
+		`INSERT INTO devices (id, user_id, name, ed_pub, token_id, cert_expires)
+		 VALUES ($1, $2, $3, $4, $5, $6) RETURNING created_at`,
+		d.ID, d.UserID, d.Name, d.EdPub, tokenID, d.CertExpires).Scan(&d.CreatedAt)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "devices_ed_pub_key" {
+			return ErrDeviceKeyInUse
+		}
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	d.TokenID = tokenID
+	d.EdPubHex = hex.EncodeToString(d.EdPub)
+	return nil
+}
+
+func (s *PgStore) ListDevices(ctx context.Context, userID string) ([]Device, error) {
+	return s.queryDevices(ctx,
+		`SELECT id, user_id::text, name, ed_pub, token_id, cert_expires, created_at, revoked_at
+		 FROM devices WHERE user_id = $1 ORDER BY created_at DESC`, userID)
+}
+
+func (s *PgStore) RevokeDevice(ctx context.Context, id, userID string) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE devices SET revoked_at = COALESCE(revoked_at, NOW())
+		 WHERE id = $1 AND user_id = $2`, id, userID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *PgStore) ListRevokedDevices(ctx context.Context) ([]Device, error) {
+	return s.queryDevices(ctx,
+		`SELECT id, user_id::text, name, ed_pub, token_id, cert_expires, created_at, revoked_at
+		 FROM devices WHERE revoked_at IS NOT NULL ORDER BY id`)
+}
+
+func (s *PgStore) queryDevices(ctx context.Context, sql string, args ...any) ([]Device, error) {
+	rows, err := s.pool.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]Device, 0)
+	for rows.Next() {
+		var d Device
+		if err := rows.Scan(&d.ID, &d.UserID, &d.Name, &d.EdPub, &d.TokenID,
+			&d.CertExpires, &d.CreatedAt, &d.RevokedAt); err != nil {
+			return nil, err
+		}
+		d.EdPubHex = hex.EncodeToString(d.EdPub)
+		out = append(out, d)
 	}
 	return out, rows.Err()
 }

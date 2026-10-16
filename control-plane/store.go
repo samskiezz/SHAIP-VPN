@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"sort"
 	"sync"
@@ -69,6 +71,37 @@ type PayOrder struct {
 	CreatedAt     time.Time  `json:"created_at"`
 	PaidAt        *time.Time `json:"paid_at,omitempty"`
 	ExpiresAt     time.Time  `json:"expires_at"`
+}
+
+// Enrollment errors. ClaimEnrollment returns exactly one of these (or
+// ErrNotFound) and changes nothing when it does.
+var (
+	ErrTokenClaimed   = errors.New("enrollment token already used")
+	ErrTokenExpired   = errors.New("enrollment token expired")
+	ErrDeviceKeyInUse = errors.New("device key already enrolled")
+)
+
+// EnrollToken records an issued enrollment token so it can be claimed once.
+type EnrollToken struct {
+	TokenID   string // hex of the token's 16-byte id
+	UserID    string
+	IssuedAt  time.Time
+	ExpiresAt time.Time
+	ClaimedAt *time.Time
+}
+
+// Device is an enrolled device: its Ed25519 identity key, bound to an account
+// by a device certificate.
+type Device struct {
+	ID          string     `json:"id"` // hex of the 16-byte device id
+	UserID      string     `json:"-"`
+	Name        string     `json:"name"`
+	EdPub       []byte     `json:"-"`
+	EdPubHex    string     `json:"ed_pub"`
+	TokenID     string     `json:"-"`
+	CertExpires time.Time  `json:"cert_expires"`
+	CreatedAt   time.Time  `json:"created_at"`
+	RevokedAt   *time.Time `json:"revoked_at,omitempty"`
 }
 
 // Node is a tunnel/mix server participating in the network.
@@ -156,6 +189,18 @@ type Store interface {
 
 	ListRevoked(ctx context.Context) ([]RevokedIdentity, error)
 
+	CreateEnrollToken(ctx context.Context, t *EnrollToken) error
+	// ClaimEnrollment atomically consumes the token and records the device. It
+	// fails with ErrNotFound (unknown token, or one issued to another account),
+	// ErrTokenClaimed, ErrTokenExpired, or ErrDeviceKeyInUse — and then changes
+	// nothing, so a failed claim never burns the token.
+	ClaimEnrollment(ctx context.Context, tokenID string, now time.Time, d *Device) error
+	ListDevices(ctx context.Context, userID string) ([]Device, error)
+	// RevokeDevice marks one of the user's devices revoked. Revoking twice keeps
+	// the first timestamp. ErrNotFound if the device is not theirs.
+	RevokeDevice(ctx context.Context, id, userID string) error
+	ListRevokedDevices(ctx context.Context) ([]Device, error)
+
 	Close()
 }
 
@@ -164,9 +209,9 @@ type Store interface {
 // ---------------------------------------------------------------------------
 
 type MemStore struct {
-	mu      sync.RWMutex
-	users   map[string]*User // keyed by email
-	nodes   map[string]*Node // keyed by id
+	mu       sync.RWMutex
+	users    map[string]*User // keyed by email
+	nodes    map[string]*Node // keyed by id
 	conns    map[string]*Connection
 	rules    map[string]*RoutingRule // keyed by rule id
 	settings map[string][]byte       // keyed by user id
@@ -174,8 +219,10 @@ type MemStore struct {
 	apiKeys  map[string]*APIKey // keyed by key id
 	audit    []AuditEntry
 	auditSeq int64
-	orders   map[string]*PayOrder // keyed by order id
-	spent    map[string]bool      // keyed by denom|nonce_hash
+	orders   map[string]*PayOrder    // keyed by order id
+	spent    map[string]bool         // keyed by denom|nonce_hash
+	enroll   map[string]*EnrollToken // keyed by token id
+	devices  map[string]*Device      // keyed by device id
 }
 
 func NewMemStore() *MemStore {
@@ -189,6 +236,8 @@ func NewMemStore() *MemStore {
 		apiKeys:  make(map[string]*APIKey),
 		orders:   make(map[string]*PayOrder),
 		spent:    make(map[string]bool),
+		enroll:   make(map[string]*EnrollToken),
+		devices:  make(map[string]*Device),
 	}
 }
 
@@ -514,6 +563,85 @@ func (m *MemStore) ListRevoked(_ context.Context) ([]RevokedIdentity, error) {
 	for _, r := range m.revoked {
 		out = append(out, *r)
 	}
+	return out, nil
+}
+
+func (m *MemStore) CreateEnrollToken(_ context.Context, t *EnrollToken) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.enroll[t.TokenID]; ok {
+		return errors.New("enrollment token id already exists")
+	}
+	cp := *t
+	m.enroll[t.TokenID] = &cp
+	return nil
+}
+
+func (m *MemStore) ClaimEnrollment(_ context.Context, tokenID string, now time.Time, d *Device) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	t, ok := m.enroll[tokenID]
+	if !ok || t.UserID != d.UserID {
+		return ErrNotFound
+	}
+	if t.ClaimedAt != nil {
+		return ErrTokenClaimed
+	}
+	if now.After(t.ExpiresAt) {
+		return ErrTokenExpired
+	}
+	for _, x := range m.devices {
+		if bytes.Equal(x.EdPub, d.EdPub) {
+			return ErrDeviceKeyInUse
+		}
+	}
+	claimed := now.UTC()
+	t.ClaimedAt = &claimed
+	d.TokenID = tokenID
+	d.CreatedAt = claimed
+	d.EdPubHex = hex.EncodeToString(d.EdPub)
+	cp := *d
+	m.devices[d.ID] = &cp
+	return nil
+}
+
+func (m *MemStore) ListDevices(_ context.Context, userID string) ([]Device, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]Device, 0)
+	for _, d := range m.devices {
+		if d.UserID == userID {
+			out = append(out, *d)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
+	return out, nil
+}
+
+func (m *MemStore) RevokeDevice(_ context.Context, id, userID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	d, ok := m.devices[id]
+	if !ok || d.UserID != userID {
+		return ErrNotFound
+	}
+	if d.RevokedAt == nil {
+		now := time.Now().UTC()
+		d.RevokedAt = &now
+	}
+	return nil
+}
+
+func (m *MemStore) ListRevokedDevices(_ context.Context) ([]Device, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]Device, 0)
+	for _, d := range m.devices {
+		if d.RevokedAt != nil {
+			out = append(out, *d)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil
 }
 

@@ -3,6 +3,8 @@
 # Persistent identity (ML-DSA-65 + Ed25519), created 0600 by
 # `pqanon keygen --out ~/.pqanon/client.id`. Omit for a throwaway per-run identity.
 identity    = "/home/user/.pqanon/client.id"
+# Device certificate from `pqanon enroll` (needed by device-bound servers).
+device_cert = "/home/user/.pqanon/client.id.cert"
 tun_device  = "pqanon-c0"
 tun_address = "10.77.0.2/24"
 

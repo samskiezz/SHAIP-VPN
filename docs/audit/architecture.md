@@ -45,7 +45,11 @@ A two-sided authenticated handshake (`client/src/handshake.rs`):
 3. Client verifies both signatures, decapsulates, and derives the mix secret
    `ss_mix = HKDF(ss_pq || ss_x, salt = client_nonce || server_nonce,
    info = "PQANON-HS/1")`.
-4. `client_finish` → server; both sides derive `k_c2s`, `k_s2c`, `conn_id`.
+4. `client_finish` → server, AEAD-sealed under a key derived from `ss_mix`:
+   the client's long-term public keys, its transcript signatures and MAC, and
+   (for a device-bound server) its device certificate, which must bind the
+   same Ed25519 key that signed the transcript. Both sides then derive `k_c2s`,
+   `k_s2c` and `conn_id`.
 
 `pqanon selftest` runs this in-process and asserts both sides derive identical
 keys.

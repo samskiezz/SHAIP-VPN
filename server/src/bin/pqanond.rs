@@ -15,11 +15,11 @@
 
 use anyhow::Result;
 use clap::Parser;
-use pqanon::handshake::{Established, Identity, ServerHandshake};
+use pqanon::handshake::{DevicePolicy, Established, Identity, ServerHandshake};
 use pqanon::obf::Obfuscator;
 use pqanon::transport::Session;
 use pqanon::wire::{Envelope, MsgType};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::UdpSocket;
@@ -62,6 +62,117 @@ struct Cli {
     /// client pins) and exit. Requires `--identity`.
     #[arg(long)]
     print_public: bool,
+
+    /// Admit only enrolled devices: clients must present a device certificate
+    /// signed by this device CA (hex Ed25519 key, the control plane's
+    /// `device_ca_pub`). Without it the daemon runs in open demo mode.
+    #[arg(long)]
+    device_ca: Option<String>,
+
+    /// Control-plane CRL (…/api/crl). Devices it lists are refused. The first
+    /// fetch must succeed at startup; later failures keep the last verified list.
+    #[arg(long, requires = "crl_pub", requires = "device_ca")]
+    crl_url: Option<String>,
+
+    /// Pinned CRL key (hex Ed25519, the control plane's `crl_pub`).
+    #[arg(long, requires = "crl_url")]
+    crl_pub: Option<String>,
+
+    /// How often to refresh the CRL, in seconds.
+    #[arg(long, default_value_t = 60)]
+    crl_refresh_secs: u64,
+}
+
+/// A CRL older than this is treated as a replay (the control plane signs a
+/// fresh list on every request).
+const CRL_MAX_AGE_SECS: i64 = 600;
+
+/// What answering a handshake needs: the server identity and, on a
+/// device-bound daemon, the admission policy.
+#[derive(Clone)]
+struct Gate {
+    identity: Identity,
+    policy: Option<DevicePolicy>,
+}
+
+impl Gate {
+    fn handshake(&self, conn_id: u64) -> ServerHandshake {
+        match &self.policy {
+            Some(p) => ServerHandshake::new_device_bound(self.identity.clone(), p.clone(), conn_id),
+            None => ServerHandshake::new_open(self.identity.clone(), conn_id),
+        }
+    }
+}
+
+fn device_label(est: &Established) -> String {
+    est.device
+        .as_ref()
+        .map(|d| hex16(d.device_id))
+        .unwrap_or_else(|| "-".into())
+}
+
+type Revoked = Arc<std::sync::RwLock<HashSet<[u8; 16]>>>;
+
+/// Build the device-admission policy, loading the CRL first when configured.
+async fn device_policy(cli: &Cli) -> Result<Option<DevicePolicy>> {
+    let Some(ca_hex) = &cli.device_ca else {
+        return Ok(None);
+    };
+    let ca = pqanon::enroll_client::parse_pin(ca_hex, "--device-ca")?;
+    let revoked: Revoked = Arc::default();
+    match (&cli.crl_url, &cli.crl_pub) {
+        (Some(url), Some(pub_hex)) => {
+            let pinned = pqanon::enroll_client::parse_pin(pub_hex, "--crl-pub")?;
+            let (u, k) = (url.clone(), pinned);
+            let crl = tokio::task::spawn_blocking(move || pqanon::crl::fetch(&u, &k, CRL_MAX_AGE_SECS))
+                .await?
+                .map_err(|e| anyhow::anyhow!("initial CRL fetch failed (refusing to start without it): {e}"))?;
+            tracing::info!(revoked_devices = crl.revoked_devices.len(), "CRL loaded");
+            let issued = crl.issued_at;
+            *revoked.write().unwrap() = crl.revoked_devices;
+            tokio::spawn(crl_refresher(
+                url.clone(),
+                pinned,
+                revoked.clone(),
+                std::time::Duration::from_secs(cli.crl_refresh_secs.max(1)),
+                issued,
+            ));
+        }
+        _ => tracing::warn!("--device-ca without --crl-url: revoked devices are NOT refused"),
+    }
+    let check = revoked.clone();
+    Ok(Some(DevicePolicy {
+        ca,
+        is_revoked: Arc::new(move |id| check.read().unwrap().contains(id)),
+    }))
+}
+
+/// Keep the revoked set current. A failed refresh keeps the last verified list;
+/// a list older than the one in force is ignored as a replay.
+async fn crl_refresher(
+    url: String,
+    pinned: ed25519_dalek::VerifyingKey,
+    revoked: Revoked,
+    every: std::time::Duration,
+    mut last_issued: i64,
+) {
+    let mut tick = tokio::time::interval(every);
+    tick.tick().await; // the first tick is immediate; the startup fetch covered it
+    loop {
+        tick.tick().await;
+        let u = url.clone();
+        match tokio::task::spawn_blocking(move || pqanon::crl::fetch(&u, &pinned, CRL_MAX_AGE_SECS)).await {
+            Ok(Ok(crl)) if crl.issued_at >= last_issued => {
+                last_issued = crl.issued_at;
+                let n = crl.revoked_devices.len();
+                *revoked.write().unwrap() = crl.revoked_devices;
+                tracing::debug!(revoked_devices = n, "CRL refreshed");
+            }
+            Ok(Ok(_)) => tracing::warn!("ignoring a CRL older than the one in force (replay?)"),
+            Ok(Err(e)) => tracing::warn!(error = %e, "CRL refresh failed; keeping the last verified list"),
+            Err(e) => tracing::warn!(error = %e, "CRL refresh task failed"),
+        }
+    }
 }
 
 enum PeerState {
@@ -106,10 +217,15 @@ async fn main() -> Result<()> {
         println!("server_ed_pub     = \"{}\"", pqanon::hex_util::encode(&p.ed_bytes()));
         return Ok(());
     }
-    tracing::warn!(
-        "demo mode: accepting ANY client identity (use a pinned allow-list in production)"
-    );
+    let policy = device_policy(&cli).await?;
+    match &policy {
+        Some(_) => tracing::info!("device-bound: admitting only clients with a valid device certificate"),
+        None => tracing::warn!(
+            "demo mode: accepting ANY client identity (use --device-ca to admit enrolled devices only)"
+        ),
+    }
     tracing::info!(server_identity = %hex16(identity.identity_id()), "pqanond identity");
+    let gate = Gate { identity, policy };
 
     let socket = Arc::new(UdpSocket::bind(&cli.listen).await?);
     tracing::info!(listen = %socket.local_addr()?, "pqanond listening");
@@ -152,7 +268,7 @@ async fn main() -> Result<()> {
         Some(name) => {
             #[cfg(target_os = "linux")]
             {
-                run_with_tun(socket, identity, &name, &cli.tun_addr).await
+                run_with_tun(socket, gate, &name, &cli.tun_addr).await
             }
             #[cfg(not(target_os = "linux"))]
             {
@@ -160,17 +276,17 @@ async fn main() -> Result<()> {
                 anyhow::bail!("--tun is Linux only (TUN is a Linux kernel interface)")
             }
         }
-        None => run_echo(socket, identity).await,
+        None => run_echo(socket, gate).await,
     }
 }
 
 /// Default (no-TUN) loop: decrypt DATA and echo it back.
-async fn run_echo(socket: Arc<UdpSocket>, identity: Identity) -> Result<()> {
+async fn run_echo(socket: Arc<UdpSocket>, gate: Gate) -> Result<()> {
     let mut peers: HashMap<SocketAddr, PeerState> = HashMap::new();
     let mut buf = vec![0u8; 65536];
     loop {
         let (n, src) = socket.recv_from(&mut buf).await?;
-        if let Err(e) = handle(&socket, &identity, &mut peers, src, &buf[..n]).await {
+        if let Err(e) = handle(&socket, &gate, &mut peers, src, &buf[..n]).await {
             tracing::debug!(%src, error = %e, "dropping packet");
         }
     }
@@ -178,7 +294,7 @@ async fn run_echo(socket: Arc<UdpSocket>, identity: Identity) -> Result<()> {
 
 async fn handle(
     socket: &UdpSocket,
-    identity: &Identity,
+    gate: &Gate,
     peers: &mut HashMap<SocketAddr, PeerState>,
     src: SocketAddr,
     pkt: &[u8],
@@ -211,7 +327,7 @@ async fn handle(
     };
     match env.msg_type {
         MsgType::ClientHello => {
-            let mut hs = ServerHandshake::new_open(identity.clone(), env.conn_id);
+            let mut hs = gate.handshake(env.conn_id);
             hs.recv_client_hello(&env, true)?;
             let shello = hs.server_hello()?;
             socket.send_to(&shello.to_plain(), src).await?;
@@ -231,7 +347,7 @@ async fn handle(
                 }
             };
             tracing::info!(%src, conn_id = format!("{:#018x}", est.conn_id),
-                client = %hex16(est.peer_id), "session established");
+                client = %hex16(est.peer_id), device = %device_label(&est), "session established");
             let session = Session::new(est.conn_id, est.k_c2s, est.k_s2c, src, false, 1400);
             let obf = Obfuscator::new(&est.ss_mix, 1);
             peers.insert(
@@ -261,7 +377,7 @@ struct TunState {
 #[cfg(target_os = "linux")]
 async fn run_with_tun(
     socket: Arc<UdpSocket>,
-    identity: Identity,
+    gate: Gate,
     tun_name: &str,
     tun_addr: &str,
 ) -> Result<()> {
@@ -317,7 +433,7 @@ async fn run_with_tun(
     loop {
         let (n, src) = socket.recv_from(&mut buf).await?;
         let pkt = buf[..n].to_vec();
-        if let Err(e) = handle_tun(&socket, &identity, &state, &tun, src, &pkt).await {
+        if let Err(e) = handle_tun(&socket, &gate, &state, &tun, src, &pkt).await {
             tracing::debug!(%src, error = %e, "dropping packet");
         }
     }
@@ -326,7 +442,7 @@ async fn run_with_tun(
 #[cfg(target_os = "linux")]
 async fn handle_tun(
     socket: &UdpSocket,
-    identity: &Identity,
+    gate: &Gate,
     state: &Arc<tokio::sync::Mutex<TunState>>,
     tun: &Arc<pqanon::tun::AsyncTun>,
     src: SocketAddr,
@@ -359,7 +475,7 @@ async fn handle_tun(
     };
     match env.msg_type {
         MsgType::ClientHello => {
-            let mut hs = ServerHandshake::new_open(identity.clone(), env.conn_id);
+            let mut hs = gate.handshake(env.conn_id);
             hs.recv_client_hello(&env, true)?;
             let shello = hs.server_hello()?;
             socket.send_to(&shello.to_plain(), src).await?;
@@ -397,7 +513,7 @@ async fn handle_tun(
             pqanon::metrics::HANDSHAKES_OK.inc();
             pqanon::metrics::SESSIONS_ESTABLISHED.inc();
             tracing::info!(%src, conn_id = format!("{:#018x}", est.conn_id),
-                assigned = ?assigned, "session established; tunnel IP assigned");
+                device = %device_label(&est), assigned = ?assigned, "session established; tunnel IP assigned");
         }
         other => anyhow::bail!("unexpected handshake type {other:?}"),
     }
