@@ -55,6 +55,12 @@ impl DataPlane {
     pub fn peer_addr(&self) -> std::net::SocketAddr {
         self.session.peer_addr
     }
+
+    /// The last sequence number this side sealed (how much of the key's
+    /// nonce space is used).
+    pub fn tx_seq(&self) -> u32 {
+        self.session.next_seq
+    }
 }
 
 #[cfg(test)]

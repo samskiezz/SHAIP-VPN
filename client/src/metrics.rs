@@ -32,12 +32,41 @@ impl Default for Counter {
     }
 }
 
+/// A value that goes up and down (set from the owner's view of the truth).
+pub struct Gauge(AtomicU64);
+
+impl Gauge {
+    pub const fn new() -> Self {
+        Gauge(AtomicU64::new(0))
+    }
+    pub fn set(&self, v: u64) {
+        self.0.store(v, Ordering::Relaxed);
+    }
+    pub fn get(&self) -> u64 {
+        self.0.load(Ordering::Relaxed)
+    }
+}
+
+impl Default for Gauge {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // --- pqanond (tunnel daemon) ---
 pub static HANDSHAKES_OK: Counter = Counter::new();
 pub static HANDSHAKES_FAILED: Counter = Counter::new();
 pub static SESSIONS_ESTABLISHED: Counter = Counter::new();
 pub static DATA_PACKETS: Counter = Counter::new();
 pub static DECOY_PROBES: Counter = Counter::new();
+pub static SESSIONS_ACTIVE: Gauge = Gauge::new();
+pub static HANDSHAKES_PENDING: Gauge = Gauge::new();
+pub static SESSIONS_ENDED: Counter = Counter::new();
+pub static PACKETS_SPOOFED: Counter = Counter::new();
+pub static PACKETS_FILTERED: Counter = Counter::new();
+pub static KEEPALIVES: Counter = Counter::new();
+pub static BYTES_FROM_CLIENTS: Counter = Counter::new();
+pub static BYTES_TO_CLIENTS: Counter = Counter::new();
 
 // --- pqanon-mixd (mix node) ---
 pub static MIX_CELLS_FORWARDED: Counter = Counter::new();
@@ -47,17 +76,34 @@ struct Metric {
     name: &'static str,
     help: &'static str,
     value: u64,
+    gauge: bool,
+}
+
+const fn counter(name: &'static str, help: &'static str, value: u64) -> Metric {
+    Metric { name, help, value, gauge: false }
+}
+
+const fn gauge(name: &'static str, help: &'static str, value: u64) -> Metric {
+    Metric { name, help, value, gauge: true }
 }
 
 fn snapshot() -> Vec<Metric> {
     vec![
-        Metric { name: "pqanon_server_handshakes_ok_total", help: "Completed server handshakes.", value: HANDSHAKES_OK.get() },
-        Metric { name: "pqanon_server_handshakes_failed_total", help: "Server handshakes that errored or were rejected.", value: HANDSHAKES_FAILED.get() },
-        Metric { name: "pqanon_server_sessions_established_total", help: "Sessions established (keys derived).", value: SESSIONS_ESTABLISHED.get() },
-        Metric { name: "pqanon_server_data_packets_total", help: "DATA packets decrypted by the server.", value: DATA_PACKETS.get() },
-        Metric { name: "pqanon_server_decoy_probes_total", help: "TLS decoy handshakes completed by a prober.", value: DECOY_PROBES.get() },
-        Metric { name: "pqanon_mix_cells_forwarded_total", help: "Onion cells peeled and forwarded by the mix.", value: MIX_CELLS_FORWARDED.get() },
-        Metric { name: "pqanon_mix_cover_cells_total", help: "Cover-traffic cells emitted by the mix.", value: MIX_COVER_CELLS.get() },
+        counter("pqanon_server_handshakes_ok_total", "Completed server handshakes.", HANDSHAKES_OK.get()),
+        counter("pqanon_server_handshakes_failed_total", "Server handshakes that errored or were rejected.", HANDSHAKES_FAILED.get()),
+        counter("pqanon_server_sessions_established_total", "Sessions established (keys derived).", SESSIONS_ESTABLISHED.get()),
+        counter("pqanon_server_data_packets_total", "DATA packets decrypted by the server.", DATA_PACKETS.get()),
+        counter("pqanon_server_decoy_probes_total", "TLS decoy handshakes completed by a prober.", DECOY_PROBES.get()),
+        gauge("pqanon_server_sessions_active", "Sessions currently established.", SESSIONS_ACTIVE.get()),
+        gauge("pqanon_server_handshakes_pending", "Handshakes awaiting CLIENT_FINISH.", HANDSHAKES_PENDING.get()),
+        counter("pqanon_server_sessions_ended_total", "Sessions ended (closed, timed out, or replaced by a new handshake).", SESSIONS_ENDED.get()),
+        counter("pqanon_server_spoofed_packets_total", "Client packets dropped for a source address other than the client's own.", PACKETS_SPOOFED.get()),
+        counter("pqanon_server_filtered_packets_total", "Client packets dropped by destination policy (other clients, private ranges).", PACKETS_FILTERED.get()),
+        counter("pqanon_server_keepalives_total", "Keepalive pings answered.", KEEPALIVES.get()),
+        counter("pqanon_server_client_bytes_in_total", "Bytes of IP traffic received from clients.", BYTES_FROM_CLIENTS.get()),
+        counter("pqanon_server_client_bytes_out_total", "Bytes of IP traffic sent to clients.", BYTES_TO_CLIENTS.get()),
+        counter("pqanon_mix_cells_forwarded_total", "Onion cells peeled and forwarded by the mix.", MIX_CELLS_FORWARDED.get()),
+        counter("pqanon_mix_cover_cells_total", "Cover-traffic cells emitted by the mix.", MIX_COVER_CELLS.get()),
     ]
 }
 
@@ -66,7 +112,7 @@ pub fn render() -> String {
     let mut out = String::new();
     for m in snapshot() {
         out.push_str(&format!("# HELP {} {}\n", m.name, m.help));
-        out.push_str(&format!("# TYPE {} counter\n", m.name));
+        out.push_str(&format!("# TYPE {} {}\n", m.name, if m.gauge { "gauge" } else { "counter" }));
         out.push_str(&format!("{} {}\n", m.name, m.value));
     }
     out

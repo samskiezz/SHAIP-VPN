@@ -249,7 +249,7 @@ enroll_e2e() {
 
 # --- The client facade + C ABI against a live, device-bound pqanond ---
 tunnel_e2e() {
-  cargo build --release -q -p pqanon-client --bin pqanon -p pqanon-server -p pqanon-ffi || return 1
+  cargo build --release -q -p pqanon-client -p pqanon-server -p pqanon-ffi || return 1
   ( cd control-plane && go build -o bin/control-plane . ) || return 1
   local BIN=control-plane/bin/control-plane CLI=./target/release/pqanon D=./target/release/pqanond
   local B=http://127.0.0.1:8093 KD W ok=0 bad=0 CP=0 SRV=0
@@ -325,7 +325,7 @@ tunnel_e2e() {
 
 # --- Staking: paid bond → signed directory → equivocation slashed (real node key) ---
 stake_e2e() {
-  cargo build --release -q -p pqanon-client --bin pqanon -p pqanon-server || return 1
+  cargo build --release -q -p pqanon-client -p pqanon-server || return 1
   ( cd control-plane && go build -o bin/control-plane . ) || return 1
   local BIN=control-plane/bin/control-plane CLI=./target/release/pqanon D=./target/release/pqanond
   local B=http://127.0.0.1:8091 KD W ok=0 bad=0 PID
@@ -444,6 +444,17 @@ if command -v python3 >/dev/null && command -v cc >/dev/null; then
   stage "tunnel: client facade + C ABI vs device-bound pqanond" tunnel_e2e
 else
   skip  "tunnel: client facade + C ABI vs device-bound pqanond" "needs python3 + a C compiler"
+fi
+# The VPN for real: client netns → ISP router → pqanond (TUN + NAT + DNS) → "internet" netns.
+vpn_lab() {
+  cargo build --release -q -p pqanon-client -p pqanon-server || return 1
+  ./scripts/e2e/vpn_lab.sh
+}
+if [ "$(id -u)" = "0" ] && [ -e /dev/net/tun ] && command -v ip >/dev/null && command -v nft >/dev/null \
+   && command -v curl >/dev/null && command -v python3 >/dev/null; then
+  stage "vpn: full tunnel across 4 netns (NAT, DNS, reconnect, kill switch)" vpn_lab
+else
+  skip  "vpn: full tunnel across 4 netns (NAT, DNS, reconnect, kill switch)" "needs root, /dev/net/tun, iproute2, nftables, curl, python3"
 fi
 if command -v python3 >/dev/null; then
   stage "stake: bond → directory → equivocation slash (x-lang)" stake_e2e

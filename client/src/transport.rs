@@ -233,6 +233,15 @@ impl CongestionControl {
     }
 }
 
+/// The last sequence number a session key may seal (with headroom below
+/// `u32::MAX`). Past it, [`Session::seal_data`] fails instead of wrapping, so a
+/// ChaCha20-Poly1305 nonce can never repeat under one key.
+pub const REJECT_AFTER_SEQ: u32 = u32::MAX - (1 << 16);
+
+/// Clients start a new handshake once either direction passes this many
+/// packets, far ahead of [`REJECT_AFTER_SEQ`].
+pub const REKEY_AFTER_SEQ: u32 = 1 << 30;
+
 /// Per-session transport state.
 pub struct Session {
     pub conn_id: u64,
@@ -288,8 +297,16 @@ impl Session {
     }
 
     /// Seal an application payload as the next DATA packet (pre-obfuscation).
+    ///
+    /// The AEAD nonce is `epoch || seq`, so a sequence number must never be
+    /// used twice under one key. Once `seq` reaches [`REJECT_AFTER_SEQ`] this
+    /// session refuses to seal anything more; a fresh handshake (new keys) is
+    /// the only way on. Clients rekey long before, at [`REKEY_AFTER_SEQ`].
     pub fn seal_data(&mut self, msg_type: MsgType, payload: Vec<u8>) -> anyhow::Result<Vec<u8>> {
-        self.next_seq = self.next_seq.wrapping_add(1);
+        if self.next_seq >= REJECT_AFTER_SEQ {
+            anyhow::bail!("session key exhausted after {} packets; a new handshake is required", self.next_seq);
+        }
+        self.next_seq += 1;
         let env = Envelope {
             msg_type,
             epoch: self.epoch,
@@ -451,5 +468,21 @@ mod tests {
         assert_eq!(env.payload, b"ping");
         // Replay is rejected.
         assert!(server.open_data(&wire).is_err());
+    }
+
+    #[test]
+    fn sequence_never_wraps_into_a_reused_nonce() {
+        let addr: SocketAddr = "127.0.0.1:9".parse().unwrap();
+        let mut client = Session::new(7, [1u8; 32], [2u8; 32], addr, true, 1400);
+        let mut server = Session::new(7, [1u8; 32], [2u8; 32], addr, false, 1400);
+        // Jump to the end of the key's life.
+        client.next_seq = REJECT_AFTER_SEQ - 1;
+        let last = client.seal_data(MsgType::Data, b"last".to_vec()).unwrap();
+        assert_eq!(server.open_data(&last).unwrap().seq, REJECT_AFTER_SEQ);
+        // The next seal must fail rather than wrap to seq 0/1 (a repeated nonce).
+        let err = client.seal_data(MsgType::Data, b"one more".to_vec()).unwrap_err();
+        assert!(err.to_string().contains("new handshake"), "{err}");
+        assert_eq!(client.next_seq, REJECT_AFTER_SEQ, "state unchanged by the refused seal");
+        const { assert!(REKEY_AFTER_SEQ < REJECT_AFTER_SEQ) };
     }
 }

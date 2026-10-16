@@ -42,13 +42,49 @@ enum Cmd {
     /// Create a real TUN device and prove IP packets flow from the kernel
     /// (Linux; needs CAP_NET_ADMIN).
     TunTest,
-    /// Start the client tunnel from a config file.
+    /// Start the VPN from a config file: every IPv4 packet and DNS lookup goes
+    /// through the tunnel, IPv6 is blocked (the tunnel carries IPv4 only), and
+    /// the session is kept alive, rekeyed, and re-established on failure
+    /// (Linux; needs CAP_NET_ADMIN). Stop with Ctrl-C or `pqanon disconnect`.
     Run {
         #[arg(short, long)]
         config: String,
+        /// Only route the tunnel subnet; leave all other traffic and DNS alone.
+        #[arg(long)]
+        split_tunnel: bool,
+        /// Reject all traffic outside the tunnel, and keep doing so if this
+        /// process dies, until it reconnects or `pqanon down` runs.
+        #[arg(long)]
+        kill_switch: bool,
+        /// Keep the system resolver instead of the server's (lookups to a
+        /// LAN resolver then go around the tunnel).
+        #[arg(long)]
+        keep_dns: bool,
+        /// Do not block IPv6. The tunnel carries IPv4 only, so IPv6 traffic
+        /// then bypasses it.
+        #[arg(long)]
+        allow_ipv6_leak: bool,
+        /// Keepalive ping interval, seconds.
+        #[arg(long, default_value_t = 10)]
+        keepalive_secs: u64,
+        /// Reconnect after this many seconds without an answer from the server.
+        #[arg(long, default_value_t = 35)]
+        dead_secs: u64,
+        /// Replace the session with a fresh handshake this often, seconds.
+        #[arg(long, default_value_t = 1200)]
+        rekey_secs: u64,
+        /// Routing mode. Only `fast` (straight to the server) exists today.
         #[arg(short, long, default_value = "fast")]
         route: String,
     },
+    /// Show the state of a running `pqanon run`.
+    Status,
+    /// Stop a running `pqanon run` (it closes the session and restores
+    /// routes, DNS and firewall).
+    Disconnect,
+    /// Undo what a `pqanon run` that crashed left behind: the kill switch,
+    /// the resolv.conf rewrite, the host route.
+    Down,
     /// Resolve a name through the DNSSEC-validating resolver and print the
     /// security verdict (Secure / Insecure / Bogus). A bogus answer is withheld.
     Resolve {
@@ -206,7 +242,30 @@ fn cli_main() -> Result<()> {
         Cmd::Keygen { out } => keygen(out.as_deref()),
         Cmd::Selftest => selftest(),
         Cmd::TunTest => tun_test(),
-        Cmd::Run { config, route } => run(&config, &route),
+        Cmd::Run {
+            config,
+            split_tunnel,
+            kill_switch,
+            keep_dns,
+            allow_ipv6_leak,
+            keepalive_secs,
+            dead_secs,
+            rekey_secs,
+            route,
+        } => run(RunOpts {
+            config,
+            split_tunnel,
+            kill_switch,
+            keep_dns,
+            allow_ipv6_leak,
+            keepalive: std::time::Duration::from_secs(keepalive_secs.max(1)),
+            dead_after: std::time::Duration::from_secs(dead_secs.max(3)),
+            rekey_after: std::time::Duration::from_secs(rekey_secs.max(30)),
+            route,
+        }),
+        Cmd::Status => status_cmd(),
+        Cmd::Disconnect => disconnect_cmd(),
+        Cmd::Down => down_cmd(),
         Cmd::Resolve {
             name,
             server,
@@ -609,25 +668,77 @@ fn load_client_toml(path: &str, timeout: std::time::Duration) -> Result<ClientTo
     })
 }
 
-/// Start the tunnel: connect through the shared `pqanon::client` facade, then
-/// pump packets between a TUN device and the tunnel.
+/// `pqanon run` options.
+struct RunOpts {
+    config: String,
+    split_tunnel: bool,
+    kill_switch: bool,
+    keep_dns: bool,
+    allow_ipv6_leak: bool,
+    keepalive: std::time::Duration,
+    dead_after: std::time::Duration,
+    rekey_after: std::time::Duration,
+    route: String,
+}
+
+/// The VPN client: connect (and stay connected) through the supervisor, bring
+/// up the TUN device with the server's parameters, route traffic and DNS into
+/// it, pump packets both ways, and undo everything on exit.
 #[cfg(target_os = "linux")]
-fn run(config: &str, route: &str) -> Result<()> {
-    use pqanon::client::Tunnel;
+fn run(o: RunOpts) -> Result<()> {
+    use pqanon::netcfg::{FullTunnel, FullTunnelOpts};
+    use pqanon::supervisor::{ManagedTunnel, SupervisorConfig};
     use pqanon::tun::{AsyncTun, TunDevice};
-    use std::sync::Arc;
+    use std::sync::{Arc, OnceLock};
 
-    let cfg = load_client_toml(config, std::time::Duration::from_secs(10))?;
-    tracing::info!(server = %cfg.tunnel.server, route, "pqanon run");
-
-    let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(async move {
-        let tunnel = Arc::new(Tunnel::connect(cfg.tunnel).await?);
-        let info = tunnel.info();
-        tracing::info!(
-            conn_id = format!("{:#018x}", tunnel.conn_id()),
-            "handshake OK; the server confirmed the session"
+    if o.route != "fast" {
+        anyhow::bail!(
+            "--route {}: only `fast` is available. The mix (anon) path is not wired into the data \
+             plane yet, so nothing would be routed through mixes.",
+            o.route
         );
+    }
+    let cfg = load_client_toml(&o.config, std::time::Duration::from_secs(10))?;
+    // Reconnect and rekey handshakes run on worker threads; ML-DSA-65 signing
+    // wants more than the default 2 MiB of stack.
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(8 << 20)
+        .build()?;
+    rt.block_on(async move {
+        // A run that crashed may have left DNS rewritten or a host route; a
+        // kill switch it left stays closed until this run replaces it.
+        for done in pqanon::netcfg::cleanup_after_crash(o.kill_switch)? {
+            tracing::info!("recovered from a previous run: {done}");
+        }
+        let server_addr = tokio::net::lookup_host(&cfg.tunnel.server)
+            .await
+            .map_err(|e| anyhow::anyhow!("resolving {}: {e}", cfg.tunnel.server))?
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("{} did not resolve", cfg.tunnel.server))?;
+
+        let net: Arc<OnceLock<FullTunnel>> = Arc::new(OnceLock::new());
+        let mut sup = SupervisorConfig::new(pqanon::client::ClientConfig {
+            server: server_addr.to_string(),
+            ..cfg.tunnel
+        });
+        sup.keepalive = o.keepalive;
+        sup.dead_after = o.dead_after;
+        sup.rekey_after = o.rekey_after;
+        let hook_net = net.clone();
+        sup.before_connect = Some(Arc::new(move || {
+            if let Some(ft) = hook_net.get() {
+                ft.refresh_host_route();
+            }
+        }));
+        let link = Arc::new(ManagedTunnel::start(sup).await.map_err(|e| {
+            if o.kill_switch {
+                e.context("first connection failed (if a kill switch from an earlier run is blocking it, run `pqanon down`)")
+            } else {
+                e
+            }
+        })?);
+        let info = link.status().info;
 
         // The server routes return traffic by the address it assigned, so use
         // that one; fall back to the configured address for servers that
@@ -645,33 +756,224 @@ fn run(config: &str, route: &str) -> Result<()> {
         };
         let dev = TunDevice::open(&cfg.tun_device)?;
         dev.configure_v4(tun_ip, tun_prefix)?;
+        dev.set_mtu(info.effective_mtu())?;
         let tun = Arc::new(AsyncTun::new(dev)?);
-        tracing::info!(device = %tun.name(), %tun_ip, "{}", pqanon::i18n::t("tunnel_up"));
 
-        let up = tokio::spawn(pump_up(tun.clone(), tunnel.clone()));
-        let down = tokio::spawn(pump_down(tun, tunnel));
-        tokio::select! {
-            r = up => r??,
-            r = down => r??,
+        let full = !o.split_tunnel;
+        let dns = if full && !o.keep_dns { info.dns_v4 } else { None };
+        if full && !o.keep_dns && dns.is_none() {
+            tracing::warn!("the server pushed no resolver: lookups use the system resolver, which may sit outside the tunnel");
         }
-        Ok::<_, anyhow::Error>(())
-    })?;
+        let ft = FullTunnel::up(FullTunnelOpts {
+            tun: tun.name().to_string(),
+            server: server_addr,
+            redirect_default: full,
+            dns,
+            block_ipv6: full && !o.allow_ipv6_leak,
+            kill_switch: o.kill_switch,
+        })?;
+        let _ = net.set(ft);
+        tracing::info!(
+            device = %tun.name(), address = %format!("{tun_ip}/{tun_prefix}"), mtu = info.effective_mtu(),
+            "{}", pqanon::i18n::t("tunnel_up")
+        );
+        println!(
+            "connected: {tun_ip}/{tun_prefix} on {} via {server_addr}; {}; DNS {}; IPv6 {}; kill switch {}",
+            tun.name(),
+            if full { "all IPv4 traffic routed through the tunnel" } else { "split tunnel (tunnel subnet only)" },
+            dns.map(|d| format!("{d} (through the tunnel)")).unwrap_or_else(|| "unchanged".into()),
+            if full && !o.allow_ipv6_leak { "blocked" } else { "NOT blocked" },
+            if o.kill_switch { "on" } else { "off" },
+        );
+
+        let up = tokio::spawn(pump_up(tun.clone(), link.clone()));
+        let down = tokio::spawn(pump_down(tun.clone(), link.clone()));
+        let watch = tokio::spawn(watch_link(link.clone(), tun.clone(), net.clone(), tun_prefix));
+        let status = tokio::spawn(write_status(link.clone(), server_addr, tun.name().to_string()));
+        let outcome = tokio::select! {
+            r = up => r.map_err(anyhow::Error::from).and_then(|r| r),
+            r = down => r.map_err(anyhow::Error::from).and_then(|r| r),
+            _ = shutdown_signal() => Ok(()),
+        };
+        watch.abort();
+        status.abort();
+        link.stop().await; // tells the server: Close
+        let _ = std::fs::remove_file(status_path());
+        if let Some(ft) = Arc::try_unwrap(net).ok().and_then(|n| n.into_inner()) {
+            ft.down(); // routes, DNS and firewall (kill switch included) restored
+        }
+        let st = link.status();
+        println!(
+            "disconnected: sent {} packets / {} B, received {} packets / {} B, {} reconnect(s), {} rekey(s)",
+            st.stats.packets_sent, st.stats.bytes_sent, st.stats.packets_received, st.stats.bytes_received,
+            st.reconnects, st.rekeys
+        );
+        outcome
+    })
+}
+
+/// Log link transitions, and re-address the TUN device if the server ever
+/// assigns a different address after a reconnect (e.g. it lost its leases).
+#[cfg(target_os = "linux")]
+async fn watch_link(
+    link: std::sync::Arc<pqanon::supervisor::ManagedTunnel>,
+    tun: std::sync::Arc<pqanon::tun::AsyncTun>,
+    net: std::sync::Arc<std::sync::OnceLock<pqanon::netcfg::FullTunnel>>,
+    prefix: u8,
+) {
+    use pqanon::supervisor::LinkState;
+    let mut changes = link.changes();
+    let mut state = LinkState::Connected;
+    let mut addr = link.status().info.assigned_v4;
+    while changes.changed().await.is_ok() {
+        let st = link.status();
+        if st.state != state {
+            match st.state {
+                LinkState::Connected => println!("tunnel up again (reconnect #{})", st.reconnects),
+                LinkState::Reconnecting => println!(
+                    "tunnel down: {}; reconnecting. Traffic stays inside the tunnel interface meanwhile (dropped, not sent around it)",
+                    st.last_error.as_deref().unwrap_or("unknown")
+                ),
+                LinkState::Stopped => return,
+            }
+            state = st.state;
+        }
+        let reassigned = st.info.assigned_v4.filter(|a| st.state == LinkState::Connected && Some(*a) != addr);
+        if let Some(new) = reassigned {
+            match tun.device().configure_v4(new, prefix) {
+                Ok(()) => {
+                    println!("the server assigned a new tunnel address: {new}");
+                    if let Some(ft) = net.get() {
+                        ft.reassert_routes();
+                    }
+                    addr = Some(new);
+                }
+                Err(e) => tracing::error!(error = %e, "could not apply the new tunnel address"),
+            }
+        }
+    }
+}
+
+fn status_path() -> std::path::PathBuf {
+    std::env::var_os("PQANON_STATUS_FILE")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("/run/pqanon.status"))
+}
+
+/// Keep a small status file current for `pqanon status` / `disconnect`.
+#[cfg(target_os = "linux")]
+async fn write_status(
+    link: std::sync::Arc<pqanon::supervisor::ManagedTunnel>,
+    server: std::net::SocketAddr,
+    device: String,
+) {
+    let mut tick = tokio::time::interval(std::time::Duration::from_secs(2));
+    loop {
+        tick.tick().await;
+        let st = link.status();
+        let i = st.info;
+        let since = st
+            .up_since
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs().to_string())
+            .unwrap_or_else(|| "-".into());
+        let text = format!(
+            "pid={}\nstate={:?}\nserver={server}\nserver_identity={}\ndevice={device}\ntunnel_address={}\ndns={}\nmtu={}\n\
+             rtt_ms={}\nup_since_unix={since}\npackets_sent={}\nbytes_sent={}\npackets_received={}\nbytes_received={}\n\
+             dropped_offline={}\nreconnects={}\nrekeys={}\nlast_error={}\n",
+            std::process::id(),
+            st.state,
+            hex::encode(st.server_identity),
+            i.assigned_v4.map(|a| format!("{a}/{}", i.prefix_len)).unwrap_or_else(|| "-".into()),
+            i.dns_v4.map(|d| d.to_string()).unwrap_or_else(|| "-".into()),
+            i.effective_mtu(),
+            st.rtt.map(|r| format!("{:.1}", r.as_secs_f64() * 1e3)).unwrap_or_else(|| "-".into()),
+            st.stats.packets_sent,
+            st.stats.bytes_sent,
+            st.stats.packets_received,
+            st.stats.bytes_received,
+            st.dropped_offline,
+            st.reconnects,
+            st.rekeys,
+            st.last_error.as_deref().unwrap_or("-"),
+        );
+        let _ = pqanon::secure_write::write_private(&status_path(), text.as_bytes());
+    }
+}
+
+fn status_cmd() -> Result<()> {
+    match std::fs::read_to_string(status_path()) {
+        Ok(text) => {
+            print!("{text}");
+            Ok(())
+        }
+        Err(_) => {
+            println!("state=NotRunning");
+            Ok(())
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn disconnect_cmd() -> Result<()> {
+    let text = std::fs::read_to_string(status_path()).map_err(|_| anyhow::anyhow!("no running `pqanon run` (no status file)"))?;
+    let pid: i32 = text
+        .lines()
+        .find_map(|l| l.strip_prefix("pid="))
+        .and_then(|p| p.trim().parse().ok())
+        .ok_or_else(|| anyhow::anyhow!("status file has no pid"))?;
+    // SAFETY: kill(2) with a pid read from our own status file and SIGTERM.
+    if unsafe { libc::kill(pid, libc::SIGTERM) } != 0 {
+        anyhow::bail!("could not signal pid {pid}: {}", std::io::Error::last_os_error());
+    }
+    println!("asked pqanon (pid {pid}) to disconnect");
     Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn disconnect_cmd() -> Result<()> {
+    anyhow::bail!("disconnect is Linux only")
+}
+
+#[cfg(target_os = "linux")]
+fn down_cmd() -> Result<()> {
+    let done = pqanon::netcfg::cleanup_after_crash(false)?;
+    if done.is_empty() {
+        println!("nothing to undo");
+    }
+    for d in done {
+        println!("{d}");
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn down_cmd() -> Result<()> {
+    anyhow::bail!("down is Linux only")
+}
+
+#[cfg(target_os = "linux")]
+async fn shutdown_signal() {
+    let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .expect("installing the SIGTERM handler");
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {}
+        _ = term.recv() => {}
+    }
 }
 
 /// TUN → tunnel.
 #[cfg(target_os = "linux")]
 async fn pump_up(
     tun: std::sync::Arc<pqanon::tun::AsyncTun>,
-    tunnel: std::sync::Arc<pqanon::client::Tunnel>,
+    link: std::sync::Arc<pqanon::supervisor::ManagedTunnel>,
 ) -> Result<()> {
     let mut b = vec![0u8; 65536];
     loop {
         let n = tun.recv(&mut b).await?;
-        if n == 0 {
-            return Ok(());
+        if n > 0 {
+            link.send(&b[..n]).await;
         }
-        tunnel.send(&b[..n]).await?;
     }
 }
 
@@ -679,10 +981,10 @@ async fn pump_up(
 #[cfg(target_os = "linux")]
 async fn pump_down(
     tun: std::sync::Arc<pqanon::tun::AsyncTun>,
-    tunnel: std::sync::Arc<pqanon::client::Tunnel>,
+    link: std::sync::Arc<pqanon::supervisor::ManagedTunnel>,
 ) -> Result<()> {
     loop {
-        let pkt = tunnel.recv().await?;
+        let pkt = link.recv().await?;
         tun.send(&pkt).await?;
     }
 }
@@ -750,7 +1052,7 @@ fn probe(config: &str, count: u16, timeout_ms: u64) -> Result<()> {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn run(_config: &str, _route: &str) -> Result<()> {
+fn run(_o: RunOpts) -> Result<()> {
     anyhow::bail!("the tunnel runs on Linux (TUN device required)")
 }
 

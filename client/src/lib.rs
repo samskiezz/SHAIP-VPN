@@ -17,6 +17,7 @@
 pub mod bloom;
 pub mod client;
 pub mod crl;
+pub mod ctl;
 pub mod dataplane;
 pub mod decoy;
 pub mod descriptor;
@@ -35,6 +36,7 @@ pub mod mix;
 pub mod obf;
 pub mod router;
 pub mod routing;
+pub mod supervisor;
 pub mod tls_decoy;
 pub mod transport;
 pub mod wire;
@@ -42,6 +44,10 @@ pub mod wire;
 /// Linux TUN device binding for the data plane (§19). Linux only.
 #[cfg(target_os = "linux")]
 pub mod tun;
+
+/// Linux routes, DNS and leak blocking for a full-tunnel client.
+#[cfg(target_os = "linux")]
+pub mod netcfg;
 
 // Supporting library primitives for the §19 integration backlog. Self-contained
 // and unit-tested; wired into the daemons as those features land.

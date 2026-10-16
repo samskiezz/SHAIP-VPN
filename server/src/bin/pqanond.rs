@@ -1,28 +1,35 @@
 //! `pqanond` — PQ-ANON tunnel daemon (§11.1).
 //!
-//! A real UDP server that:
-//! 1. answers the PQANON-HS/1 handshake (plain-framed, pre-key),
-//! 2. establishes a per-client [`Session`], and
-//! 3. with `--tun`, decrypts morphed DATA and writes the IP packet to a TUN
-//!    device, and routes packets read back from TUN to the owning client by
-//!    destination address (the real data plane, §19). Without `--tun` it echoes
-//!    decrypted DATA back — a self-contained demo of the crypto path.
+//! A real UDP server that answers the PQANON-HS/1 handshake, keeps one session
+//! per client identity, and moves the client's IP traffic:
+//!
+//! - With `--tun`, decrypted packets go to a TUN device and return traffic is
+//!   routed to the owning client by destination address. A client may send
+//!   only from its own tunnel address. Add `--nat IFACE` and the server
+//!   forwards and masquerades that traffic out to the internet; a DNS
+//!   forwarder on the tunnel address serves the clients' lookups (pushed to
+//!   them in the session ACK), so those never leave from the client's network.
+//! - Without `--tun` it echoes decrypted DATA back: a self-contained demo of
+//!   the crypto path, used by the tests.
+//!
+//! Sessions are kept alive by client keepalives, end on `Close` or after the
+//! session timeout, and every client is sent `Close` when the daemon stops
+//! (SIGINT/SIGTERM), so they reconnect at once. The session logic itself lives
+//! in [`pqanon_server::core`].
 //!
 //! Handshake messages are plain-framed because the per-epoch morph key is
 //! derived from `ss_mix`, which does not exist until the handshake completes;
 //! anti-probing (a TLS 1.3 decoy, §10.2) answers unrecognized datagrams, and
-//! all DATA is morphed.
+//! all session traffic is morphed.
 
 use anyhow::Result;
 use clap::Parser;
-use pqanon::client::SessionInfo;
-use pqanon::handshake::{DevicePolicy, Established, Identity, ServerHandshake};
-use pqanon::obf::Obfuscator;
-use pqanon::transport::Session;
-use pqanon::wire::{Envelope, MsgType};
-use std::collections::{HashMap, HashSet};
+use pqanon::handshake::{DevicePolicy, Identity};
+use pqanon_server::core::{Core, Forwarding, Gate, Limits, Out};
+use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::net::UdpSocket;
 
 #[derive(Parser)]
@@ -38,9 +45,42 @@ struct Cli {
     #[arg(long)]
     tun: Option<String>,
 
-    /// This server's tunnel IP (CIDR) when `--tun` is set.
+    /// This server's tunnel IP (CIDR) when `--tun` is set. Clients get the
+    /// other addresses of this subnet.
     #[arg(long, default_value = "10.77.0.1/24")]
     tun_addr: String,
+
+    /// Forward and masquerade client traffic out of this interface (e.g.
+    /// eth0), so clients reach the internet through the server. Needs
+    /// `--tun` and nftables; enables IPv4 forwarding while running.
+    #[arg(long, requires = "tun")]
+    nat: Option<String>,
+
+    /// Upstream resolver for the in-tunnel DNS forwarder (default: the first
+    /// nameserver in /etc/resolv.conf).
+    #[arg(long)]
+    dns_upstream: Option<String>,
+
+    /// Do not run the DNS forwarder (and push no resolver to clients).
+    #[arg(long)]
+    no_dns: bool,
+
+    /// Let clients reach each other's tunnel addresses (off: isolated).
+    #[arg(long)]
+    allow_client_to_client: bool,
+
+    /// Let clients reach private, link-local (incl. cloud metadata), and
+    /// reserved addresses from this server's network (off by default).
+    #[arg(long)]
+    allow_private_destinations: bool,
+
+    /// End a session after this many seconds without a packet from it.
+    #[arg(long, default_value_t = 180)]
+    session_timeout_secs: u64,
+
+    /// Drop a handshake that has not finished after this many seconds.
+    #[arg(long, default_value_t = 10)]
+    handshake_timeout_secs: u64,
 
     /// Also run a live TLS 1.3 decoy on this TCP address (e.g. 0.0.0.0:443). A
     /// prober that scans the TCP port completes a real HTTPS handshake and sees
@@ -118,30 +158,6 @@ struct Cli {
 /// fresh list on every request).
 const CRL_MAX_AGE_SECS: i64 = 600;
 
-/// What answering a handshake needs: the server identity and, on a
-/// device-bound daemon, the admission policy.
-#[derive(Clone)]
-struct Gate {
-    identity: Identity,
-    policy: Option<DevicePolicy>,
-}
-
-impl Gate {
-    fn handshake(&self, conn_id: u64) -> ServerHandshake {
-        match &self.policy {
-            Some(p) => ServerHandshake::new_device_bound(self.identity.clone(), p.clone(), conn_id),
-            None => ServerHandshake::new_open(self.identity.clone(), conn_id),
-        }
-    }
-}
-
-fn device_label(est: &Established) -> String {
-    est.device
-        .as_ref()
-        .map(|d| hex16(d.device_id))
-        .unwrap_or_else(|| "-".into())
-}
-
 type Revoked = Arc<std::sync::RwLock<HashSet<[u8; 16]>>>;
 
 /// Build the device-admission policy, loading the CRL first when configured.
@@ -206,14 +222,6 @@ async fn crl_refresher(
     }
 }
 
-enum PeerState {
-    Handshaking(Box<ServerHandshake>),
-    Established {
-        session: Box<Session>,
-        obf: Box<Obfuscator>,
-    },
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
     // Logs go to stderr so stdout stays clean for --print-public.
@@ -274,9 +282,13 @@ async fn main() -> Result<()> {
     }
     tracing::info!(server_identity = %hex16(identity.identity_id()), "pqanond identity");
     let gate = Gate { identity, policy };
+    let limits = Limits {
+        handshake_timeout: Duration::from_secs(cli.handshake_timeout_secs.max(1)),
+        session_timeout: Duration::from_secs(cli.session_timeout_secs.max(5)),
+        ..Limits::default()
+    };
 
     let socket = Arc::new(UdpSocket::bind(&cli.listen).await?);
-    tracing::info!(listen = %socket.local_addr()?, "pqanond listening");
 
     // Optional Prometheus metrics endpoint.
     if let Some(metrics_addr) = cli.metrics.clone() {
@@ -316,275 +328,185 @@ async fn main() -> Result<()> {
         Some(name) => {
             #[cfg(target_os = "linux")]
             {
-                run_with_tun(socket, gate, &name, &cli.tun_addr).await
+                tun_mode(&cli, socket, gate, limits, &name).await
             }
             #[cfg(not(target_os = "linux"))]
             {
-                let _ = name;
+                let _ = (name, gate, limits);
                 anyhow::bail!("--tun is Linux only (TUN is a Linux kernel interface)")
             }
         }
-        None => run_echo(socket, gate).await,
-    }
-}
-
-/// Default (no-TUN) loop: decrypt DATA and echo it back.
-async fn run_echo(socket: Arc<UdpSocket>, gate: Gate) -> Result<()> {
-    let mut peers: HashMap<SocketAddr, PeerState> = HashMap::new();
-    let mut buf = vec![0u8; 65536];
-    loop {
-        let (n, src) = socket.recv_from(&mut buf).await?;
-        if let Err(e) = handle(&socket, &gate, &mut peers, src, &buf[..n]).await {
-            tracing::debug!(%src, error = %e, "dropping packet");
+        None => {
+            tracing::info!(listen = %socket.local_addr()?, "pqanond listening (echo mode)");
+            serve(socket, Core::new(gate, Forwarding::Echo, limits)?, None).await
         }
     }
 }
 
-async fn handle(
-    socket: &UdpSocket,
-    gate: &Gate,
-    peers: &mut HashMap<SocketAddr, PeerState>,
-    src: SocketAddr,
-    pkt: &[u8],
-) -> Result<()> {
-    // Established peer: DATA is morphed.
-    if let Some(PeerState::Established { session, obf }) = peers.get_mut(&src) {
-        let sealed = obf.demorph(pkt)?;
-        let env = session.open_data(&sealed)?;
-        if env.msg_type == MsgType::Data {
-            pqanon::metrics::DATA_PACKETS.inc();
-            tracing::info!(%src, bytes = env.payload.len(), "DATA received; echoing");
-            let reply = session.seal_data(MsgType::Data, env.payload)?;
-            let wire = obf.morph(&reply);
-            socket.send_to(&wire, src).await?;
-        }
-        return Ok(());
-    }
+/// Bring up the TUN device, DNS forwarder and NAT, then serve.
+#[cfg(target_os = "linux")]
+async fn tun_mode(cli: &Cli, socket: Arc<UdpSocket>, gate: Gate, limits: Limits, name: &str) -> Result<()> {
+    use pqanon::tun::{AsyncTun, TunDevice};
+    use pqanon_server::core::TunPolicy;
+    use pqanon_server::{dns_forward, nat};
 
-    let env = match Envelope::from_plain(pkt) {
-        Ok(env) => env,
-        Err(_) => {
-            // Not our protocol — a scanner/DPI probe. Answer with a randomized
-            // TLS 1.3 decoy so the port looks like an HTTPS server (§10.2).
-            socket
-                .send_to(&pqanon::tls_decoy::probe_response(), src)
-                .await?;
-            tracing::debug!(%src, "unrecognized packet; sent TLS decoy");
-            return Ok(());
+    let (gateway, prefix) = parse_cidr(&cli.tun_addr)?;
+    let dev = TunDevice::open(name)?;
+    dev.configure_v4(gateway, prefix)?;
+    dev.set_mtu(pqanon::client::TUNNEL_MTU)?;
+    let tun = Arc::new(AsyncTun::new(dev)?);
+    tracing::info!(device = %tun.name(), %gateway, prefix, mtu = pqanon::client::TUNNEL_MTU, "server TUN up");
+
+    let dns = if cli.no_dns {
+        tracing::warn!("--no-dns: clients get no resolver from this server and keep their own");
+        None
+    } else {
+        let upstream: SocketAddr = match &cli.dns_upstream {
+            Some(a) => a
+                .parse()
+                .or_else(|_| format!("{a}:53").parse())
+                .map_err(|_| anyhow::anyhow!("bad --dns-upstream {a:?} (use IP or IP:PORT)"))?,
+            None => dns_forward::upstream_from_resolv_conf(&std::fs::read_to_string("/etc/resolv.conf").unwrap_or_default())
+                .ok_or_else(|| anyhow::anyhow!("no nameserver in /etc/resolv.conf: pass --dns-upstream or --no-dns"))?,
+        };
+        let (udp, tcp) = dns_forward::bind(gateway).await?;
+        tokio::spawn(async move {
+            if let Err(e) = dns_forward::serve(udp, tcp, upstream).await {
+                tracing::error!(error = %e, "DNS forwarder stopped");
+            }
+        });
+        Some(gateway)
+    };
+
+    let _nat = match &cli.nat {
+        Some(egress) => Some(nat::enable(tun.name(), gateway, prefix, egress)?),
+        None => {
+            tracing::warn!("no --nat: clients can reach this server's tunnel address and nothing beyond it");
+            None
         }
     };
-    match env.msg_type {
-        MsgType::ClientHello => {
-            let mut hs = gate.handshake(env.conn_id);
-            hs.recv_client_hello(&env, true)?;
-            let shello = hs.server_hello()?;
-            socket.send_to(&shello.to_plain(), src).await?;
-            peers.insert(src, PeerState::Handshaking(Box::new(hs)));
-            tracing::info!(%src, "CLIENT_HELLO ok; sent SERVER_HELLO");
-        }
-        MsgType::ClientFinish => {
-            let Some(PeerState::Handshaking(hs)) = peers.remove(&src) else {
-                anyhow::bail!("CLIENT_FINISH without pending handshake");
-            };
-            let mut hs = *hs;
-            let est: Established = match hs.recv_client_finish(&env) {
-                Ok(e) => e,
-                Err(e) => {
-                    pqanon::metrics::HANDSHAKES_FAILED.inc();
-                    return Err(e);
-                }
-            };
-            tracing::info!(%src, conn_id = format!("{:#018x}", est.conn_id),
-                client = %hex16(est.peer_id), device = %device_label(&est), "session established");
-            let mut session = Session::new(est.conn_id, est.k_c2s, est.k_s2c, src, false, 1400);
-            let obf = Obfuscator::new(&est.ss_mix, 1);
-            // Confirm the session: a sealed ACK proves we derived the same keys
-            // and admitted this client. Echo mode assigns no tunnel address.
-            let ack = session.seal_data(MsgType::Ack, SessionInfo::default().encode())?;
-            socket.send_to(&obf.morph(&ack), src).await?;
-            peers.insert(
-                src,
-                PeerState::Established {
-                    session: Box::new(session),
-                    obf: Box::new(obf),
-                },
-            );
-            pqanon::metrics::HANDSHAKES_OK.inc();
-            pqanon::metrics::SESSIONS_ESTABLISHED.inc();
-        }
-        other => anyhow::bail!("unexpected handshake type {other:?}"),
-    }
-    Ok(())
-}
 
-// --- TUN data-plane mode (§19) ---
-
-#[cfg(target_os = "linux")]
-struct TunState {
-    peers: HashMap<SocketAddr, PeerState>,
-    router: pqanon::router::Router,
-    conn_addr: HashMap<u64, SocketAddr>,
-    /// This server's tunnel address and prefix (sent to clients in the ACK).
-    gateway: std::net::Ipv4Addr,
-    prefix_len: u8,
+    let core = Core::new(
+        gate,
+        Forwarding::Tun(TunPolicy {
+            gateway,
+            prefix,
+            dns,
+            allow_client_to_client: cli.allow_client_to_client,
+            allow_private_destinations: cli.allow_private_destinations,
+        }),
+        limits,
+    )?;
+    tracing::info!(listen = %socket.local_addr()?, "pqanond listening (TUN mode)");
+    serve(socket, core, Some(tun)).await
+    // `_nat` drops here: forwarding and masquerade are removed.
 }
 
 #[cfg(target_os = "linux")]
-async fn run_with_tun(
-    socket: Arc<UdpSocket>,
-    gate: Gate,
-    tun_name: &str,
-    tun_addr: &str,
-) -> Result<()> {
-    use pqanon::tun::{AsyncTun, TunDevice};
-    use tokio::sync::Mutex;
+type Tun = pqanon::tun::AsyncTun;
+#[cfg(not(target_os = "linux"))]
+type Tun = ();
 
-    let (ip, prefix) = parse_cidr(tun_addr)?;
-    let dev = TunDevice::open(tun_name)?;
-    dev.configure_v4(ip, prefix)?;
-    let tun = Arc::new(AsyncTun::new(dev)?);
-    tracing::info!(device = %tun.name(), %ip, "server TUN up; routing by destination IP");
+/// The I/O shell: UDP datagrams and TUN packets in, [`Out`]s out, a 1 s
+/// housekeeping tick, and a clean shutdown on SIGINT/SIGTERM.
+async fn serve(socket: Arc<UdpSocket>, core: Core, tun: Option<Arc<Tun>>) -> Result<()> {
+    let core = Arc::new(std::sync::Mutex::new(core));
 
-    let state = Arc::new(Mutex::new(TunState {
-        peers: HashMap::new(),
-        router: pqanon::router::Router::new(),
-        conn_addr: HashMap::new(),
-        gateway: ip,
-        prefix_len: prefix,
-    }));
-
-    // TUN read task: route each kernel packet to its client session by dst IP.
-    {
-        let (tun, state, socket) = (tun.clone(), state.clone(), socket.clone());
+    #[cfg(target_os = "linux")]
+    if let Some(tun) = tun.clone() {
+        let (core, socket) = (core.clone(), socket.clone());
         tokio::spawn(async move {
-            let mut buf = vec![0u8; 65536];
+            let mut buf = vec![0u8; 65_536];
             loop {
                 let n = match tun.recv(&mut buf).await {
                     Ok(n) if n > 0 => n,
-                    _ => continue,
-                };
-                let pkt = &buf[..n];
-                // Compute the datagram under the lock, then send after dropping it.
-                let out = {
-                    let mut st = state.lock().await;
-                    match st.router.route(pkt).and_then(|c| st.conn_addr.get(&c).copied()) {
-                        Some(addr) => match st.peers.get_mut(&addr) {
-                            Some(PeerState::Established { session, obf }) => session
-                                .seal_data(MsgType::Data, pkt.to_vec())
-                                .ok()
-                                .map(|sealed| (obf.morph(&sealed), addr)),
-                            _ => None,
-                        },
-                        None => None,
+                    Ok(_) => continue,
+                    Err(e) => {
+                        tracing::error!(error = %e, "TUN read failed");
+                        return;
                     }
                 };
-                if let Some((wire, addr)) = out {
-                    let _ = socket.send_to(&wire, addr).await;
+                let out = core.lock().expect("core lock").on_tun_packet(&buf[..n]);
+                if let Some(Out::Udp(wire, to)) = out {
+                    let _ = socket.send_to(&wire, to).await;
                 }
             }
         });
     }
 
-    // UDP recv loop.
-    let mut buf = vec![0u8; 65536];
+    {
+        let core = core.clone();
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_secs(1));
+            loop {
+                tick.tick().await;
+                core.lock().expect("core lock").on_tick(Instant::now());
+            }
+        });
+    }
+
+    let shutdown = shutdown_signal();
+    tokio::pin!(shutdown);
+    let mut buf = vec![0u8; 65_536];
     loop {
-        let (n, src) = socket.recv_from(&mut buf).await?;
-        let pkt = buf[..n].to_vec();
-        if let Err(e) = handle_tun(&socket, &gate, &state, &tun, src, &pkt).await {
-            tracing::debug!(%src, error = %e, "dropping packet");
+        tokio::select! {
+            r = socket.recv_from(&mut buf) => {
+                let (n, src) = match r {
+                    Ok(x) => x,
+                    Err(e) => {
+                        tracing::debug!(error = %e, "recv_from failed");
+                        continue;
+                    }
+                };
+                let outs = core.lock().expect("core lock").on_datagram(src, &buf[..n], Instant::now());
+                deliver(&socket, tun.as_deref(), outs).await;
+            }
+            _ = &mut shutdown => break,
+        }
+    }
+    let outs = core.lock().expect("core lock").shutdown(Instant::now());
+    let told = outs.len();
+    deliver(&socket, tun.as_deref(), outs).await;
+    tracing::info!(clients_told = told, "pqanond stopping; every client was sent Close");
+    Ok(())
+}
+
+async fn deliver(socket: &UdpSocket, tun: Option<&Tun>, outs: Vec<Out>) {
+    for o in outs {
+        match o {
+            Out::Udp(wire, to) => {
+                let _ = socket.send_to(&wire, to).await;
+            }
+            #[cfg(target_os = "linux")]
+            Out::Tun(pkt) => {
+                if let Some(t) = tun {
+                    if let Err(e) = t.send(&pkt).await {
+                        tracing::debug!(error = %e, "TUN write failed");
+                    }
+                }
+            }
+            #[cfg(not(target_os = "linux"))]
+            Out::Tun(_) => {
+                let _ = tun;
+            }
         }
     }
 }
 
-#[cfg(target_os = "linux")]
-async fn handle_tun(
-    socket: &UdpSocket,
-    gate: &Gate,
-    state: &Arc<tokio::sync::Mutex<TunState>>,
-    tun: &Arc<pqanon::tun::AsyncTun>,
-    src: SocketAddr,
-    pkt: &[u8],
-) -> Result<()> {
-    // Established peer: decrypt and write the IP packet to the TUN device.
+async fn shutdown_signal() {
+    #[cfg(unix)]
     {
-        let mut st = state.lock().await;
-        if let Some(PeerState::Established { session, obf }) = st.peers.get_mut(&src) {
-            let sealed = obf.demorph(pkt)?;
-            let env = session.open_data(&sealed)?;
-            let payload = (env.msg_type == MsgType::Data).then_some(env.payload);
-            drop(st); // don't hold the lock across the TUN write
-            if let Some(p) = payload {
-                pqanon::metrics::DATA_PACKETS.inc();
-                tun.send(&p).await?;
-            }
-            return Ok(());
+        let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("installing the SIGTERM handler");
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            _ = term.recv() => {}
         }
     }
-
-    let env = match Envelope::from_plain(pkt) {
-        Ok(env) => env,
-        Err(_) => {
-            socket
-                .send_to(&pqanon::tls_decoy::probe_response(), src)
-                .await?;
-            return Ok(());
-        }
-    };
-    match env.msg_type {
-        MsgType::ClientHello => {
-            let mut hs = gate.handshake(env.conn_id);
-            hs.recv_client_hello(&env, true)?;
-            let shello = hs.server_hello()?;
-            socket.send_to(&shello.to_plain(), src).await?;
-            state
-                .lock()
-                .await
-                .peers
-                .insert(src, PeerState::Handshaking(Box::new(hs)));
-            tracing::info!(%src, "CLIENT_HELLO ok; sent SERVER_HELLO");
-        }
-        MsgType::ClientFinish => {
-            let mut st = state.lock().await;
-            let Some(PeerState::Handshaking(hs)) = st.peers.remove(&src) else {
-                anyhow::bail!("CLIENT_FINISH without pending handshake");
-            };
-            let mut hs = *hs;
-            let est = match hs.recv_client_finish(&env) {
-                Ok(e) => e,
-                Err(e) => {
-                    pqanon::metrics::HANDSHAKES_FAILED.inc();
-                    return Err(e);
-                }
-            };
-            let assigned = st.router.allocate_v4(est.conn_id);
-            st.conn_addr.insert(est.conn_id, src);
-            let mut session = Session::new(est.conn_id, est.k_c2s, est.k_s2c, src, false, 1400);
-            let obf = Obfuscator::new(&est.ss_mix, 1);
-            // Confirm the session and tell the client the address it was given
-            // (and its gateway), so its TUN matches what we route by.
-            let info = SessionInfo {
-                assigned_v4: assigned,
-                prefix_len: st.prefix_len,
-                gateway_v4: Some(st.gateway),
-            };
-            let ack = obf.morph(&session.seal_data(MsgType::Ack, info.encode())?);
-            st.peers.insert(
-                src,
-                PeerState::Established {
-                    session: Box::new(session),
-                    obf: Box::new(obf),
-                },
-            );
-            drop(st); // don't hold the lock across the send
-            socket.send_to(&ack, src).await?;
-            pqanon::metrics::HANDSHAKES_OK.inc();
-            pqanon::metrics::SESSIONS_ESTABLISHED.inc();
-            tracing::info!(%src, conn_id = format!("{:#018x}", est.conn_id),
-                device = %device_label(&est), assigned = ?assigned, "session established; tunnel IP assigned");
-        }
-        other => anyhow::bail!("unexpected handshake type {other:?}"),
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
     }
-    Ok(())
 }
 
 #[cfg(target_os = "linux")]

@@ -104,6 +104,33 @@ impl TunDevice {
         Ok(())
     }
 
+    /// Set the interface MTU (`SIOCSIFMTU`), so the kernel never hands the
+    /// tunnel a packet whose sealed datagram would fragment on the real path.
+    pub fn set_mtu(&self, mtu: u16) -> io::Result<()> {
+        #[repr(C)]
+        struct IfReqMtu {
+            ifr_name: [libc::c_char; IFNAMSIZ],
+            ifr_mtu: libc::c_int,
+            _pad: [u8; 20],
+        }
+        // SAFETY: creating an AF_INET datagram socket; args are plain ints.
+        let raw = unsafe { libc::socket(libc::AF_INET, libc::SOCK_DGRAM, 0) };
+        if raw < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: freshly-opened fd we own.
+        let sock = unsafe { OwnedFd::from_raw_fd(raw) };
+        // SAFETY: POD struct; zeroing is valid.
+        let mut req: IfReqMtu = unsafe { std::mem::zeroed() };
+        copy_name(&mut req.ifr_name, &self.name)?;
+        req.ifr_mtu = libc::c_int::from(mtu);
+        // SAFETY: valid socket fd and a correctly-shaped ifreq for SIOCSIFMTU.
+        if unsafe { libc::ioctl(sock.as_raw_fd(), libc::SIOCSIFMTU as _, &mut req as *mut IfReqMtu) } < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
     /// Switch the device to non-blocking mode (required by async drivers).
     pub fn set_nonblocking(&self) -> io::Result<()> {
         let fd = self.fd.as_raw_fd();
@@ -173,6 +200,11 @@ impl AsyncTun {
 
     pub fn name(&self) -> &str {
         self.inner.get_ref().name()
+    }
+
+    /// The underlying device (to reconfigure its address or MTU).
+    pub fn device(&self) -> &TunDevice {
+        self.inner.get_ref()
     }
 
     /// Read one IP packet, awaiting readiness.
