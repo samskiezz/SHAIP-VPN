@@ -1,10 +1,27 @@
 # SHAIP-VPN — honest build status
 
-Last audited: 2026-10-16. This file is the single source of truth for what is
+Baseline audited: 2026-10-16. Exposure safeguards updated: 2026-10-17. This file is the single source of truth for what is
 real, what is written-but-unverified, and what does not exist. If any other
 doc disagrees with this one, this one is right. No marketing.
 
-## The two things that are NOT done, and why they need you
+## Current exposure safeguards
+
+See [exposure-safeguards.md](docs/exposure-safeguards.md) for the implemented
+Linux/desktop readiness checks, HTTPS restrictions and verification limits.
+**Android VPN packet forwarding is not implemented.** Its connection control is
+disabled and says “Not protected”; the crypto self-test proves no traffic protection.
+Desktop VPN operation is Linux-only. The baseline battery below was reported by
+the previous audit; it has not all been reproduced for this patch.
+The browser instrument UI cannot establish a VPN or install a kill switch;
+connection animations require preview mode and display a simulation notice.
+
+Patch verification: workspace Rust library/binary tests (175 passed, 1 ignored),
+desktop tests (4 passed), web protection/transport tests (5 passed), TypeScript
+check, production web build and C smoke-source syntax check passed. Privileged
+network tests and the full integration battery were not completed. Android
+Gradle bootstrap was blocked by network access; iOS requires Xcode/device testing.
+
+## Deployment and platform gaps
 
 These are not code defects. They are steps that require hardware and accounts
 this build environment (a Linux container) does not have:
@@ -25,7 +42,7 @@ this build environment (a Linux container) does not have:
    has nothing to connect to yet. Standing one up is a deliberate, ~30-minute
    step (below).
 
-Everything else below is real.
+The table below records the baseline audit, with corrected tunnel availability.
 
 ## What is real and proven (reproduced on 2026-10-16)
 
@@ -44,10 +61,10 @@ Everything else below is real.
 | iOS **core logic** (config parsing, telemetry, render engine) | **Real** | `swift test` (13 tests) — builds on Linux, Foundation-only |
 | iOS ↔ Rust boundary (the app's FFI Swift against a live `pqanond`) | **Real** | `clients/ios/FFIInterop` runs in the battery on Linux |
 | **Android app** (Kotlin + Jetpack Compose, same glass design; login, dashboard, Servers directory, devices, buy-access + code redeem; wired to the real control plane) | **Real — builds to an APK on Linux** | `cd clients/android && ./gradlew assembleDebug` → `app-debug.apk` (no macOS needed) |
-| Android VpnService (owns the TUN + connection lifecycle) | **Real skeleton** | `clients/android/.../vpn/PqanonVpnService.kt`; does not black-hole traffic until the tunnel data path lands |
+| Android VPN packet forwarding | **Unavailable** | Service rejects connection attempts; dashboard says “Not protected”. Native self-test does not forward packets. |
 | Android ↔ Rust PQ core over JNI | **Real** | `clients/android-native` builds `libpqanon_jni.so` for arm64-v8a / x86_64 / armeabi-v7a (cargo-ndk), bundled in the APK; the Dashboard runs a live on-device ML-DSA-65 keygen. Proven by a JVM round-trip test (`cargo test`) and a Rust unit test |
 | **Desktop app** (Rust + egui, same glass design; login, dashboard, Servers, Buy access + code redeem; wired to the real control plane) | **Real — cross-builds to Linux + Windows from Linux** | `cd clients/desktop && cargo build --release` (Linux ELF) and `--target x86_64-pc-windows-gnu` (Windows PE32+ GUI .exe); screens rendered headless under Xvfb |
-| Desktop tunnel control | **Real control surface** | drives the local `pqanon` engine (shared Rust core); honest when the engine isn't installed |
+| Desktop tunnel control | **Implemented for Linux; unit-tested/build-checked** | Owns the updated engine child, verifies fresh private protection status. Privileged live TUN testing still required. Windows/macOS tunnel backend unavailable. |
 | Full battery | **16 stages, 0 failed** | `scripts/test-all.sh` |
 
 ## What is written but UNVERIFIED (needs a Mac to compile)

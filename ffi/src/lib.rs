@@ -395,6 +395,31 @@ pub unsafe extern "C" fn pqanon_session_start(
     })
 }
 
+/// Validate server parameters before a native front end installs full-tunnel
+/// routes. A confirmed echo session or missing/inappropriate DNS is refused.
+/// This checks parameters, not whether the front end installed OS protection.
+///
+/// # Safety
+/// `s` must come from `pqanon_session_start` and not be freed. `err` is NULL
+/// or a writable pointer; free a returned message with pqanon_string_free.
+#[no_mangle]
+pub unsafe extern "C" fn pqanon_session_check_full_tunnel(
+    s: *const PqanonSession,
+    err: *mut *mut c_char,
+) -> c_int {
+    guard(err, -1, || {
+        let s = s.as_ref().ok_or("session is NULL")?;
+        let status = s.link.status();
+        if status.state != LinkState::Connected {
+            return Err("the session is not connected".into());
+        }
+        let info = status.info;
+        pqanon::protection::require_full_tunnel(info.assigned_v4, info.prefix_len, info.dns_v4, true)
+            .map_err(str::to_string)?;
+        Ok(0)
+    })
+}
+
 /// Send one IP packet. While the link is reconnecting the packet is dropped
 /// (and counted), never sent elsewhere. Returns 0, or -1 for bad arguments.
 ///
@@ -678,6 +703,10 @@ mod tests {
         assert!(t.is_null());
         let msg = unsafe { CStr::from_ptr(err) }.to_str().unwrap().to_string();
         assert!(msg.contains("server is NULL"), "{msg}");
+        unsafe { super::pqanon_string_free(err) };
+        err = std::ptr::null_mut();
+        assert_eq!(unsafe { super::pqanon_session_check_full_tunnel(std::ptr::null(), &mut err) }, -1);
+        assert_eq!(unsafe { CStr::from_ptr(err) }.to_str().unwrap(), "session is NULL");
         unsafe { super::pqanon_string_free(err) };
         assert_eq!(unsafe { super::pqanon_tunnel_send(std::ptr::null(), std::ptr::null(), 0, std::ptr::null_mut()) }, -1);
         assert_eq!(unsafe { super::pqanon_tunnel_assigned_ipv4(std::ptr::null()) }, 0);

@@ -21,15 +21,25 @@ same `PQANON-CP/1` control plane.
   identity-free discount/comp-code redemption (Buy access).
 - **Anonymous accounts** (16-digit number, no email); the number is never
   written to disk by this client.
-- Requests run off the UI thread (ehttp); the UI repaints when a reply lands.
+- Requests run off the UI thread (native worker thread); the UI repaints when a reply lands.
 
 ## The tunnel
 
-The Connect control drives the local **pqanon tunnel engine** (the Rust client,
-shared with the CLI and proven by the netns lab), which opens the TUN device and
-runs the PQANON/1 post-quantum handshake (ML-KEM-768 + ML-DSA-65) and the
-encrypted tunnel. The GUI launches/stops that privileged helper; if it isn't on
-PATH the app says so honestly rather than pretending to connect.
+On Linux, Connect launches the updated `pqanon run --config FILE --kill-switch`
+engine. Set `PQANON_CONFIG` to an absolute operator-issued TOML path (or enter it
+on the dashboard) and `PQANON_ENGINE` to the matching CLI binary if it is not on
+PATH. It inherits the current user's privileges: no privileged broker or
+automatic elevation is implemented. TUN, nftables and network administration
+privileges are required.
+
+Connected requires a live owned child and a fresh private status confirming full
+IPv4 routing, tunnel DNS, IPv6 blocking and kill switch. Missing/stale/old-format
+status is unverified. Disconnect waits for the engine to exit; failure may leave
+the kill switch closed until `pqanon down`. This is engine evidence, not an
+external leak test. The Windows/macOS VPN backend is unavailable.
+
+See [exposure safeguards](../../docs/exposure-safeguards.md) for remaining risks,
+startup blocking behaviour and build/test instructions.
 
 ## Offline preview
 
@@ -41,6 +51,7 @@ screenshots and offline demos.
 ## Config
 
 `PQANON_API` sets the control-plane base URL (default `http://127.0.0.1:8080`).
+Remote hosts require HTTPS; automatic redirects are refused.
 
 ## Layout
 
@@ -48,6 +59,6 @@ screenshots and offline demos.
 src/
   main.rs    window + entry point
   theme.rs   the glass look in egui (shared tokens) + gradient painter
-  api.rs     control-plane client (ehttp + serde), async → UI channel
+  api.rs     control-plane client (ureq + serde), async → UI channel
   app.rs     state, the login/dashboard/servers/buy screens, tunnel control
 ```

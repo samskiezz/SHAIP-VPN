@@ -408,7 +408,7 @@ pub struct FullTunnelOpts {
     pub kill_switch: bool,
 }
 
-/// Routes, DNS and firewall for a running tunnel; all undone on drop.
+/// Routes and DNS are undone on drop; a persistent kill switch stays closed.
 pub struct FullTunnel {
     tun: String,
     server: Option<Ipv4Addr>,
@@ -431,10 +431,13 @@ impl FullTunnel {
             dns: None,
             firewall: None,
         };
-        // Firewall first, so nothing leaks while routes are changing. Until
-        // setup completes, a failure removes it again (dropping `ft`).
+        // Firewall first. Persist immediately: a later route/DNS setup failure
+        // must not remove the protection installed before the handshake.
         if o.kill_switch || o.block_ipv6 {
             ft.firewall = Some(block_leaks(&o.tun, o.server, o.kill_switch)?);
+            if o.kill_switch {
+                ft.firewall.as_mut().unwrap().persist();
+            }
         }
         if o.redirect_default {
             if let Some(server) = ft.server {
@@ -450,11 +453,6 @@ impl FullTunnel {
         }
         if let Some(dns) = o.dns {
             ft.dns = Some(set_dns(&o.tun, dns).map_err(|e| anyhow::anyhow!("setting DNS to {dns}: {e}"))?);
-        }
-        if o.kill_switch {
-            if let Some(fw) = ft.firewall.as_mut() {
-                fw.persist(); // from here on, a crash keeps blocking
-            }
         }
         Ok(ft)
     }
@@ -498,12 +496,11 @@ impl FullTunnel {
     }
 
     /// Re-install the default-route halves (after the TUN address changed).
-    pub fn reassert_routes(&self) {
+    pub fn reassert_routes(&self) -> io::Result<()> {
         for r in &self.split_routes {
-            if let Err(e) = add_route(r) {
-                tracing::warn!(error = %e, route = ?r, "could not re-add a tunnel route");
-            }
+            add_route(r)?;
         }
+        Ok(())
     }
 
     /// Tear down cleanly, including a kill switch.
@@ -566,6 +563,33 @@ pub fn cleanup_after_crash(keep_firewall: bool) -> io::Result<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn setup_failure_keeps_firewall() {
+        // Separate process: PATH changes cannot affect concurrent tests, and
+        // the fake nft never changes the host firewall or requires privileges.
+        if let Some(dir) = std::env::var_os("SHAIP_FIREWALL_TEST_DIR") {
+            let result = FullTunnel::up(FullTunnelOpts {
+                tun: "pq-test".into(), server: "[::1]:443".parse().unwrap(),
+                redirect_default: true, dns: None, block_ipv6: true, kill_switch: true,
+            });
+            assert!(result.is_err(), "IPv6 full-tunnel endpoint must fail after firewall setup");
+            let calls = std::fs::read_to_string(PathBuf::from(dir).join("calls")).unwrap();
+            assert_eq!(calls.lines().count(), 1, "setup failure must not issue a firewall removal");
+            return;
+        }
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("shaip-firewall-test-{}", std::process::id()));
+        std::fs::create_dir(&dir).unwrap();
+        let script = dir.join("nft");
+        std::fs::write(&script, b"#!/bin/sh\n[ \"$1\" = --version ] && exit 0\nprintf 'call\\n' >> \"$SHAIP_FIREWALL_TEST_DIR/calls\"\nwhile IFS= read -r line; do :; done\n").unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "netcfg::tests::setup_failure_keeps_firewall", "--nocapture"])
+            .env("SHAIP_FIREWALL_TEST_DIR", &dir).env("PATH", &dir).output().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stdout));
+    }
 
     #[test]
     fn rtentry_matches_the_kernel_layout() {

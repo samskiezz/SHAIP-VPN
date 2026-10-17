@@ -1,4 +1,5 @@
 // Thin client for the PQANON-CP/1 control plane.
+import { apiRequestURL } from "./transport";
 
 export const API_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
@@ -88,7 +89,15 @@ export async function api<T>(path: string, opts: Options = {}): Promise<T> {
     status = r.status;
     text = r.body;
   } else {
-    const res = await fetch(`${API_URL}${path}`, { method, headers, body });
+    const url = apiRequestURL(API_URL, path,
+      typeof window === "undefined" ? undefined : window.location.href);
+    const res = await fetch(url, {
+      method, headers, body,
+      redirect: "error", // never forward a password/body to a redirected origin
+      referrerPolicy: "no-referrer",
+      cache: "no-store",
+      credentials: "omit", // bearer auth only; no ambient tracking cookies
+    });
     status = res.status;
     text = await res.text();
   }

@@ -4,6 +4,8 @@
 mod api;
 mod app;
 mod theme;
+mod tunnel;
+mod http;
 
 use app::DesktopApp;
 

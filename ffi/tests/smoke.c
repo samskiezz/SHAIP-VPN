@@ -95,6 +95,13 @@ int main(int argc, char **argv) {
     if (pqanon_session_status(ss, &st) != 0 || st.state != PQANON_STATE_CONNECTED)
         return fail("session not connected", NULL);
     if (st.mtu == 0 || st.mtu > 1370) return fail("session MTU", NULL);
+    /* The lab server echoes packets: crypto success must not be advertised as
+     * a usable full VPN with routed DNS. */
+    err = NULL;
+    if (pqanon_session_check_full_tunnel(ss, &err) != -1 || err == NULL)
+        return fail("echo session accepted as a full tunnel", err);
+    pqanon_string_free(err);
+    err = NULL;
     char *addr = pqanon_session_server_addr(ss);
     if (!addr || strcmp(addr, argv[1]) != 0) return fail("server address", addr);
     pqanon_string_free(addr);
