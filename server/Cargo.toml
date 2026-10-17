@@ -27,3 +27,9 @@ anyhow             = "1"
 clap               = { version = "4", features = ["derive"] }
 tracing            = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+# For the SHAIP-PT/1 bridge end-to-end test (TLS carrier + self-signed cert).
+rustls       = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+rcgen        = { version = "0.13", default-features = false, features = ["ring", "pem"] }

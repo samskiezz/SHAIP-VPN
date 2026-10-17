@@ -17,9 +17,10 @@
 //! option that dials it instead of raw UDP, are layered on top.
 
 use std::io;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio::net::TcpStream;
+use tokio::net::{TcpStream, UdpSocket};
 use tokio_rustls::{TlsAcceptor, TlsConnector};
 
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
@@ -104,6 +105,114 @@ pub async fn accept(
     tcp.set_nodelay(true).ok();
     let tls = acceptor.accept(tcp).await?;
     Ok(tls)
+}
+
+fn unspecified_for(addr: SocketAddr) -> SocketAddr {
+    if addr.is_ipv4() {
+        (std::net::Ipv4Addr::UNSPECIFIED, 0).into()
+    } else {
+        (std::net::Ipv6Addr::UNSPECIFIED, 0).into()
+    }
+}
+
+/// Bridge side: relay one accepted TLS connection to/from an upstream `shaipd`
+/// UDP address. Framed datagrams read from the client over TLS are sent as UDP
+/// datagrams to `upstream`; UDP replies are framed back over TLS. Returns when
+/// either direction closes. One upstream UDP socket per connection, so `shaipd`
+/// distinguishes clients by source port exactly as with direct UDP.
+pub async fn bridge_connection(
+    tls: tokio_rustls::server::TlsStream<TcpStream>,
+    upstream: SocketAddr,
+) -> anyhow::Result<()> {
+    let udp = UdpSocket::bind(unspecified_for(upstream)).await?;
+    udp.connect(upstream).await?;
+    let udp = Arc::new(udp);
+    let (mut rd, mut wr) = tokio::io::split(tls);
+
+    // client (TLS) -> upstream (UDP)
+    let mut up = {
+        let udp = udp.clone();
+        tokio::spawn(async move {
+            while let Ok(d) = read_datagram(&mut rd).await {
+                if udp.send(&d).await.is_err() {
+                    break;
+                }
+            }
+        })
+    };
+    // upstream (UDP) -> client (TLS)
+    let mut down = tokio::spawn(async move {
+        let mut buf = vec![0u8; MAX_DATAGRAM];
+        loop {
+            match udp.recv(&mut buf).await {
+                Ok(n) => {
+                    if write_datagram(&mut wr, &buf[..n]).await.is_err() {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    tokio::select! {
+        _ = &mut up => down.abort(),
+        _ = &mut down => up.abort(),
+    }
+    Ok(())
+}
+
+/// Client side: a local pluggable-transport proxy. The SHAIP client is pointed at
+/// `local` (an ordinary local UDP socket) as if it were the server; this relays
+/// its datagrams over a TLS connection to the bridge and back, so to the network
+/// the client's traffic is an HTTPS-looking TLS flow. One SHAIP client per proxy
+/// instance (it learns that client's address from its first datagram).
+pub async fn pt_client(
+    local: Arc<UdpSocket>,
+    bridge: SocketAddr,
+    server_name: &str,
+    config: Arc<ClientConfig>,
+) -> anyhow::Result<()> {
+    let tls = connect(bridge, server_name, config).await?;
+    let (mut rd, mut wr) = tokio::io::split(tls);
+    let peer: Arc<tokio::sync::Mutex<Option<SocketAddr>>> = Arc::new(tokio::sync::Mutex::new(None));
+
+    // local client (UDP) -> bridge (TLS)
+    let mut up = {
+        let local = local.clone();
+        let peer = peer.clone();
+        tokio::spawn(async move {
+            let mut buf = vec![0u8; MAX_DATAGRAM];
+            loop {
+                match local.recv_from(&mut buf).await {
+                    Ok((n, from)) => {
+                        *peer.lock().await = Some(from);
+                        if write_datagram(&mut wr, &buf[..n]).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        })
+    };
+    // bridge (TLS) -> local client (UDP)
+    let mut down = tokio::spawn(async move {
+        while let Ok(d) = read_datagram(&mut rd).await {
+            let to = *peer.lock().await;
+            if let Some(to) = to {
+                if local.send_to(&d, to).await.is_err() {
+                    break;
+                }
+            }
+        }
+    });
+
+    tokio::select! {
+        _ = &mut up => down.abort(),
+        _ = &mut down => up.abort(),
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -210,12 +210,162 @@ enum Cmd {
         #[arg(long, default_value_t = 600)]
         max_age: i64,
     },
+    /// SHAIP-PT/1 bridge: accept the pluggable transport (TLS) and relay each
+    /// connection to a local shaipd over UDP. Run this beside the VPN server so a
+    /// censor sees HTTPS, not UDP. Terminate real TLS with a real certificate for
+    /// the best cover; a self-signed one is generated if none is given.
+    PtBridge {
+        /// Where to accept TLS (e.g. 0.0.0.0:443).
+        #[arg(long, default_value = "0.0.0.0:443")]
+        listen: String,
+        /// The local shaipd UDP address to relay to (e.g. 127.0.0.1:443).
+        #[arg(long)]
+        upstream: String,
+        /// TLS certificate chain (PEM). Omit to generate a self-signed cert.
+        #[arg(long)]
+        cert: Option<String>,
+        /// TLS private key (PEM). Required with --cert.
+        #[arg(long)]
+        key: Option<String>,
+        /// Hostname for a generated self-signed certificate (its SNI).
+        #[arg(long, default_value = "bridge.local")]
+        server_name: String,
+    },
+    /// SHAIP-PT/1 client proxy: open a local UDP endpoint and relay the tunnel
+    /// over TLS to a bridge. Point your client.toml [server].address at the local
+    /// endpoint this prints.
+    PtClient {
+        /// Local UDP endpoint to expose to the SHAIP client.
+        #[arg(long, default_value = "127.0.0.1:0")]
+        listen: String,
+        /// The bridge's TLS address (e.g. bridge.example.com:443).
+        #[arg(long)]
+        bridge: String,
+        /// SNI/hostname to present to the bridge.
+        #[arg(long)]
+        server_name: String,
+        /// PEM of the certificate(s) to trust for the bridge (its own cert, or a
+        /// CA). Omit only if the bridge uses a publicly-trusted certificate.
+        #[arg(long)]
+        ca: Option<String>,
+    },
 }
 
 fn wallet_path(store: Option<String>) -> std::path::PathBuf {
     store
         .map(std::path::PathBuf::from)
         .unwrap_or_else(shaip::pay_client::default_wallet_path)
+}
+
+/// Load PEM certificates from a file into rustls DER certs.
+fn load_certs_pem(path: &str) -> Result<Vec<rustls::pki_types::CertificateDer<'static>>> {
+    let pem = std::fs::read(path).map_err(|e| anyhow::anyhow!("read {path}: {e}"))?;
+    let mut cur = std::io::Cursor::new(pem);
+    let certs: Vec<_> = rustls_pemfile::certs(&mut cur)
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| anyhow::anyhow!("parse certificates in {path}: {e}"))?;
+    if certs.is_empty() {
+        anyhow::bail!("no certificates found in {path}");
+    }
+    Ok(certs)
+}
+
+/// `shaip pt-bridge`: accept the TLS pluggable transport and relay to a local
+/// shaipd over UDP.
+fn pt_bridge_cmd(
+    listen: &str,
+    upstream: &str,
+    cert: Option<&str>,
+    key: Option<&str>,
+    server_name: &str,
+) -> Result<()> {
+    use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
+    use tokio_rustls::TlsAcceptor;
+
+    // The TLS identity: a real cert/key pair if given, else a fresh self-signed
+    // one for `server_name` (printed so the client can pin it).
+    let (chain, key_der): (Vec<CertificateDer<'static>>, PrivateKeyDer<'static>) = match (cert, key) {
+        (Some(c), Some(k)) => {
+            let chain = load_certs_pem(c)?;
+            let key_pem = std::fs::read(k).map_err(|e| anyhow::anyhow!("read {k}: {e}"))?;
+            let mut cur = std::io::Cursor::new(key_pem);
+            let key = rustls_pemfile::private_key(&mut cur)
+                .map_err(|e| anyhow::anyhow!("parse key {k}: {e}"))?
+                .ok_or_else(|| anyhow::anyhow!("no private key in {k}"))?;
+            (chain, key)
+        }
+        (None, None) => {
+            let ck = rcgen::generate_simple_self_signed(vec![server_name.to_string()])
+                .map_err(|e| anyhow::anyhow!("self-signed cert: {e}"))?;
+            let cert_der = CertificateDer::from(ck.cert.der().to_vec());
+            let out = "pt-bridge-cert.pem";
+            std::fs::write(out, ck.cert.pem()).map_err(|e| anyhow::anyhow!("write {out}: {e}"))?;
+            println!(
+                "generated a self-signed certificate for {server_name:?}; wrote it to {out} — \
+                 pass it to clients as `shaip pt-client --ca {out} --server-name {server_name}`"
+            );
+            let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(ck.key_pair.serialize_der()));
+            (vec![cert_der], key)
+        }
+        _ => anyhow::bail!("--cert and --key must be given together"),
+    };
+
+    let config = shaip::pt::server_config(chain, key_der)?;
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(async move {
+        let upstream: std::net::SocketAddr = tokio::net::lookup_host(upstream)
+            .await
+            .map_err(|e| anyhow::anyhow!("resolve {upstream}: {e}"))?
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("{upstream} did not resolve"))?;
+        let listener = tokio::net::TcpListener::bind(listen)
+            .await
+            .map_err(|e| anyhow::anyhow!("bind {listen}: {e}"))?;
+        let acceptor = TlsAcceptor::from(config);
+        println!("shaip pt-bridge listening on {} → upstream {upstream}", listener.local_addr()?);
+        loop {
+            let (tcp, _) = listener.accept().await?;
+            let acceptor = acceptor.clone();
+            tokio::spawn(async move {
+                if let Ok(tls) = shaip::pt::accept(&acceptor, tcp).await {
+                    let _ = shaip::pt::bridge_connection(tls, upstream).await;
+                }
+            });
+        }
+    })
+}
+
+/// `shaip pt-client`: expose a local UDP endpoint that relays the tunnel over TLS
+/// to a bridge. The SHAIP client points `[server].address` at the printed endpoint.
+fn pt_client_cmd(listen: &str, bridge: &str, server_name: &str, ca: Option<&str>) -> Result<()> {
+    let ca = ca.ok_or_else(|| {
+        anyhow::anyhow!(
+            "--ca <bridge cert PEM> is required (the bridge prints its cert when it starts); \
+             publicly-trusted roots are not bundled"
+        )
+    })?;
+    let roots = load_certs_pem(ca)?;
+    let config = shaip::pt::client_config(roots)?;
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(async move {
+        let bridge: std::net::SocketAddr = tokio::net::lookup_host(bridge)
+            .await
+            .map_err(|e| anyhow::anyhow!("resolve {bridge}: {e}"))?
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("{bridge} did not resolve"))?;
+        let local = std::sync::Arc::new(
+            tokio::net::UdpSocket::bind(listen)
+                .await
+                .map_err(|e| anyhow::anyhow!("bind {listen}: {e}"))?,
+        );
+        println!(
+            "shaip pt-client on {} → bridge {bridge} ({server_name}); set [server].address = \"{}\" \
+             in your client.toml",
+            local.local_addr()?,
+            local.local_addr()?
+        );
+        shaip::pt::pt_client(local, bridge, server_name, config).await
+    })
 }
 
 fn main() {
@@ -308,6 +458,12 @@ fn cli_main() -> Result<()> {
         }
         Cmd::Crl { url, pubkey, max_age } => crl_cmd(&url, &pubkey, max_age),
         Cmd::Directory { url, authorities } => directory_cmd(&url, &authorities),
+        Cmd::PtBridge { listen, upstream, cert, key, server_name } => {
+            pt_bridge_cmd(&listen, &upstream, cert.as_deref(), key.as_deref(), &server_name)
+        }
+        Cmd::PtClient { listen, bridge, server_name, ca } => {
+            pt_client_cmd(&listen, &bridge, &server_name, ca.as_deref())
+        }
         Cmd::Probe {
             config,
             count,
