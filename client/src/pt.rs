@@ -238,14 +238,9 @@ pub async fn bridge_connection(
     // upstream (UDP) -> client (TLS)
     let mut down = tokio::spawn(async move {
         let mut buf = vec![0u8; MAX_DATAGRAM];
-        loop {
-            match udp.recv(&mut buf).await {
-                Ok(n) => {
-                    if write_datagram(&mut wr, &buf[..n]).await.is_err() {
-                        break;
-                    }
-                }
-                Err(_) => break,
+        while let Ok(n) = udp.recv(&mut buf).await {
+            if write_datagram(&mut wr, &buf[..n]).await.is_err() {
+                break;
             }
         }
     });
@@ -280,15 +275,10 @@ pub async fn pt_client(
         let peer = peer.clone();
         tokio::spawn(async move {
             let mut buf = vec![0u8; MAX_DATAGRAM];
-            loop {
-                match local.recv_from(&mut buf).await {
-                    Ok((n, from)) => {
-                        *peer.lock().await = Some(from);
-                        if write_datagram(&mut wr, &buf[..n]).await.is_err() {
-                            break;
-                        }
-                    }
-                    Err(_) => break,
+            while let Ok((n, from)) = local.recv_from(&mut buf).await {
+                *peer.lock().await = Some(from);
+                if write_datagram(&mut wr, &buf[..n]).await.is_err() {
+                    break;
                 }
             }
         })
@@ -364,11 +354,8 @@ mod tests {
             let (tcp, _) = listener.accept().await.unwrap();
             let tls = accept(&acceptor, tcp).await.unwrap();
             let (mut rd, mut wr) = tokio::io::split(tls);
-            loop {
-                match read_datagram(&mut rd).await {
-                    Ok(d) => write_datagram(&mut wr, &d).await.unwrap(),
-                    Err(_) => break, // client closed
-                }
+            while let Ok(d) = read_datagram(&mut rd).await {
+                write_datagram(&mut wr, &d).await.unwrap();
             }
         });
 

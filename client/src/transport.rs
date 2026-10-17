@@ -796,10 +796,8 @@ impl TrafficShaper {
         // Next wakeup: the soonest remaining timer or the blocking expiry.
         let mut wakeup: Option<Instant> = self.block_until;
         for i in 0..self.n {
-            for t in [self.action_at[i], self.internal_at[i]] {
-                if let Some(at) = t {
-                    wakeup = Some(wakeup.map(|w| w.min(at)).unwrap_or(at));
-                }
+            for at in [self.action_at[i], self.internal_at[i]].into_iter().flatten() {
+                wakeup = Some(wakeup.map(|w| w.min(at)).unwrap_or(at));
             }
         }
         ShaperPoll { send_padding, blocking_ended, wakeup }

@@ -67,12 +67,12 @@ pub fn generate(min_signers: u16, max_signers: u16) -> anyhow::Result<ThresholdK
     );
     // frost re-exports the rand_core it was built against; rand 0.8's OsRng
     // implements that RngCore + CryptoRng.
-    let mut rng = rand::rngs::OsRng;
+    let rng = rand::rngs::OsRng;
     let (shares, public) = frost::keys::generate_with_dealer(
         max_signers,
         min_signers,
         frost::keys::IdentifierList::Default,
-        &mut rng,
+        rng,
     )
     .map_err(|e| anyhow::anyhow!("frost dealer keygen: {e}"))?;
 

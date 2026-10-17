@@ -314,22 +314,17 @@ pub async fn mp_client(
         let peer = peer.clone();
         tokio::spawn(async move {
             let mut buf = vec![0u8; 65535];
-            loop {
-                match local.recv_from(&mut buf).await {
-                    Ok((n, from)) => {
-                        *peer.lock().await = Some(from);
-                        let chosen = {
-                            let s = sched.lock().expect("sched");
-                            s.select_redundant(redundancy)
-                        };
-                        for pid in chosen {
-                            let idx = pid.0 as usize;
-                            if socks[idx].send(&buf[..n]).await.is_err() {
-                                sched.lock().expect("sched").on_loss(pid);
-                            }
-                        }
+            while let Ok((n, from)) = local.recv_from(&mut buf).await {
+                *peer.lock().await = Some(from);
+                let chosen = {
+                    let s = sched.lock().expect("sched");
+                    s.select_redundant(redundancy)
+                };
+                for pid in chosen {
+                    let idx = pid.0 as usize;
+                    if socks[idx].send(&buf[..n]).await.is_err() {
+                        sched.lock().expect("sched").on_loss(pid);
                     }
-                    Err(_) => break,
                 }
             }
         })
