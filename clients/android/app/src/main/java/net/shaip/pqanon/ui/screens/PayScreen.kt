@@ -36,7 +36,7 @@ fun PayScreen(api: Api) {
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Text("PQ·ANON — Private access", color = Tokens.Signal,
+        Text("SHAIP VPN — Private access", color = Tokens.Signal,
             fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = 22.sp)
         Text(
             "Pay with Monero or Bitcoin. Get blind-signed access tokens: the token you redeem " +

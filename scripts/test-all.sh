@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PQ-ANON master test battery.
+# SHAIP VPN master test battery.
 #
 # Runs every class of test across the whole stack and prints a pass/fail
 # summary: build, lint (clippy -D warnings), Rust unit + integration + fuzz +
@@ -426,7 +426,7 @@ stake_e2e() {
   [ "$bad" -eq 0 ]
 }
 
-echo "PQ-ANON master test battery — $(date -u +%FT%TZ)"
+echo "SHAIP VPN master test battery — $(date -u +%FT%TZ)"
 
 stage "rust: build (workspace)"              rust_build
 stage "rust: clippy -D warnings"             rust_clippy

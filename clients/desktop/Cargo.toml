@@ -2,7 +2,7 @@
 name = "pqanon-desktop"
 version = "0.1.0"
 edition = "2021"
-description = "SHAIP / PQ·ANON desktop client (Linux + Windows), glass UI over the real control plane"
+description = "SHAIP / SHAIP VPN desktop client (Linux + Windows), glass UI over the real control plane"
 
 [[bin]]
 name = "pqanon-desktop"

@@ -197,9 +197,9 @@ struct StatusCard: View {
 
     private var subtitle: String {
         guard store.connected, let snap = store.snapshot else {
-            return store.config.map { "\($0.address) · PQANON/1" } ?? "Set up a server to connect"
+            return store.config.map { "\($0.address) · SHAIP/1" } ?? "Set up a server to connect"
         }
-        return "DNS \(snap.dns ?? "unchanged") · MTU \(snap.mtu) · PQANON/1"
+        return "DNS \(snap.dns ?? "unchanged") · MTU \(snap.mtu) · SHAIP/1"
     }
 
     private func metric(_ label: String, _ value: String, _ unit: String, first: Bool = false) -> some View {

@@ -91,7 +91,7 @@ export default function Pay() {
 
   return (
     <main className="mx-auto max-w-2xl p-6">
-      <h1 className="font-mono text-2xl font-bold text-signal">PQ·ANON — Private access</h1>
+      <h1 className="font-mono text-2xl font-bold text-signal">SHAIP VPN — Private access</h1>
       <p className="mt-2 text-ink-2">
         Pay with Monero or Bitcoin. Get blind-signed access tokens: the token you redeem carries
         nothing that links it to your payment (RFC&nbsp;9474 blind signatures).

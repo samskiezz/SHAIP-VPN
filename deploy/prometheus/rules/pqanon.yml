@@ -1,4 +1,4 @@
-# PQ-ANON alert rules (§16). Every expression here references a metric that is
+# SHAIP VPN alert rules (§16). Every expression here references a metric that is
 # actually emitted: pqanon_cp_* from the control plane (client_golang),
 # pqanon_server_* / pqanon_mix_* from the Rust daemons' /metrics, and the
 # standard `up`, `node_*`, `pg_*` series from the exporters in docker-compose.

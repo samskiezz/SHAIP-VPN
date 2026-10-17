@@ -1,6 +1,6 @@
 # Key custody and HSM support
 
-Every long-term key in PQ-ANON is either **persistent** (a key file or an HSM)
+Every long-term key in SHAIP VPN is either **persistent** (a key file or an HSM)
 or explicitly **ephemeral** with a warning in the log. A key that silently
 changes on restart breaks whoever pinned it, so the defaults below exist to make
 that failure loud.

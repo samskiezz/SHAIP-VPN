@@ -129,7 +129,7 @@ func main() {
 		}
 	}()
 
-	log.Printf("PQANON-CP/1 control plane listening on %s (store: %s)", addr, label)
+	log.Printf("SHAIP control plane listening on %s (store: %s)", addr, label)
 	srvHTTP := &http.Server{
 		Addr:              addr,
 		Handler:           routes(srv, label),

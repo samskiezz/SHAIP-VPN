@@ -1,4 +1,4 @@
-// Thin client for the PQANON-CP/1 control plane.
+// Thin client for the SHAIP control plane control plane.
 
 export const API_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";

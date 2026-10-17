@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 #[derive(Parser, Debug)]
-#[command(name = "pqanon-decoy", about = "PQ-ANON live TLS 1.3 decoy server")]
+#[command(name = "pqanon-decoy", about = "SHAIP VPN live TLS 1.3 decoy server")]
 struct Args {
     /// Address to listen on.
     #[arg(long, default_value = "0.0.0.0:443")]

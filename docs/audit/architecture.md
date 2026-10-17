@@ -1,4 +1,4 @@
-# PQ-ANON Architecture
+# SHAIP VPN Architecture
 
 This document describes the system **as it exists in this repository**. Planned
 but not-yet-wired pieces are called out explicitly so the picture stays honest.
@@ -7,7 +7,7 @@ but not-yet-wired pieces are called out explicitly so the picture stays honest.
 
 | Component | Location | Language | Purpose |
 |---|---|---|---|
-| `pqanon` (library) | `client/` (lib name `pqanon`) | Rust | Core PQANON/1 protocol: handshake, wire framing, obfuscation, transport, mix onion, routing |
+| `pqanon` (library) | `client/` (lib name `pqanon`) | Rust | Core SHAIP/1 protocol: handshake, wire framing, obfuscation, transport, mix onion, routing |
 | `pqanon` (client bin) | `client/src/main.rs` | Rust | CLI: `keygen`, `selftest`, `run` |
 | `pqanond` | `server/src/bin/pqanond.rs` | Rust | Tunnel server daemon: handshake responder, session table, TUN device, egress NAT, DNS forwarder |
 | `pqanon-mixd` | `server/src/bin/pqanon-mixd.rs` | Rust | Mix node: peels one onion layer, replay-filters, forwards |
@@ -34,7 +34,7 @@ hand-rolled:
 
 ## Data flows
 
-### Handshake (PQANON-HS/1)
+### Handshake (SHAIP-HS/1)
 
 A two-sided authenticated handshake (`client/src/handshake.rs`):
 
@@ -46,7 +46,7 @@ A two-sided authenticated handshake (`client/src/handshake.rs`):
    transcript).
 3. Client verifies both signatures, decapsulates, and derives the mix secret
    `ss_mix = HKDF(ss_pq || ss_x, salt = client_nonce || server_nonce,
-   info = "PQANON-HS/1")`.
+   info = "SHAIP-HS/1")`.
 4. `client_finish` → server, AEAD-sealed under a key derived from `ss_mix`:
    the client's long-term public keys, its transcript signatures and MAC, and
    (for a device-bound server) its device certificate, which must bind the
@@ -61,7 +61,7 @@ keys.
 - A DATA packet is framed as an `Envelope` (`client/src/wire.rs`) and sealed
   with the directional key under a deterministic nonce
   (`epoch(2) || seq(4) || zeros`), the 22-byte header as AAD.
-- The sealed bytes then pass through **PQANON-OBF/2** (`client/src/obf.rs`):
+- The sealed bytes then pass through **SHAIP-OBF/2** (`client/src/obf.rs`):
   the 22-byte header is XORed with a ChaCha20 keystream selected by a 16-byte
   sample of the ciphertext under a per-session key (after RFC 9001 §5.4.4),
   and the datagram is padded to a shaped size plus 0–15 random bytes. Every
@@ -76,7 +76,7 @@ keys.
   `lab_wirecap.py` on the ISP's link): no IP fragments, no `PQAN` magic, and no
   byte position whose most common value exceeds 3% of a flow's packets.
 
-### Mix path (PQANON-MIX/1)
+### Mix path (SHAIP-MIX/1)
 
 - Fixed **2048-byte** cells, default **5 hops** (`client/src/mix.rs`).
 - Each layer is `ephemeral_x25519_pub(32) || nonce(12) || AEAD(flag || [next_addr] || inner)`.

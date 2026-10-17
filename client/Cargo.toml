@@ -3,7 +3,7 @@ name = "pqanon-client"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "PQ-ANON — from-scratch post-quantum anonymizing VPN client (PQANON/1)"
+description = "SHAIP VPN — from-scratch post-quantum anonymizing VPN client (PQANON/1)"
 
 [lib]
 name = "pqanon"

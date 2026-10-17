@@ -12,11 +12,11 @@ fn main() -> eframe::Result<()> {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([600.0, 820.0])
             .with_min_inner_size([360.0, 560.0])
-            .with_title("PQ·ANON"),
+            .with_title("SHAIP VPN"),
         ..Default::default()
     };
     eframe::run_native(
-        "PQ·ANON",
+        "SHAIP VPN",
         options,
         Box::new(|cc| Ok(Box::new(DesktopApp::new(cc)))),
     )

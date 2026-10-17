@@ -39,7 +39,7 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("SHAIP \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "") · core \(pqanonVersion)")
                         .mono(11, .medium).foregroundStyle(Tok.dim(0.55))
-                    Text("Pre-release software. PQ-ANON has not yet had an independent security audit.")
+                    Text("Pre-release software. SHAIP VPN has not yet had an independent security audit.")
                         .ui(12, relativeTo: .footnote).foregroundStyle(Tok.dim(0.45)).fixedSize(horizontal: false, vertical: true)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -53,7 +53,7 @@ struct SettingsView: View {
     private var protocolCard: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                Text("PQANON/1").ui(16, .semibold).em(-0.01, of: 16).foregroundStyle(Tok.ink)
+                Text("SHAIP/1").ui(16, .semibold).em(-0.01, of: 16).foregroundStyle(Tok.ink)
                 Chip(text: "THE ONLY PROTOCOL", size: 8, ink: Tok.signal, fill: Tok.signal.opacity(0.12), stroke: .clear, radius: 6, tracking: 0.14)
             }
             Text("Hybrid post-quantum handshake: the session key comes from both ML-KEM-768 and X25519, so breaking one is not enough. Both sides sign with ML-DSA-65 and Ed25519. Traffic is sealed with ChaCha20-Poly1305 and padded to common packet sizes.")

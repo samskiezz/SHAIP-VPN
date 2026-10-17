@@ -13,8 +13,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import net.shaip.pqanon.MainActivity
 
 /**
- * The Android side of the PQ-ANON tunnel. This service owns the TUN interface
- * and the connection lifecycle. The data plane — the PQANON/1 post-quantum
+ * The Android side of the SHAIP VPN tunnel. This service owns the TUN interface
+ * and the connection lifecycle. The data plane — the SHAIP VPN post-quantum
  * handshake (ML-KEM-768 + ML-DSA-65) and the encrypted tunnel — lives in the
  * shared Rust core (crate `pqanon`, already proven by the CLI and the netns
  * lab) and is bridged into this service over JNI in the next step.
@@ -55,7 +55,7 @@ class PqanonVpnService : VpnService() {
         // data plane a full-tunnel route would black-hole traffic, so we claim
         // only the client's own tunnel address until the Rust core is wired.
         val builder = Builder()
-            .setSession("PQ·ANON")
+            .setSession("SHAIP VPN")
             .addAddress("10.111.0.2", 32)
             .addDnsServer("10.111.0.1")
             .setMtu(1280)
@@ -93,7 +93,7 @@ class PqanonVpnService : VpnService() {
             PendingIntent.FLAG_IMMUTABLE,
         )
         return Notification.Builder(this, CHANNEL)
-            .setContentTitle("PQ·ANON")
+            .setContentTitle("SHAIP VPN")
             .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_lock_lock)
             .setContentIntent(open)

@@ -335,7 +335,7 @@ function build() {
       <div class="list glass-tile" id="p-now"></div>
       <div class="eyebrow section-eyebrow">WHAT THIS VPN DOESN'T DO</div>
       <div class="list glass-tile">${LIMITS.map(([t, d]) => `<div class="prow"><span class="ic">${icon('info', 14, T.steel, 2)}</span><span class="t"><b>${esc(t)}</b><span>${esc(d)}</span></span></div>`).join('')}</div>
-      <div class="footnote">SHAIP runs PQ-ANON, pre-release software. Its code is open; it has not yet had an independent security audit.</div>
+      <div class="footnote">SHAIP runs SHAIP VPN, pre-release software. Its code is open; it has not yet had an independent security audit.</div>
     </div></div>
   </section>
 
@@ -376,7 +376,7 @@ function build() {
       </div>
       <div class="eyebrow section-eyebrow">TUNNEL</div>
       <div class="facts" id="set-facts"></div>
-      <div class="version"><span>SHAIP 2.0 · core 0.1.0</span><span class="footnote" style="padding:0">Pre-release software. PQ-ANON has not yet had an independent security audit.</span></div>
+      <div class="version"><span>SHAIP 2.0 · core 0.1.0</span><span class="footnote" style="padding:0">Pre-release software. SHAIP VPN has not yet had an independent security audit.</span></div>
     </div></div>
   </section>
 

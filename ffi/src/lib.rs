@@ -1,4 +1,4 @@
-//! C ABI for native PQ-ANON front ends (`include/pqanon.h`).
+//! C ABI for native SHAIP VPN front ends (`include/pqanon.h`).
 //!
 //! A native shell — an iOS/macOS Network Extension, an Android `VpnService`, a
 //! Windows service — owns the OS packet interface and calls into this library

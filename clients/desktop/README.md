@@ -1,6 +1,6 @@
-# PQ·ANON — Desktop client (Linux + Windows)
+# SHAIP VPN — Desktop client (Linux + Windows)
 
-A native desktop client for the SHAIP / PQ·ANON post-quantum VPN, written in
+A native desktop client for the SHAIP / SHAIP VPN post-quantum VPN, written in
 Rust with `egui`/`eframe`. It carries the same glass design language as the web
 UI, iOS and Android — deep-graphite gradient, translucent glass panels, cyan
 signal accent, mono labels (clients/ios/design/HANDOFF.md) — and talks to the

@@ -40,7 +40,7 @@ struct SetupView: View {
             VStack(alignment: .leading, spacing: 18) {
                 HStack(spacing: 8) {
                     GlowDot(color: Tok.signal, glow: 10)
-                    Text("PQANON/1 · POST-QUANTUM VPN").mono(10, .medium).em(0.16, of: 10).foregroundStyle(Tok.signal)
+                    Text("SHAIP/1 · POST-QUANTUM VPN").mono(10, .medium).em(0.16, of: 10).foregroundStyle(Tok.signal)
                 }
                 Text("Your traffic, encrypted to a server you choose.")
                     .ui(38, .semibold, relativeTo: .largeTitle).em(-0.045, of: 38)

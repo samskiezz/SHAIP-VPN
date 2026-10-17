@@ -1,4 +1,4 @@
-//! `pqanon-mixd` — PQ-ANON mix node (§10, §11.1).
+//! `pqanon-mixd` — SHAIP VPN mix node (§10, §11.1).
 //!
 //! Receives fixed-size (2048-byte) PQANON-MIX/1 cells, peels its own onion
 //! layer with its long-term X25519 key, and either forwards the re-framed cell
@@ -26,7 +26,7 @@ use tokio::net::UdpSocket;
 use x25519_dalek::{PublicKey, StaticSecret};
 
 #[derive(Parser)]
-#[command(name = "pqanon-mixd", about = "PQ-ANON mix node")]
+#[command(name = "pqanon-mixd", about = "SHAIP VPN mix node")]
 struct Cli {
     /// UDP listen address.
     #[arg(short, long, default_value = "0.0.0.0:8443")]

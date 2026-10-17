@@ -54,9 +54,9 @@ export default function Login() {
         <div className="glass w-full max-w-sm space-y-4 p-6">
           <div className="flex items-center gap-2">
             <span className="glow-dot text-signal" />
-            <span className="eyebrow">PQANON/1 · Post-quantum VPN</span>
+            <span className="eyebrow">SHAIP VPN · Post-quantum VPN</span>
           </div>
-          <div className="font-mono text-2xl font-bold text-signal">PQ·ANON</div>
+          <div className="font-mono text-2xl font-bold text-signal">SHAIP VPN</div>
           <p className="text-sm text-ink-2">Your account number is your login:</p>
           <div className="select-all rounded-xl bg-white/5 px-3 py-3 text-center font-mono text-xl tracking-widest text-ink">
             {formatAccount(created)}
@@ -96,9 +96,9 @@ export default function Login() {
       <form onSubmit={submit} className="glass w-full max-w-sm space-y-4 p-6">
         <div className="flex items-center gap-2">
           <span className="glow-dot text-signal" />
-          <span className="eyebrow">PQANON/1 · Post-quantum VPN</span>
+          <span className="eyebrow">SHAIP VPN · Post-quantum VPN</span>
         </div>
-        <div className="font-mono text-2xl font-bold text-signal">PQ·ANON</div>
+        <div className="font-mono text-2xl font-bold text-signal">SHAIP VPN</div>
         <p className="text-sm text-ink-2">
           {mode === "login"
             ? "Sign in with your account number"
