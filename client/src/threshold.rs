@@ -17,10 +17,24 @@
 //!
 //! This module is a self-contained, tested wrapper over the real `frost-ed25519`
 //! crate: trusted-dealer key generation, the two-round threshold signing flow,
-//! and the group key / signature in the standard 32- and 64-byte encodings. It
-//! is the primitive the directory's threshold-signing mode is built on; the
-//! control-plane coordinator that runs the rounds across authorities is layered
-//! on top.
+//! and the group key / signature in the standard 32- and 64-byte encodings.
+//!
+//! Two ways to drive the signing are provided:
+//!   * [`sign`] runs both rounds in one process holding every share — the
+//!     single-host convenience, and what the tests exercise the primitive with.
+//!   * [`Authority`] + [`Coordinator`] run the protocol as separate parties:
+//!     each authority holds only its own share and its own single-use nonces, and
+//!     the coordinator holds no secret material at all, so it can run on an
+//!     untrusted host. This is the trustless multi-party flow a real authority
+//!     set uses.
+//!
+//! What remains is deployment, not cryptography: standing up each [`Authority`]
+//! behind an authenticated channel and running the [`Coordinator`] against the
+//! live authority set (and, if a trusted dealer is not wanted, swapping
+//! [`generate`] for the `frost::keys::dkg` flow — the signing and verifying code
+//! above is unchanged either way). Verifiers already need nothing new: the
+//! aggregate is an ordinary RFC 8032 Ed25519 signature under the pinned group
+//! key.
 
 use frost_ed25519 as frost;
 use std::collections::BTreeMap;
@@ -151,6 +165,160 @@ pub fn verify(group_public_key: &[u8; 32], message: &[u8], signature: &[u8; 64])
     vk.verify(message, &Signature::from_bytes(signature)).is_ok()
 }
 
+// ---------------------------------------------------------------------------
+// Multi-party signing: the authorities each hold ONE share, the coordinator
+// holds NONE.
+//
+// [`sign`] above drives both rounds in one process holding every share — handy
+// for a single-host operator and for tests, but not how a real authority set is
+// meant to run. In deployment each authority is a separate party that holds only
+// its own secret share and its own secret nonces, and a coordinator (which may
+// run on an untrusted host) orchestrates the two rounds and aggregates the
+// public shares. No secret key material and no signing nonce ever reaches the
+// coordinator, and no `t-1` authorities can sign.
+//
+// The one sharp edge of threshold Schnorr is nonce reuse: signing twice with the
+// same round-1 nonces leaks the secret share. [`Authority`] therefore keeps each
+// session's nonces internally and consumes them on use, so a nonce is signed
+// with at most once (a second round-2 for the same session is refused).
+// ---------------------------------------------------------------------------
+
+/// One directory authority. Holds exactly its own secret share — never the group
+/// secret, never another authority's share — plus, between rounds, the secret
+/// nonces it committed to. A [`Coordinator`] only ever sees this authority's
+/// public commitment and public signature share.
+pub struct Authority {
+    id: frost::Identifier,
+    key_package: frost::keys::KeyPackage,
+    /// Per-session single-use nonces: produced in [`Authority::commit`],
+    /// consumed in [`Authority::sign`]. Keyed by the caller's session id so an
+    /// authority can take part in several independent signings at once.
+    pending: BTreeMap<u64, frost::round1::SigningNonces>,
+}
+
+impl Authority {
+    /// Wrap one authority's key package. In production this package is delivered
+    /// to the authority at setup (e.g. from [`ThresholdKeys::into_parties`]) and
+    /// the dealer's copy is destroyed.
+    pub fn new(id: frost::Identifier, key_package: frost::keys::KeyPackage) -> Self {
+        Self {
+            id,
+            key_package,
+            pending: BTreeMap::new(),
+        }
+    }
+
+    /// This authority's identifier, as it appears in the coordinator's maps.
+    pub fn id(&self) -> frost::Identifier {
+        self.id
+    }
+
+    /// Round 1. Produce this authority's public commitment for `session`; the
+    /// matching secret nonces are retained internally for [`Authority::sign`] and
+    /// never leave the authority. Committing again for a session that still has
+    /// pending nonces replaces them (abandoning that earlier attempt) — it is a
+    /// fresh nonce, never a reuse.
+    pub fn commit(&mut self, session: u64) -> frost::round1::SigningCommitments {
+        let mut rng = rand::rngs::OsRng;
+        let (nonces, commitments) =
+            frost::round1::commit(self.key_package.signing_share(), &mut rng);
+        self.pending.insert(session, nonces);
+        commitments
+    }
+
+    /// Round 2. Sign `signing_package` with the nonces committed for `session`.
+    /// The nonces are consumed here: a second call for the same session fails, so
+    /// a given nonce is used in at most one signature (reuse would leak the
+    /// secret share). Fails if no round-1 commitment was made for this session.
+    pub fn sign(
+        &mut self,
+        session: u64,
+        signing_package: &frost::SigningPackage,
+    ) -> anyhow::Result<frost::round2::SignatureShare> {
+        // Remove, not borrow: the nonces are spent by this call whether it
+        // succeeds or fails, so they can never be signed with twice.
+        let nonces = self
+            .pending
+            .remove(&session)
+            .ok_or_else(|| anyhow::anyhow!("no round-1 commitment for this session (or already signed)"))?;
+        frost::round2::sign(signing_package, &nonces, &self.key_package)
+            .map_err(|e| anyhow::anyhow!("round2 sign: {e}"))
+    }
+}
+
+/// The signing coordinator. Holds only the public key package — no secret share
+/// and no nonce — so it can run on an untrusted host: the worst a dishonest
+/// coordinator can do is refuse to produce a signature, never forge one. It
+/// binds the message to the quorum's commitments and aggregates their shares.
+pub struct Coordinator {
+    public: frost::keys::PublicKeyPackage,
+}
+
+impl Coordinator {
+    /// A coordinator over `public` — the same public package every authority and
+    /// verifier holds.
+    pub fn new(public: frost::keys::PublicKeyPackage) -> Self {
+        Self { public }
+    }
+
+    /// The 32-byte group verifying key clients pin (a standard Ed25519 key).
+    pub fn group_public_key(&self) -> anyhow::Result<[u8; 32]> {
+        let bytes = self
+            .public
+            .verifying_key()
+            .serialize()
+            .map_err(|e| anyhow::anyhow!("serialize group key: {e}"))?;
+        bytes
+            .as_slice()
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("group key is not 32 bytes"))
+    }
+
+    /// Bind `message` to the quorum's round-1 commitments, producing the signing
+    /// package every participating authority then signs in round 2.
+    pub fn signing_package(
+        commitments: BTreeMap<frost::Identifier, frost::round1::SigningCommitments>,
+        message: &[u8],
+    ) -> frost::SigningPackage {
+        frost::SigningPackage::new(commitments, message)
+    }
+
+    /// Aggregate the quorum's round-2 shares into one 64-byte Ed25519 signature.
+    /// Fails if fewer than the threshold signed, or if any share does not match
+    /// its commitment — a dishonest or corrupt share cannot be folded in
+    /// unnoticed.
+    pub fn aggregate(
+        &self,
+        signing_package: &frost::SigningPackage,
+        shares: &BTreeMap<frost::Identifier, frost::round2::SignatureShare>,
+    ) -> anyhow::Result<[u8; 64]> {
+        let group_sig = frost::aggregate(signing_package, shares, &self.public)
+            .map_err(|e| anyhow::anyhow!("aggregate: {e}"))?;
+        let bytes = group_sig
+            .serialize()
+            .map_err(|e| anyhow::anyhow!("serialize signature: {e}"))?;
+        bytes
+            .as_slice()
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("signature is not 64 bytes"))
+    }
+}
+
+impl ThresholdKeys {
+    /// Split a freshly dealt key set into the parties that run the protocol: one
+    /// [`Authority`] per share (each holding only its own), and a [`Coordinator`]
+    /// holding only the public package. After this the caller should drop any
+    /// other copy of the shares — the dealer exists only at setup.
+    pub fn into_parties(self) -> (Vec<Authority>, Coordinator) {
+        let authorities = self
+            .shares
+            .into_iter()
+            .map(|(id, kp)| Authority::new(id, kp))
+            .collect();
+        (authorities, Coordinator::new(self.public))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -217,5 +385,123 @@ mod tests {
         let sig = sign(&keys, &ids(&keys)[..2], msg).unwrap();
         // The signature must not verify under a different group's key.
         assert!(!verify(&other.group_public_key().unwrap(), msg, &sig));
+    }
+
+    // --- multi-party coordinator (authorities hold one share each) -----------
+
+    /// Drive the full two-round protocol across separate [`Authority`] parties
+    /// via a [`Coordinator`] that never touches a secret, and confirm the result
+    /// is an ordinary Ed25519 signature under the pinned group key.
+    #[test]
+    fn multi_party_quorum_signs_and_verifies() {
+        let keys = generate(3, 5).unwrap();
+        let gpk = keys.group_public_key().unwrap();
+        let (mut authorities, coord) = keys.into_parties();
+        assert_eq!(coord.group_public_key().unwrap(), gpk);
+
+        let msg = b"SHAIP-CONSENSUS-V1 digest over the signed node directory";
+        let session = 42u64;
+        // Any 3 of the 5 authorities — a non-contiguous subset on purpose.
+        let quorum = [0usize, 2, 4];
+
+        // Round 1: each participating authority commits; only the public
+        // commitment is handed to the coordinator.
+        let mut commitments = BTreeMap::new();
+        for &i in &quorum {
+            let a = &mut authorities[i];
+            commitments.insert(a.id(), a.commit(session));
+        }
+
+        // The coordinator binds the message to those commitments.
+        let pkg = Coordinator::signing_package(commitments, msg);
+
+        // Round 2: each authority signs; only the public share is handed back.
+        let mut shares = BTreeMap::new();
+        for &i in &quorum {
+            let a = &mut authorities[i];
+            shares.insert(a.id(), a.sign(session, &pkg).unwrap());
+        }
+
+        let sig = coord.aggregate(&pkg, &shares).unwrap();
+        assert!(verify(&gpk, msg, &sig), "a cross-authority quorum must produce a valid signature");
+    }
+
+    /// Nonce reuse leaks the secret share in Schnorr threshold signing, so an
+    /// authority must sign with a given round-1 nonce at most once.
+    #[test]
+    fn a_nonce_is_consumed_and_cannot_be_reused() {
+        let keys = generate(2, 3).unwrap();
+        let (mut authorities, _coord) = keys.into_parties();
+        let session = 7u64;
+
+        let c0 = authorities[0].commit(session);
+        let c1 = authorities[1].commit(session);
+        let mut commitments = BTreeMap::new();
+        commitments.insert(authorities[0].id(), c0);
+        commitments.insert(authorities[1].id(), c1);
+        let pkg = Coordinator::signing_package(commitments, b"once");
+
+        // First round-2 for this session succeeds...
+        assert!(authorities[0].sign(session, &pkg).is_ok());
+        // ...a second must be refused: the nonce was consumed.
+        assert!(
+            authorities[0].sign(session, &pkg).is_err(),
+            "a round-1 nonce must never be signed with twice"
+        );
+    }
+
+    /// Signing round 2 without having committed in round 1 for that session must
+    /// fail rather than reach for some other session's nonce.
+    #[test]
+    fn signing_without_committing_fails() {
+        let keys = generate(2, 2).unwrap();
+        let (mut authorities, _coord) = keys.into_parties();
+        // Build a well-formed package from a real round 1 so only the missing
+        // commitment on authority 0 is under test.
+        let c0 = authorities[0].commit(1);
+        let c1 = authorities[1].commit(1);
+        let mut commitments = BTreeMap::new();
+        commitments.insert(authorities[0].id(), c0);
+        commitments.insert(authorities[1].id(), c1);
+        let pkg = Coordinator::signing_package(commitments, b"m");
+        // Session 999 was never committed on this authority.
+        assert!(authorities[0].sign(999, &pkg).is_err());
+    }
+
+    /// Below the threshold, the coordinator must not be able to produce a valid
+    /// signature — whether `frost` errors or returns bytes that fail to verify.
+    #[test]
+    fn coordinator_below_threshold_yields_no_valid_signature() {
+        let keys = generate(3, 5).unwrap();
+        let gpk = keys.group_public_key().unwrap();
+        let (mut authorities, coord) = keys.into_parties();
+        let msg = b"only two of three";
+        let session = 1u64;
+        let quorum = [0usize, 1]; // 2 of the required 3
+
+        let mut commitments = BTreeMap::new();
+        for &i in &quorum {
+            commitments.insert(authorities[i].id(), authorities[i].commit(session));
+        }
+        let pkg = Coordinator::signing_package(commitments, msg);
+        // A sub-threshold quorum may already be refused at round 2; if it is,
+        // the property holds (no signature is produced). Otherwise, prove the
+        // aggregate it does produce is not a valid signature under the group key.
+        let mut shares = BTreeMap::new();
+        let mut all_signed = true;
+        for &i in &quorum {
+            match authorities[i].sign(session, &pkg) {
+                Ok(share) => {
+                    shares.insert(authorities[i].id(), share);
+                }
+                Err(_) => {
+                    all_signed = false;
+                    break;
+                }
+            }
+        }
+        let produced_valid = all_signed
+            && matches!(coord.aggregate(&pkg, &shares), Ok(sig) if verify(&gpk, msg, &sig));
+        assert!(!produced_valid, "a sub-threshold quorum must not yield a valid signature");
     }
 }
