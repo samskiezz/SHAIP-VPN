@@ -28,13 +28,16 @@
 //!     untrusted host. This is the trustless multi-party flow a real authority
 //!     set uses.
 //!
+//! Setup comes two ways: [`generate`] (a trusted dealer, simplest for an operator
+//! bootstrapping its own authorities) or [`generate_dkg`] (distributed key
+//! generation — no party ever holds the whole group secret, not even at setup).
+//! Both yield the same [`ThresholdKeys`], and the signing and verifying code is
+//! identical either way.
+//!
 //! What remains is deployment, not cryptography: standing up each [`Authority`]
 //! behind an authenticated channel and running the [`Coordinator`] against the
-//! live authority set (and, if a trusted dealer is not wanted, swapping
-//! [`generate`] for the `frost::keys::dkg` flow — the signing and verifying code
-//! above is unchanged either way). Verifiers already need nothing new: the
-//! aggregate is an ordinary RFC 8032 Ed25519 signature under the pinned group
-//! key.
+//! live authority set. Verifiers already need nothing new — the aggregate is an
+//! ordinary RFC 8032 Ed25519 signature under the pinned group key.
 
 use frost_ed25519 as frost;
 use std::collections::BTreeMap;
@@ -99,6 +102,104 @@ pub fn generate(min_signers: u16, max_signers: u16) -> anyhow::Result<ThresholdK
     Ok(ThresholdKeys {
         shares: key_packages,
         public,
+    })
+}
+
+/// Dealer-free setup via distributed key generation (DKG): no party — not even a
+/// setup dealer — ever holds the whole group secret. Each party contributes to
+/// the group key, which exists only as the combination of all contributions.
+///
+/// This drives all `max_signers` parties' three DKG rounds locally (as [`sign`]
+/// drives signing locally), which fits a single operator bootstrapping its own
+/// authorities and keeps it testable. In a real deployment the three rounds run
+/// across the authorities over authenticated channels (round 2's per-recipient
+/// packages over confidential ones); each party's resulting
+/// [`frost::keys::KeyPackage`] is identical to what this produces. The output is
+/// an ordinary [`ThresholdKeys`] — it signs via [`ThresholdKeys::into_parties`]
+/// and verifies exactly like a dealt key, with no change to the signing or
+/// verifying code. Requires `min_signers >= 2` (a 1-of-n DKG is degenerate).
+pub fn generate_dkg(min_signers: u16, max_signers: u16) -> anyhow::Result<ThresholdKeys> {
+    anyhow::ensure!(
+        min_signers >= 2 && min_signers <= max_signers,
+        "DKG needs 2 <= min_signers <= max_signers (got {min_signers}/{max_signers})"
+    );
+    // OsRng is a zero-sized, Copy, stateless handle to the OS CSPRNG, so each
+    // `part1` call takes its own copy.
+    let rng = rand::rngs::OsRng;
+
+    let ids: Vec<frost::Identifier> = (1..=max_signers)
+        .map(|i| frost::Identifier::try_from(i).map_err(|e| anyhow::anyhow!("identifier {i}: {e}")))
+        .collect::<anyhow::Result<_>>()?;
+
+    // Round 1: each party keeps a secret package and broadcasts a public one.
+    let mut r1_secret: BTreeMap<frost::Identifier, frost::keys::dkg::round1::SecretPackage> =
+        BTreeMap::new();
+    let mut r1_public: BTreeMap<frost::Identifier, frost::keys::dkg::round1::Package> =
+        BTreeMap::new();
+    for id in &ids {
+        let (sp, pp) = frost::keys::dkg::part1(*id, max_signers, min_signers, rng)
+            .map_err(|e| anyhow::anyhow!("dkg part1: {e}"))?;
+        r1_secret.insert(*id, sp);
+        r1_public.insert(*id, pp);
+    }
+
+    // Round 2: each party processes everyone else's round-1 package, keeping a
+    // secret package and emitting one round-2 package addressed to each other
+    // party. `incoming[recipient][sender]` collects the packages a party receives.
+    let mut r2_secret: BTreeMap<frost::Identifier, frost::keys::dkg::round2::SecretPackage> =
+        BTreeMap::new();
+    let mut incoming: BTreeMap<
+        frost::Identifier,
+        BTreeMap<frost::Identifier, frost::keys::dkg::round2::Package>,
+    > = BTreeMap::new();
+    for id in &ids {
+        let others: BTreeMap<_, _> = r1_public
+            .iter()
+            .filter(|(k, _)| *k != id)
+            .map(|(k, v)| (*k, v.clone()))
+            .collect();
+        let sp = r1_secret
+            .remove(id)
+            .ok_or_else(|| anyhow::anyhow!("missing round-1 secret"))?;
+        let (r2sp, outgoing) =
+            frost::keys::dkg::part2(sp, &others).map_err(|e| anyhow::anyhow!("dkg part2: {e}"))?;
+        r2_secret.insert(*id, r2sp);
+        for (recipient, pkg) in outgoing {
+            incoming.entry(recipient).or_default().insert(*id, pkg);
+        }
+    }
+
+    // Round 3: each party combines its received packages into its key package and
+    // the shared public package. Every party must derive the same public package.
+    let mut key_packages = BTreeMap::new();
+    let mut group_public: Option<(frost::keys::PublicKeyPackage, Vec<u8>)> = None;
+    for id in &ids {
+        let others_r1: BTreeMap<_, _> = r1_public
+            .iter()
+            .filter(|(k, _)| *k != id)
+            .map(|(k, v)| (*k, v.clone()))
+            .collect();
+        let my_r2 = incoming.remove(id).unwrap_or_default();
+        let (kp, pp) = frost::keys::dkg::part3(&r2_secret[id], &others_r1, &my_r2)
+            .map_err(|e| anyhow::anyhow!("dkg part3: {e}"))?;
+        key_packages.insert(*id, kp);
+        let pp_bytes = pp
+            .serialize()
+            .map_err(|e| anyhow::anyhow!("serialize public package: {e}"))?;
+        match &group_public {
+            None => group_public = Some((pp, pp_bytes)),
+            Some((_, existing)) => anyhow::ensure!(
+                *existing == pp_bytes,
+                "DKG parties disagree on the group public key"
+            ),
+        }
+    }
+
+    Ok(ThresholdKeys {
+        shares: key_packages,
+        public: group_public
+            .ok_or_else(|| anyhow::anyhow!("no parties"))?
+            .0,
     })
 }
 
@@ -503,5 +604,40 @@ mod tests {
         let produced_valid = all_signed
             && matches!(coord.aggregate(&pkg, &shares), Ok(sig) if verify(&gpk, msg, &sig));
         assert!(!produced_valid, "a sub-threshold quorum must not yield a valid signature");
+    }
+
+    /// Dealer-free setup: keys produced by DKG (no party ever holds the whole
+    /// secret) must sign through the same multi-party coordinator and verify as a
+    /// standard Ed25519 signature — proving the trusted dealer can be dropped
+    /// without touching the signing or verifying code.
+    #[test]
+    fn dkg_keys_sign_through_the_coordinator_and_verify() {
+        let keys = generate_dkg(2, 3).unwrap();
+        let gpk = keys.group_public_key().unwrap();
+        // A real Ed25519 public key.
+        assert!(ed25519_dalek::VerifyingKey::from_bytes(&gpk).is_ok());
+
+        let (mut authorities, coord) = keys.into_parties();
+        let msg = b"produced by DKG, no trusted dealer";
+        let session = 1u64;
+        let quorum = [0usize, 2];
+
+        let mut commitments = BTreeMap::new();
+        for &i in &quorum {
+            commitments.insert(authorities[i].id(), authorities[i].commit(session));
+        }
+        let pkg = Coordinator::signing_package(commitments, msg);
+        let mut shares = BTreeMap::new();
+        for &i in &quorum {
+            shares.insert(authorities[i].id(), authorities[i].sign(session, &pkg).unwrap());
+        }
+        let sig = coord.aggregate(&pkg, &shares).unwrap();
+        assert!(verify(&gpk, msg, &sig), "DKG-produced keys must sign and verify");
+    }
+
+    /// A 1-of-n DKG is degenerate and must be refused.
+    #[test]
+    fn dkg_rejects_degenerate_threshold() {
+        assert!(generate_dkg(1, 3).is_err());
     }
 }
