@@ -62,6 +62,8 @@ export default function AppPage() {
   const [kill, setKill] = useState(true);
   const [multihop, setMultihop] = useState(true);
   const [dns, setDns] = useState(true);
+  const [pq, setPq] = useState(true);
+  const [proto, setProto] = useState<"mesh" | "wg" | "ike">("mesh");
   const [tab, setTab] = useState(0);
   const [secs, setSecs] = useState(0);
 
@@ -136,6 +138,9 @@ export default function AppPage() {
     else if (act === "kill") setKill((v) => !v);
     else if (act === "multihop") setMultihop((v) => !v);
     else if (act === "dns") setDns((v) => !v);
+    else if (act === "pq") setPq((v) => !v);
+    else if (act.startsWith("proto:")) setProto(act.slice(6) as "mesh" | "wg" | "ike");
+    else if (act.startsWith("srv:")) setSrvIdx(Number(act.slice(4)));
     else if (act.startsWith("tab:")) setTab(Number(act.slice(4)));
   };
 
@@ -143,10 +148,12 @@ export default function AppPage() {
   const html = useMemo(() => {
     if (tab === 0) return connectOverlayHTML(v);
     if (tab === 1) return networkOverlayHTML(v);
+    if (tab === 2) return nodesOverlayHTML({ nodes, srvIdx });
     if (tab === 3) return securityOverlayHTML(v);
+    if (tab === 4) return protocolOverlayHTML({ proto, kill, multihop, dns, pq });
     return buildingOverlayHTML(tab);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, on, srv, account, kill, multihop, dns, secs, nodes]);
+  }, [tab, on, srv, account, kill, multihop, dns, pq, proto, srvIdx, secs, nodes]);
 
   // A distinct key per screen forces a fresh <canvas> element so the engine's
   // per-canvas state (kept in a WeakMap) is re-seeded for the new gfx mode
@@ -352,6 +359,98 @@ function securityOverlayHTML(v: { kill: boolean }): string {
     </div>
   </div>
   ${SCRIM_HTML}${tabBarHTML(3)}${HOME_HTML}`;
+}
+
+// Access tab → the real Servers directory picker (anonymous: no zero-trust
+// identity grid). RTT is "—" until a live tunnel measures it.
+function nodesOverlayHTML(v: { nodes: Srv[]; srvIdx: number }): string {
+  const { nodes, srvIdx } = v;
+  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  const rows = nodes.length === 0
+    ? `<div style="padding:28px 16px;text-align:center;color:rgba(220,228,255,0.5);font-size:14px">No servers listed yet. Sign in to load the signed node directory.</div>`
+    : nodes.map((s, i) => {
+        const sel = i === srvIdx;
+        const code = (s.id.replace(/[^a-zA-Z]/g, "").slice(0, 3) || "SRV").toUpperCase();
+        const badgeBg = sel ? "linear-gradient(135deg,#5CF2FF,#8A9BB8)" : "rgba(255,255,255,0.06)";
+        const badgeInk = sel ? "#04050A" : "#F5F7FC";
+        const bt = i ? "0.5px solid rgba(255,255,255,0.08)" : "0.5px solid transparent";
+        const bg = sel ? "linear-gradient(90deg,rgba(92,242,255,0.12),rgba(92,242,255,0.02))" : "transparent";
+        const tag = s.tag ? `<span style="font:600 8px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.12em;padding:2px 5px;border-radius:5px;background:rgba(138,155,184,0.18);color:#B4C2DA">${esc(s.tag)}</span>` : "";
+        return `<div data-act="srv:${i}" style="pointer-events:auto;display:grid;grid-template-columns:42px minmax(0,1fr) auto;align-items:center;gap:12px;padding:11px 14px;border-top:${bt};background:${bg};cursor:pointer">
+          <div style="width:42px;height:42px;border-radius:13px;display:flex;align-items:center;justify-content:center;font:600 11px ui-monospace,'SF Mono',Menlo,monospace;background:${badgeBg};color:${badgeInk};box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.3)">${code}</div>
+          <div style="display:flex;flex-direction:column;gap:5px;min-width:0">
+            <div style="display:flex;align-items:center;gap:6px"><span style="font-size:15px;font-weight:600;letter-spacing:-.01em">${esc(s.city)}</span>${tag}</div>
+            <span style="font:400 10px ui-monospace,'SF Mono',Menlo,monospace;color:rgba(220,228,255,0.45);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(s.id)} · ${esc(s.dc)}</span>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;width:40px"><span style="font:600 14px ui-monospace,'SF Mono',Menlo,monospace;color:rgba(220,228,255,0.6)">${s.ms != null ? s.ms : "—"}</span><span style="font:400 9px ui-monospace,'SF Mono',Menlo,monospace;color:rgba(220,228,255,0.4)">ms</span></div>
+        </div>`;
+      }).join("");
+
+  return `${STATUSBAR_HTML}
+  <div style="position:absolute;width:420px;height:420px;right:-200px;top:-120px;border-radius:50%;background:#5CF2FF;opacity:0.12;filter:blur(110px)"></div>
+  <div style="position:absolute;top:62px;left:16px;right:16px;display:flex;flex-direction:column;gap:12px;z-index:8;color:#F5F7FC">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;padding:0 8px"><span style="font-size:34px;font-weight:700;letter-spacing:-.03em;line-height:1">Servers</span><span style="font:500 10px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:rgba(220,228,255,0.45)">${nodes.length} LISTED</span></div>
+    <div style="height:44px;border-radius:22px;padding:0 16px;display:flex;align-items:center;gap:10px;color:rgba(220,228,255,0.45);font-size:15px;background:linear-gradient(180deg,rgba(255,255,255,0.07),rgba(255,255,255,0.025));backdrop-filter:blur(40px);-webkit-backdrop-filter:blur(40px);border:0.5px solid rgba(255,255,255,0.14)"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 4a7 7 0 100 14 7 7 0 000-14zM20 20l-4-4"></path></svg><span style="flex:1">Region, city or node ID</span></div>
+    <div style="border-radius:30px;overflow:hidden;background:linear-gradient(180deg,rgba(255,255,255,0.075),rgba(255,255,255,0.02));backdrop-filter:blur(40px) saturate(180%);-webkit-backdrop-filter:blur(40px) saturate(180%);border:0.5px solid rgba(255,255,255,0.15);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.3),0 24px 48px -18px rgba(0,0,0,0.9)">${rows}</div>
+    <span style="font:400 11px ui-monospace,'SF Mono',Menlo,monospace;color:rgba(220,228,255,0.4);padding:2px 8px">Latency is measured after you connect; the directory is signed and verified before any server is trusted.</span>
+  </div>
+  ${SCRIM_HTML}${tabBarHTML(2)}${HOME_HTML}`;
+}
+
+// Settings tab → Protocol: real product config (SHAIP Mesh / WireGuard / IKEv2)
+// and the tunnel toggles. All real settings; the crypto facts are the product's.
+function protocolOverlayHTML(v: { proto: "mesh" | "wg" | "ike"; kill: boolean; multihop: boolean; dns: boolean; pq: boolean }): string {
+  const { proto, kill, multihop, dns, pq } = v;
+  const PROTOS = [
+    { k: "mesh", name: "SHAIP Mesh", tag: "RECOMMENDED", sub: "WireGuard core · multi-hop · ML-KEM-768 hybrid", specs: ["UDP 443", "ChaCha20-Poly1305", "PQ"] },
+    { k: "wg", name: "WireGuard", tag: "", sub: "Single hop · lowest latency", specs: ["UDP 51820", "Curve25519"] },
+    { k: "ike", name: "IKEv2 / IPsec", tag: "", sub: "Native fallback for restricted networks", specs: ["UDP 500/4500", "AES-256-GCM"] },
+  ];
+  const protoHTML = PROTOS.map((p) => {
+    const sel = p.k === proto;
+    const border = sel ? "rgba(92,242,255,0.5)" : "rgba(255,255,255,0.13)";
+    const shadow = sel ? "inset 0 0.5px 0 rgba(255,255,255,0.3),0 10px 24px -12px rgba(92,242,255,0.4)" : "inset 0 0.5px 0 rgba(255,255,255,0.25)";
+    const ring = sel ? CY : "rgba(255,255,255,0.3)";
+    const dot = sel ? CY : "transparent";
+    const tag = p.tag ? `<span style="font:600 8px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;padding:3px 6px;border-radius:6px;background:rgba(92,242,255,0.12);color:#5CF2FF">${p.tag}</span>` : "";
+    const specs = p.specs.map((s) => `<span style="font:500 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.06em;padding:3px 6px;border-radius:6px;border:0.5px solid rgba(255,255,255,0.14);color:rgba(220,228,255,0.75)">${s}</span>`).join("");
+    return `<div data-act="proto:${p.k}" style="pointer-events:auto;padding:14px 16px;border-radius:24px;display:grid;grid-template-columns:minmax(0,1fr) 22px;gap:12px;align-items:center;cursor:pointer;background:linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.02));backdrop-filter:blur(40px) saturate(180%);-webkit-backdrop-filter:blur(40px) saturate(180%);border:0.5px solid ${border};box-shadow:${shadow}">
+      <div style="display:flex;flex-direction:column;gap:6px;min-width:0">
+        <div style="display:flex;align-items:center;gap:8px"><span style="font-size:16px;font-weight:600;letter-spacing:-.01em">${p.name}</span>${tag}</div>
+        <span style="font-size:12px;color:rgba(220,228,255,0.5)">${p.sub}</span>
+        <div style="display:flex;gap:5px;flex-wrap:wrap">${specs}</div>
+      </div>
+      <div style="width:22px;height:22px;border-radius:11px;border:1.5px solid ${ring};box-sizing:border-box;display:flex;align-items:center;justify-content:center"><div style="width:10px;height:10px;border-radius:5px;background:${dot};box-shadow:0 0 8px ${dot}"></div></div>
+    </div>`;
+  }).join("");
+
+  const toggles = [
+    { act: "kill", label: "Kill switch", sub: "Block all traffic if the tunnel drops", on: kill },
+    { act: "multihop", label: "Multi-hop", sub: "Route through a relay before the exit", on: multihop },
+    { act: "dns", label: "Private DNS", sub: "Resolve inside the tunnel, filter trackers", on: dns },
+    { act: "pq", label: "Post-quantum", sub: "ML-KEM-768 + ML-DSA-65 hybrid handshake", on: pq },
+  ];
+  const togglesHTML = toggles.map((t, i) => {
+    const bt = i ? "0.5px solid rgba(255,255,255,0.08)" : "0.5px solid transparent";
+    return `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-top:${bt}">
+      <div style="display:flex;flex-direction:column;gap:2px"><span style="font-size:15px;font-weight:500">${t.label}</span><span style="font-size:12px;color:rgba(220,228,255,0.48)">${t.sub}</span></div>
+      <div data-act="${t.act}" style="pointer-events:auto;flex:none;width:58px;height:32px;border-radius:16px;padding:2px;box-sizing:border-box;display:flex;justify-content:${t.on ? "flex-end" : "flex-start"};background:${t.on ? OK : "rgba(255,255,255,0.14)"};cursor:pointer;box-shadow:inset 0 1px 2px rgba(0,0,0,0.3)"><div style="width:36px;height:28px;border-radius:14px;background:linear-gradient(180deg,#FFFFFF,#E4E8F0);box-shadow:0 2px 6px rgba(0,0,0,0.35)"></div></div>
+    </div>`;
+  }).join("");
+
+  const advanced = [["KEM", "ML-KEM-768"], ["SIG", "ML-DSA-65"], ["AEAD", "ChaCha20"]];
+  const advHTML = advanced.map(([k, val]) => `<div style="padding:9px 12px;border-radius:16px;display:flex;flex-direction:column;gap:2px;background:rgba(255,255,255,0.04);border:0.5px solid rgba(255,255,255,0.1)"><span style="font:500 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:rgba(220,228,255,0.42)">${k}</span><span style="font:500 12px ui-monospace,'SF Mono',Menlo,monospace">${val}</span></div>`).join("");
+
+  return `${STATUSBAR_HTML}
+  <div style="position:absolute;width:420px;height:420px;right:-220px;top:80px;border-radius:50%;background:#5CF2FF;opacity:0.1;filter:blur(110px)"></div>
+  <div style="position:absolute;top:62px;left:16px;right:16px;bottom:118px;overflow-y:auto;scrollbar-width:none;display:flex;flex-direction:column;gap:10px;z-index:8;color:#F5F7FC">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;padding:0 8px 2px"><span style="font-size:34px;font-weight:700;letter-spacing:-.03em;line-height:1">Settings</span><span style="font:500 10px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:rgba(220,228,255,0.45)">PROTOCOL</span></div>
+    ${protoHTML}
+    <span style="font:500 10px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.16em;color:rgba(220,228,255,0.42);padding:6px 8px 0">TUNNEL</span>
+    <div style="padding:0 16px;border-radius:24px;background:linear-gradient(180deg,rgba(255,255,255,0.07),rgba(255,255,255,0.02));backdrop-filter:blur(40px);-webkit-backdrop-filter:blur(40px);border:0.5px solid rgba(255,255,255,0.13);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.25)">${togglesHTML}</div>
+    <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px">${advHTML}</div>
+  </div>
+  ${SCRIM_HTML}${tabBarHTML(4)}${HOME_HTML}`;
 }
 
 // Temporary honest placeholder for tabs still being built to the v2 design.
