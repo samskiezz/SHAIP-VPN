@@ -56,6 +56,9 @@ rustls-pki-types = "1"
 maybenot = "2.2.2"
 rand09 = { package = "rand", version = "0.9" }
 enum-map = "2.7"
+# Forward error correction (SHAIP-FEC/1): RaptorQ (RFC 6330) fountain code, to
+# recover lost tunnel packets without a retransmit round trip on lossy links.
+raptorq = "2.0.1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"

@@ -61,6 +61,7 @@ pub mod payment;
 pub mod dns_qmin;
 pub mod dns_tcp;
 pub mod entropy;
+pub mod fec;
 pub mod hex_util;
 pub mod identity_check;
 pub mod mix_cover;
