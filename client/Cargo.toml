@@ -63,6 +63,9 @@ raptorq = "2.0.1"
 # a t-of-n quorum co-signs the consensus under one group key, and the aggregate
 # is an ordinary RFC 8032 Ed25519 signature any existing verifier accepts.
 frost-ed25519 = "3.0.0"
+# SHA-1 only for the RFC 6455 WebSocket Sec-WebSocket-Accept handshake used by the
+# SHAIP-PT/1 HTTP-Upgrade camouflage (not used as a security primitive anywhere).
+sha1 = "0.10"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"

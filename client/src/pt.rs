@@ -107,6 +107,98 @@ pub async fn accept(
     Ok(tls)
 }
 
+/// The RFC 6455 WebSocket GUID, used to derive `Sec-WebSocket-Accept`.
+const WS_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+
+fn ws_accept(key: &str) -> String {
+    use base64::Engine;
+    use sha1::{Digest, Sha1};
+    let mut h = Sha1::new();
+    h.update(key.as_bytes());
+    h.update(WS_GUID.as_bytes());
+    base64::engine::general_purpose::STANDARD.encode(h.finalize())
+}
+
+/// Read HTTP headers (up to the blank line) from a stream, bounded.
+async fn read_http_head<S: AsyncRead + Unpin>(s: &mut S) -> io::Result<String> {
+    let mut buf = Vec::new();
+    let mut one = [0u8; 1];
+    loop {
+        let n = s.read(&mut one).await?;
+        if n == 0 {
+            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "eof in HTTP head"));
+        }
+        buf.push(one[0]);
+        if buf.ends_with(b"\r\n\r\n") {
+            break;
+        }
+        if buf.len() > 8192 {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "HTTP head too large"));
+        }
+    }
+    Ok(String::from_utf8_lossy(&buf).into_owned())
+}
+
+/// Client side of the WebSocket (RFC 6455) HTTP/1.1 Upgrade: makes the flow look
+/// like a genuine WebSocket connection to deep-packet inspection, then hands back
+/// the raw stream for the datagram framing. `host`/`path` shape the request line.
+pub async fn client_http_upgrade<S: AsyncRead + AsyncWrite + Unpin>(
+    s: &mut S,
+    host: &str,
+    path: &str,
+) -> anyhow::Result<()> {
+    use base64::Engine;
+    let mut key_bytes = [0u8; 16];
+    rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut key_bytes);
+    let key = base64::engine::general_purpose::STANDARD.encode(key_bytes);
+    let req = format!(
+        "GET {path} HTTP/1.1\r\nHost: {host}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\
+         Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n"
+    );
+    s.write_all(req.as_bytes()).await?;
+    s.flush().await?;
+    let head = read_http_head(s).await?;
+    let first = head.lines().next().unwrap_or("");
+    if !first.starts_with("HTTP/1.1 101") {
+        anyhow::bail!("bridge did not accept the WebSocket upgrade: {first:?}");
+    }
+    // Verify the server proved it spoke WebSocket (defeats a naive echo).
+    let want = ws_accept(&key);
+    let ok = head.lines().any(|l| {
+        let l = l.trim();
+        l.len() > 22
+            && l[..22].eq_ignore_ascii_case("sec-websocket-accept: ")
+            && l[22..].trim() == want
+    });
+    if !ok {
+        anyhow::bail!("bridge returned a bad Sec-WebSocket-Accept");
+    }
+    Ok(())
+}
+
+/// Bridge side of the WebSocket Upgrade: read the client's request, answer
+/// `101 Switching Protocols` with the correct `Sec-WebSocket-Accept`, then hand
+/// back the raw stream for datagram framing.
+pub async fn server_http_upgrade<S: AsyncRead + AsyncWrite + Unpin>(s: &mut S) -> anyhow::Result<()> {
+    let head = read_http_head(s).await?;
+    let key = head
+        .lines()
+        .find_map(|l| {
+            let l = l.trim();
+            (l.len() > 19 && l[..19].eq_ignore_ascii_case("sec-websocket-key: "))
+                .then(|| l[19..].trim().to_string())
+        })
+        .ok_or_else(|| anyhow::anyhow!("no Sec-WebSocket-Key in upgrade request"))?;
+    let resp = format!(
+        "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\
+         Sec-WebSocket-Accept: {}\r\n\r\n",
+        ws_accept(&key)
+    );
+    s.write_all(resp.as_bytes()).await?;
+    s.flush().await?;
+    Ok(())
+}
+
 fn unspecified_for(addr: SocketAddr) -> SocketAddr {
     if addr.is_ipv4() {
         (std::net::Ipv4Addr::UNSPECIFIED, 0).into()
@@ -124,6 +216,9 @@ pub async fn bridge_connection(
     tls: tokio_rustls::server::TlsStream<TcpStream>,
     upstream: SocketAddr,
 ) -> anyhow::Result<()> {
+    let mut tls = tls;
+    // Complete the WebSocket upgrade so the flow looks like real HTTPS+WS.
+    server_http_upgrade(&mut tls).await?;
     let udp = UdpSocket::bind(unspecified_for(upstream)).await?;
     udp.connect(upstream).await?;
     let udp = Arc::new(udp);
@@ -173,7 +268,9 @@ pub async fn pt_client(
     server_name: &str,
     config: Arc<ClientConfig>,
 ) -> anyhow::Result<()> {
-    let tls = connect(bridge, server_name, config).await?;
+    let mut tls = connect(bridge, server_name, config).await?;
+    // Present a WebSocket upgrade so the carrier looks like ordinary HTTPS+WS.
+    client_http_upgrade(&mut tls, server_name, "/").await?;
     let (mut rd, mut wr) = tokio::io::split(tls);
     let peer: Arc<tokio::sync::Mutex<Option<SocketAddr>>> = Arc::new(tokio::sync::Mutex::new(None));
 
@@ -219,6 +316,14 @@ pub async fn pt_client(
 mod tests {
     use super::*;
     use tokio::net::TcpListener;
+
+    #[tokio::test]
+    async fn websocket_upgrade_handshake_completes() {
+        let (mut client, mut server) = tokio::io::duplex(1 << 14);
+        let srv = tokio::spawn(async move { server_http_upgrade(&mut server).await });
+        client_http_upgrade(&mut client, "bridge.local", "/").await.unwrap();
+        srv.await.unwrap().unwrap();
+    }
 
     #[tokio::test]
     async fn framing_roundtrips_many_sizes() {
