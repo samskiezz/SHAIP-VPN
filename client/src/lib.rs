@@ -50,6 +50,10 @@ pub mod tun;
 #[cfg(target_os = "linux")]
 pub mod netcfg;
 
+/// Linux UDP segmentation/aggregation offload (GSO/GRO) for the data path.
+#[cfg(target_os = "linux")]
+pub mod udp_offload;
+
 // Supporting library primitives for the §19 integration backlog. Self-contained
 // and unit-tested; wired into the daemons as those features land.
 pub mod delayed_ack;
