@@ -1,4 +1,4 @@
-# PQ-ANON Prometheus config (§16). Scrapes the real /metrics endpoints the
+# SHAIP VPN Prometheus config (§16). Scrapes the real /metrics endpoints the
 # control plane and daemons expose; the rules in rules/ reference only series
 # these targets actually emit.
 global:

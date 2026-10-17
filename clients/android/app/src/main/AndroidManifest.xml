@@ -37,7 +37,7 @@
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="VPN tunnel for the PQ-ANON post-quantum client" />
+                android:value="VPN tunnel for the SHAIP VPN post-quantum client" />
             <intent-filter>
                 <action android:name="android.net.VpnService" />
             </intent-filter>

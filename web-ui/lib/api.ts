@@ -1,4 +1,4 @@
-// Thin client for the PQANON-CP/1 control plane.
+// Thin client for the SHAIP control plane.
 import { apiRequestURL } from "./transport";
 
 export const API_URL =

@@ -1,5 +1,5 @@
 /*
- * pqanon.h — C ABI for native PQ-ANON front ends.
+ * pqanon.h — C ABI for native SHAIP VPN front ends.
  *
  * A native shell (iOS/macOS Network Extension, Android VpnService, Windows
  * service) owns the OS packet interface and drives the tunnel through these

@@ -1,4 +1,4 @@
-//! PQ-ANON client core library (`pqanon`).
+//! SHAIP VPN client core library (`pqanon`).
 //!
 //! Implements the PQANON/1 protocol family:
 //! - [`wire`]      — PQANON/1 common envelope (AEAD framing).

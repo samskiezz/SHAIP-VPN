@@ -89,7 +89,7 @@ They are a product decision, not an engineering task:
 | Traffic | **Built** (needs Mac) | Yes — measured byte/packet counters |
 | Lock screen (Live Activity) | **Built** (needs Mac) | Yes — but shows no server/city (privacy) |
 | Onboarding → **Setup** | **Built** (needs Mac) | Real config import. SSO/passkey/SOC2/ISO/FIPS: **no backend, cut** |
-| Protocol → folded into **Settings** | **Built** (needs Mac) | Only PQANON/1 exists. WireGuard/IKEv2: **do not exist** |
+| Protocol → folded into **Settings** | **Built** (needs Mac) | Only SHAIP/1 exists. WireGuard/IKEv2: **do not exist** |
 | Security (kill switch half) | **Built** (needs Mac) | Kill switch real; threat radar / "1,284 threats": **no backend** |
 | Network globe / Nodes | **Real on web** (globe art cut) | A real **Servers** page now lists the signed node directory (region, role, capacity, stake, status). The *globe animation* and per-node exit-IPs/loads/RTT sparklines remain unbuilt — no real source. |
 | Zero-trust Access (trust score, CrowdStrike, MFA grants) | **Cut** | **No backend whatsoever** |

@@ -5,7 +5,7 @@
 | Component | URL | Purpose |
 |-----------|-----|---------|
 | Prometheus | http://localhost:9090 | scrapes `/metrics`, evaluates alert rules |
-| Grafana | http://localhost:3001 | the **PQ-ANON Overview** dashboard (auto-provisioned) |
+| Grafana | http://localhost:3001 | the **SHAIP VPN Overview** dashboard (auto-provisioned) |
 | Alertmanager | http://localhost:9093 | routes alerts to Slack / PagerDuty |
 
 Every series the rules and dashboard use is really emitted — nothing is scraped

@@ -6,7 +6,7 @@ pub fn enable(path: &std::path::Path) -> std::io::Result<()> {
     let dir = std::path::PathBuf::from(home).join(".config/autostart");
     std::fs::create_dir_all(&dir)?;
     let unit = format!(
-        "[Desktop Entry]\nType=Application\nName=PQANON\nExec={}\n\
+        "[Desktop Entry]\nType=Application\nName=SHAIP VPN\nExec={}\n\
          X-GNOME-Autostart-enabled=true\nHidden=false\n",
         path.display()
     );

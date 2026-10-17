@@ -9,7 +9,7 @@ struct TunnelModelTests {
 
     /// The CLI's own client config (examples/client.toml) imports as is.
     static let cliConfig = """
-    # PQ-ANON client config
+    # SHAIP VPN client config
     [client]
     identity    = "/home/user/.pqanon/client.id"
     tun_device  = "pqanon-c0"

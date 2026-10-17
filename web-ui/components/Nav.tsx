@@ -17,7 +17,7 @@ export default function Nav() {
   };
   return (
     <nav className="sticky top-0 z-20 flex flex-wrap items-center gap-x-6 gap-y-2 border-b border-white/10 bg-bg-bottom/70 px-6 py-3 backdrop-blur-xl">
-      <span className="font-mono text-lg font-bold tracking-tight text-signal">PQ·ANON</span>
+      <span className="font-mono text-lg font-bold tracking-tight text-signal">SHAIP VPN</span>
       <div className="flex flex-wrap gap-4">
         {links.map((l) => (
           <Link

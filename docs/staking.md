@@ -33,9 +33,9 @@ descriptor is not equivocation. To change its address, a node publishes in
 the next epoch.
 
 The body is deterministic and length-prefixed, and starts with the
-length-prefixed magic `PQANON-NODEDESC-V1`. It can therefore never coincide
-with a PQANON-HS/1 transcript (which starts with a 4-byte ML-KEM key length) or
-an enrollment proof (`PQANON-ENROLL-CLAIM-V1:`), even though the same key signs
+length-prefixed magic `SHAIP-NODEDESC-V1`. It can therefore never coincide
+with a SHAIP-HS/1 transcript (which starts with a 4-byte ML-KEM key length) or
+an enrollment proof (`SHAIP-ENROLL-CLAIM-V1:`), even though the same key signs
 all three. The identity's `sign_node_descriptor` refuses any body without that
 prefix. Go (`control-plane/staking`) and Rust (`client/src/descriptor.rs`)
 produce byte-identical descriptors; a shared vector pins this.

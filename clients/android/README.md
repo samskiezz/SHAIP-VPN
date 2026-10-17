@@ -1,6 +1,6 @@
-# PQ·ANON — Android client
+# SHAIP VPN — Android client
 
-A native Android client for the SHAIP / PQ·ANON post-quantum VPN, built with
+A native Android client for the SHAIP / SHAIP VPN post-quantum VPN, built with
 Kotlin + Jetpack Compose. It shares one visual language with the iOS app
 (`clients/ios`) and the web UI (`web-ui`): the deep-graphite background,
 Liquid-Glass cards, mono eyebrows and the cyan **signal** accent, from the same

@@ -6,7 +6,7 @@
 
 ## Permitted use
 
-PQ-ANON is provided for lawful purposes only. You agree not to use it to
+SHAIP VPN is provided for lawful purposes only. You agree not to use it to
 violate any law, attack systems without authorization, or distribute malware.
 
 ## Availability

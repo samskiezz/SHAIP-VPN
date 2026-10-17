@@ -1,4 +1,4 @@
-// SHAIP / PQ·ANON Android client.
+// SHAIP / SHAIP VPN Android client.
 //
 // Repositories are ordered to survive a rate-limited Maven Central: Google's
 // GCS-backed Central mirror is tried first (it does not throttle), then the

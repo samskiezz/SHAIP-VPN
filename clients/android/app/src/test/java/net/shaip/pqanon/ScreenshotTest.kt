@@ -42,9 +42,9 @@ private fun LoginPreview() = ScreenBackground {
         Column(Modifier.widthIn(max = 380.dp).fillMaxWidth().glass().padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                GlowDot(Tokens.Signal); Eyebrow("PQANON/1 · Post-quantum VPN")
+                GlowDot(Tokens.Signal); Eyebrow("SHAIP VPN · Post-quantum VPN")
             }
-            Text("PQ·ANON", color = Tokens.Signal, fontFamily = FontFamily.Monospace,
+            Text("SHAIP VPN", color = Tokens.Signal, fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.Bold, fontSize = 26.sp)
             Text("Sign in with your account number", color = Tokens.Ink2)
             Field("1234 5678 9012 3456", {}, "1234 5678 9012 3456", mono = true)
@@ -122,7 +122,7 @@ private fun ServersPreview() = ScreenBackground {
 private fun PayPreview() = ScreenBackground {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())
         .padding(horizontal = 16.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Text("PQ·ANON — Private access", color = Tokens.Signal, fontFamily = FontFamily.Monospace,
+        Text("SHAIP VPN — Private access", color = Tokens.Signal, fontFamily = FontFamily.Monospace,
             fontWeight = FontWeight.Bold, fontSize = 22.sp)
         Text("Pay with Monero or Bitcoin. Get blind-signed access tokens (RFC 9474).",
             color = Tokens.Ink2, fontSize = 14.sp)

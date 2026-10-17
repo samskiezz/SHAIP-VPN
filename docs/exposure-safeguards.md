@@ -51,7 +51,7 @@ replies; validate on a test host with console access before using it on a server
 Failure to install nftables protection aborts startup and cannot promise blocking.
 
 Desktop uses `PQANON_ENGINE` (default `pqanon` on PATH), `PQANON_CONFIG` or the
-config path field, and `PQANON_API`. The engine inherits the launching user's
+config path field, and `SHAIP_API`. The engine inherits the launching user's
 privileges; this change adds no privileged broker or automatic elevation. Linux
 requires network administration privileges, `/dev/net/tun` and nftables. Desktop
 VPN operation on Windows/macOS is explicitly unavailable.

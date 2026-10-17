@@ -57,7 +57,7 @@ private fun TopBar(current: Tab, onSelect: (Tab) -> Unit, onSignOut: () -> Unit)
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Text("PQ·ANON", color = Tokens.Signal, fontFamily = FontFamily.Monospace,
+            Text("SHAIP VPN", color = Tokens.Signal, fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.Bold, fontSize = 18.sp)
             TextButton(onSignOut) { Text("Sign out", color = Tokens.Ink2) }
         }

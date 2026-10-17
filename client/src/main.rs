@@ -1,4 +1,4 @@
-//! `pqanon` — PQ-ANON client daemon / CLI.
+//! `pqanon` — SHAIP VPN client daemon / CLI.
 //!
 //! Subcommands:
 //! - `keygen` — generate a long-term identity and print its id + keys.
@@ -21,7 +21,7 @@ use pqanon::wire::MsgType;
 #[command(
     name = "pqanon",
     version,
-    about = "PQ-ANON post-quantum anonymizing VPN client"
+    about = "SHAIP VPN post-quantum anonymizing VPN client"
 )]
 struct Cli {
     #[command(subcommand)]

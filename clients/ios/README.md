@@ -1,7 +1,7 @@
 # SHAIP — iOS app
 
 The SHAIP VPN for iPhone: SwiftUI on the iOS 26 SDK with the v2 design (Liquid Glass, the native
-floating tab bar, live 3-D scenes), a **Packet Tunnel extension that runs the real PQ-ANON client**,
+floating tab bar, live 3-D scenes), a **Packet Tunnel extension that runs the real SHAIP VPN client**,
 and a Live Activity with Dynamic Island layouts.
 
 **Nothing in the app is simulated.** Connection state is iOS's own (`NEVPNStatus`). Every number

@@ -1,4 +1,4 @@
-//! The PQ·ANON desktop app: a glass console over the real control plane, with a
+//! The SHAIP VPN desktop app: a glass console over the real control plane, with a
 //! Connect control that drives the local tunnel engine.
 
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -51,14 +51,14 @@ impl DesktopApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         theme::install(&cc.egui_ctx);
         let (tx, rx) = channel();
-        let api_base = std::env::var("PQANON_API")
+        let api_base = std::env::var("SHAIP_API")
             .unwrap_or_else(|_| "http://127.0.0.1:8080".to_string());
 
-        // Offline preview mode (PQANON_DEMO=1): seed sample infrastructure data so
+        // Offline preview mode (SHAIP_DEMO=1): seed sample infrastructure data so
         // the signed-in screens render without a backend. Sample node names and a
         // placeholder account number only — never customer data. Used for
-        // screenshots and demos. PQANON_SCREEN picks the initial tab.
-        let demo = std::env::var("PQANON_DEMO").is_ok();
+        // screenshots and demos. SHAIP_SCREEN picks the initial tab.
+        let demo = std::env::var("SHAIP_DEMO").is_ok();
         let (token, me, dash, nodes, denoms) = if demo {
             (
                 Some("demo".to_string()),
@@ -70,7 +70,7 @@ impl DesktopApp {
         } else {
             (None, None, None, None, None)
         };
-        let screen = match std::env::var("PQANON_SCREEN").as_deref() {
+        let screen = match std::env::var("SHAIP_SCREEN").as_deref() {
             Ok("servers") => Screen::Servers,
             Ok("buy") => Screen::Buy,
             _ => Screen::Dashboard,
@@ -255,9 +255,9 @@ impl DesktopApp {
                     theme::glass().show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.label(RichText::new("●").color(SIGNAL).size(9.0));
-                            eyebrow(ui, "PQANON/1 · Post-quantum VPN");
+                            eyebrow(ui, "SHAIP VPN · Post-quantum VPN");
                         });
-                        ui.label(RichText::new("PQ·ANON").color(SIGNAL).font(theme::mono(26.0)).strong());
+                        ui.label(RichText::new("SHAIP VPN").color(SIGNAL).font(theme::mono(26.0)).strong());
                         ui.add_space(4.0);
 
                         if let Some(acct) = self.created.clone() {
@@ -327,7 +327,7 @@ impl DesktopApp {
             .inner_margin(egui::Margin::symmetric(16.0, 10.0))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("PQ·ANON").color(SIGNAL).font(theme::mono(18.0)).strong());
+                    ui.label(RichText::new("SHAIP VPN").color(SIGNAL).font(theme::mono(18.0)).strong());
                     ui.add_space(16.0);
                     for (s, label) in [
                         (Screen::Dashboard, "Dashboard"),
@@ -490,7 +490,7 @@ impl DesktopApp {
     }
 
     fn buy_screen(&mut self, ui: &mut egui::Ui) {
-        ui.label(RichText::new("PQ·ANON — Private access").color(SIGNAL).font(theme::mono(22.0)).strong());
+        ui.label(RichText::new("SHAIP VPN — Private access").color(SIGNAL).font(theme::mono(22.0)).strong());
         ui.label(RichText::new(
             "Pay with Monero or Bitcoin. Get blind-signed access tokens: the token you redeem \
              carries nothing that links it to your payment (RFC 9474 blind signatures).",

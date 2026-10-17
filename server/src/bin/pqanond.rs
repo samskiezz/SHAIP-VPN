@@ -1,4 +1,4 @@
-//! `pqanond` — PQ-ANON tunnel daemon (§11.1).
+//! `pqanond` — SHAIP VPN tunnel daemon (§11.1).
 //!
 //! A real UDP server that answers the PQANON-HS/1 handshake, keeps one session
 //! per client identity, and moves the client's IP traffic:
@@ -33,7 +33,7 @@ use std::time::{Duration, Instant};
 use tokio::net::UdpSocket;
 
 #[derive(Parser)]
-#[command(name = "pqanond", about = "PQ-ANON tunnel daemon")]
+#[command(name = "pqanond", about = "SHAIP VPN tunnel daemon")]
 struct Cli {
     /// UDP listen address.
     #[arg(short, long, default_value = "0.0.0.0:443")]

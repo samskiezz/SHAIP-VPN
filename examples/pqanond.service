@@ -1,4 +1,4 @@
-# systemd unit for a PQ-ANON VPN server. pqanond is configured by flags (it
+# systemd unit for a SHAIP VPN VPN server. pqanond is configured by flags (it
 # reads no config file); these are the ones a production server needs.
 #
 #   apt install nftables conntrack        # --nat needs both
@@ -18,7 +18,7 @@
 # stays on localhost here.
 
 [Unit]
-Description=PQ-ANON VPN server (pqanond)
+Description=SHAIP VPN VPN server (pqanond)
 After=network-online.target
 Wants=network-online.target
 

@@ -49,9 +49,9 @@ fun LoginScreen(api: Api, session: Session, onSignedIn: () -> Unit) {
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     GlowDot(Tokens.Signal)
-                    Eyebrow("PQANON/1 · Post-quantum VPN")
+                    Eyebrow("SHAIP VPN · Post-quantum VPN")
                 }
-                Text("PQ·ANON", color = Tokens.Signal, fontFamily = FontFamily.Monospace,
+                Text("SHAIP VPN", color = Tokens.Signal, fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold, fontSize = 26.sp)
 
                 val shown = created

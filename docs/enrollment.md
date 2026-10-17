@@ -29,13 +29,13 @@ URL/QR-safe base64url:
 integers). `sig` is an **Ed25519** signature (RFC 8032, pure — the body *is* the
 message; Ed25519 hashes it internally, so there is no separate digest step). The
 first field of every body is a domain-separation magic
-(`PQANON-ENROLL-V1` / `PQANON-DEVCERT-V1`), so a signature over one artifact type
+(`SHAIP-ENROLL-V1` / `SHAIP-DEVCERT-V1`), so a signature over one artifact type
 can never be reinterpreted as the other even if the outer label is swapped.
 
 Enrollment-token body:
 
 ```
-u16 len | "PQANON-ENROLL-V1"
+u16 len | "SHAIP-ENROLL-V1"
 u8      | version (1)
 [16]    | token id
 u16 len | account (UTF-8)
@@ -47,7 +47,7 @@ u8      | flags (bit0 = one-time)
 Device-certificate body:
 
 ```
-u16 len | "PQANON-DEVCERT-V1"
+u16 len | "SHAIP-DEVCERT-V1"
 u8      | version (1)
 [16]    | device id
 u16 len | account (UTF-8): "-" in every certificate the control plane issues
@@ -104,7 +104,7 @@ format ever changes, both sides change together.
 | `DELETE /api/devices/{id}` | session | Revoke a device. It is published in the signed CRL. |
 
 - **Proof of possession.** A claim must carry an Ed25519 signature by the device
-  key over `PQANON-ENROLL-CLAIM-V1:<token>`. This proves the claimant holds the
+  key over `SHAIP-ENROLL-CLAIM-V1:<token>`. This proves the claimant holds the
   key being bound, so a claim cannot bind someone else's public key.
 - **One-time, atomically.** Issued tokens are recorded (`enroll_tokens`). A claim
   consumes the token and inserts the device (`devices`) in one transaction. In

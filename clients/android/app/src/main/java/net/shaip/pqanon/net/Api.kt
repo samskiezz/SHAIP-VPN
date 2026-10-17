@@ -14,7 +14,7 @@ import java.util.concurrent.TimeUnit
 class ApiException(message: String, val status: Int) : Exception(message)
 
 /**
- * Thin client for the PQANON-CP/1 control plane — the same API the web UI and
+ * Thin client for the SHAIP-CP/1 control plane — the same API the web UI and
  * CLI use. All calls are suspend functions that run on the IO dispatcher.
  */
 class Api(private val session: Session) {

@@ -18,7 +18,7 @@ struct ProtectionView: View {
                 }
                 section("RIGHT NOW", items)
                 section("WHAT THIS VPN DOESN'T DO", Protection.limits, limits: true)
-                Text("SHAIP runs PQ-ANON, pre-release software. Its code is open; it has not yet had an independent security audit.")
+                Text("SHAIP runs SHAIP VPN, pre-release software. Its code is open; it has not yet had an independent security audit.")
                     .ui(12, relativeTo: .footnote).foregroundStyle(Tok.dim(0.45))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 8).padding(.top, 4)

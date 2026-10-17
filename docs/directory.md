@@ -12,7 +12,7 @@ ASCII, one directive per line, fully deterministic so two independent
 implementations produce byte-identical bytes:
 
 ```
-PQANON-CONSENSUS-V1
+SHAIP-CONSENSUS-V1
 published 2026-01-15T00:00:00Z
 valid-until 2026-01-15T01:00:00Z
 threshold 2/3

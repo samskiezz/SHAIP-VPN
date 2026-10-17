@@ -1,11 +1,11 @@
-# PQ-ANON — Post-Quantum Anonymizing VPN Stack
+# SHAIP VPN — Post-Quantum Anonymizing VPN Stack
 
 > **[STATUS.md](STATUS.md) is the honest, no-spin build status** — what is real
 > and proven, what is written but needs a Mac to compile, what was deliberately
 > cut rather than faked, and the exact path to a working app and server. Read it
 > first.
 
-A from-scratch VPN stack implementing **PQANON/1**: a hybrid post-quantum
+A from-scratch VPN stack implementing **SHAIP/1**: a hybrid post-quantum
 handshake, a custom obfuscated UDP transport, a fixed-size onion mixnet, a REST
 control plane, and a web dashboard. Every wire format and cryptographic
 composition is defined in-house; only standard RustCrypto / Go stdlib primitives
@@ -28,7 +28,7 @@ ChaCha20-Poly1305, HKDF/HMAC-SHA256, Argon2id).
 | `pqanon::supervisor` reconnecting link + `pqanon-ffi` C ABI for native shells | Rust + C | **Working** | restart/crash/hang/rekey test vs real `pqanond`; C and Swift programs against a live server ([docs/client-api.md](docs/client-api.md)) |
 | `pqanond` session core: one session per identity, stable addresses, idempotent handshake retransmits, idle expiry, Close on shutdown | Rust | **Working** | unit tests with real handshakes + the lab |
 | `pqanon-mixd` mix node (peels + forwards onion cells) | Rust | **Working, standalone** | mix round-trip tests. The tunnel does **not** route through mixes yet. |
-| Control plane `PQANON-CP/1` (anonymous accounts, devices, nodes, payments, CRL): no email, no request log, no stored addresses | Go | **Working** | `go test` incl. privacy tests (no address, id or path in any log line or stored record), live curl |
+| Control plane `SHAIP-CP/1` (anonymous accounts, devices, nodes, payments, CRL): no email, no request log, no stored addresses | Go | **Working** | `go test` incl. privacy tests (no address, id or path in any log line or stored record), live curl |
 | Web UI (account-number sign-up, dashboard, devices, buy access, delete account) | Next.js/TS | **Working** | `next build`, `tsc`, a browser run with no third-party requests |
 | iOS app: a Packet Tunnel extension running the Rust core; screens show only measured state and state the limits (`clients/ios`) | SwiftUI + Rust | **Written** (needs an Xcode 26 build) | the app's FFI Swift run against a live `pqanond` on Linux; Rust core clippy-clean for `aarch64-apple-ios`; `SHAIPCore` tests ([clients/ios/README.md](clients/ios/README.md)) |
 | Postgres schema + in-memory fallback | SQL/Go | **Working** | one store contract run against both, incl. real PostgreSQL |
@@ -121,7 +121,7 @@ Full design, crypto choices, and threat model, including those limits:
 ```
 client/         Rust core library (lib "pqanon") + `pqanon` CLI binary
 server/         Rust daemons: pqanond (tunnel) + pqanon-mixd (mix node)
-control-plane/  Go REST API (PQANON-CP/1): anonymous accounts, devices, nodes, payments, CRL
+control-plane/  Go REST API (SHAIP-CP/1): anonymous accounts, devices, nodes, payments, CRL
 db/             PostgreSQL schema (§15)
 web-ui/         Next.js dashboard
 clients/ios/    SwiftUI iOS app (SHAIP v2 design), SHAIPCore package, design reference
@@ -199,7 +199,7 @@ clients/ios/preview/build.sh   # → clients/ios/preview/dist/index.html
 
 ## Protocol summary
 
-- **PQANON-HS/1 handshake** — 3-message mutually-authenticated handshake. The
+- **SHAIP-HS/1 handshake** — 3-message mutually-authenticated handshake. The
   session secret `ss_mix` is derived from **both** ML-KEM-768 and X25519, so
   breaking either alone is insufficient. Both sides sign the transcript with
   long-term ML-DSA-65 **and** Ed25519 keys. The client's long-term verifying
@@ -208,13 +208,13 @@ clients/ios/preview/build.sh   # → clients/ios/preview/dist/index.html
   authenticates against a pinned `identity_id` set or an enrolled device
   certificate with no identifier ever in cleartext (regression-tested on the
   wire bytes).
-- **PQANON/1 envelope** — 22-byte header bound as AEAD associated data; any
+- **SHAIP/1 envelope** — 22-byte header bound as AEAD associated data; any
   tamper with `epoch/conn_id/seq/type/length` breaks authentication. Nonces are
   deterministic (`epoch||seq`); a session refuses to seal past
   `REJECT_AFTER_SEQ` rather than wrap, and clients rekey with a fresh handshake
   long before (every 20 minutes or 2³⁰ packets). Directional keys separate the
   two directions.
-- **PQANON-OBF/2 wire layer** (`client/src/obf.rs`) — every datagram is random
+- **SHAIP-OBF/2 wire layer** (`client/src/obf.rs`) — every datagram is random
   bytes to anyone without the keys. Session packets: the 22-byte header is
   masked with a ChaCha20 keystream chosen by a sample of the ciphertext under a
   per-session key (QUIC's header protection, RFC 9001 §5.4), then padded to a
@@ -226,11 +226,11 @@ clients/ios/preview/build.sh   # → clients/ios/preview/dist/index.html
   position holding a fixed value across a flow's packets.
 - **Session control** — keepalive PING/PONG (the RTT clients show) and Close,
   sealed and padded like data, so they look like any other small packet.
-- **PQANON-MIX/1 mixnet** — fixed-size 2048-byte onion cells; each hop peels one
+- **SHAIP-MIX/1 mixnet** — fixed-size 2048-byte onion cells; each hop peels one
   X25519 + ChaCha20-Poly1305 layer and learns only the next hop. Verified by a
   5-hop wrap → peel → deliver round-trip. Standalone: the tunnel doesn't use it
   yet.
-- **PQANON-UDP/1 transport** — anti-replay sliding window, EWMA RTT/RTO, and a
+- **SHAIP-UDP/1 transport** — anti-replay sliding window, EWMA RTT/RTO, and a
   custom BBR-inspired congestion controller (all unit-tested).
 
 ## Improvements / deviations from the v1.0 design doc

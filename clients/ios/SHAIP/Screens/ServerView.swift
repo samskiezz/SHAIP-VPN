@@ -41,7 +41,7 @@ struct ServerView: View {
             HStack {
                 StatusPill(text: store.stateLabel, color: store.connected ? Tok.ok : Tok.ink2)
                 Spacer()
-                Chip(text: "PQANON/1", ink: Tok.signal, fill: Tok.signal.opacity(0.12), stroke: .clear)
+                Chip(text: "SHAIP/1", ink: Tok.signal, fill: Tok.signal.opacity(0.12), stroke: .clear)
             }
             Text(c.label).ui(24, .semibold, relativeTo: .title2).em(-0.03, of: 24).foregroundStyle(Tok.ink).lineLimit(1).minimumScaleFactor(0.6)
             kv("ADDRESS", c.address)

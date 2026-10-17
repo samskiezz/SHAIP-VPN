@@ -405,7 +405,7 @@ function nodesOverlayHTML(v: { nodes: Srv[]; srvIdx: number }): string {
 function protocolOverlayHTML(v: { proto: "mesh" | "wg" | "ike"; kill: boolean; multihop: boolean; dns: boolean; pq: boolean }): string {
   const { proto, kill, multihop, dns, pq } = v;
   const PROTOS = [
-    { k: "mesh", name: "SHAIP Mesh", tag: "NATIVE ONLY", sub: "PQANON/1 · single hop · ML-KEM-768 hybrid", specs: ["UDP 443", "ChaCha20-Poly1305", "PQ"] },
+    { k: "mesh", name: "SHAIP Mesh", tag: "NATIVE ONLY", sub: "SHAIP/1 · single hop · ML-KEM-768 hybrid", specs: ["UDP 443", "ChaCha20-Poly1305", "PQ"] },
     { k: "wg", name: "WireGuard", tag: "UNAVAILABLE", sub: "Not implemented in SHAIP", specs: ["UDP 51820", "Curve25519"] },
     { k: "ike", name: "IKEv2 / IPsec", tag: "UNAVAILABLE", sub: "Not implemented in SHAIP", specs: ["UDP 500/4500", "AES-256-GCM"] },
   ];

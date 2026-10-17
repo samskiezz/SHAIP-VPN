@@ -3,7 +3,7 @@ package net.shaip.pqanon.net
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-// Wire models for the PQANON-CP/1 control plane. Field names match the Go
+// Wire models for the SHAIP-CP/1 control plane. Field names match the Go
 // handlers' JSON tags exactly.
 
 @Serializable

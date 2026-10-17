@@ -1,6 +1,6 @@
-# PQ·ANON — Desktop client (Linux + Windows)
+# SHAIP VPN — Desktop client (Linux + Windows)
 
-A native desktop client for the SHAIP / PQ·ANON post-quantum VPN, written in
+A native desktop client for the SHAIP / SHAIP VPN post-quantum VPN, written in
 Rust with `egui`/`eframe`. It carries the same glass design language as the web
 UI, iOS and Android — deep-graphite gradient, translucent glass panels, cyan
 signal accent, mono labels (clients/ios/design/HANDOFF.md) — and talks to the
@@ -43,14 +43,14 @@ startup blocking behaviour and build/test instructions.
 
 ## Offline preview
 
-`PQANON_DEMO=1` seeds sample infrastructure data (demo node names, a placeholder
+`SHAIP_DEMO=1` seeds sample infrastructure data (demo node names, a placeholder
 account number — never customer data) so the signed-in screens render without a
-backend; `PQANON_SCREEN=dashboard|servers|buy` picks the tab. Used for
+backend; `SHAIP_SCREEN=dashboard|servers|buy` picks the tab. Used for
 screenshots and offline demos.
 
 ## Config
 
-`PQANON_API` sets the control-plane base URL (default `http://127.0.0.1:8080`).
+`SHAIP_API` sets the control-plane base URL (default `http://127.0.0.1:8080`).
 Remote hosts require HTTPS; automatic redirects are refused.
 
 ## Layout
