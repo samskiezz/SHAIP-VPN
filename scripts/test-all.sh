@@ -31,8 +31,8 @@ skip() { echo "⏭  SKIP: $1 ($2)"; NAMES+=("$1"); STATUSES+=("SKIP"); SKIP=$((S
 rust_build()   { cargo build --workspace; }
 rust_clippy()  { cargo clippy --workspace --all-targets -- -D warnings; }
 rust_tests()   { cargo test --release --workspace -- --nocapture; }
-rust_selftest(){ cargo build --release -q -p pqanon-client --bin pqanon && ./target/release/pqanon selftest; }
-rust_tunsmoke(){ ./target/release/pqanon tun-test; }
+rust_selftest(){ cargo build --release -q -p shaip-client --bin shaip && ./target/release/shaip selftest; }
+rust_tunsmoke(){ ./target/release/shaip tun-test; }
 
 # --- Go ---
 go_all() { ( cd control-plane && go build ./... && go vet ./... && go test ./... ); }
@@ -56,23 +56,23 @@ hsm_pkcs11() {
   D=$(mktemp -d)
   printf 'directories.tokendir = %s\nobjectstore.backend = file\nlog.level = ERROR\n' "$D" > "$D/softhsm2.conf"
   export SOFTHSM2_CONF="$D/softhsm2.conf"
-  softhsm2-util --init-token --free --label pqanon-ci --pin 1234 --so-pin 5678 >/dev/null \
+  softhsm2-util --init-token --free --label shaip-ci --pin 1234 --so-pin 5678 >/dev/null \
     || { rm -rf "$D"; unset SOFTHSM2_CONF; return 1; }
   chk() { if [ "$1" = "$2" ]; then ok=$((ok+1)); else echo "  ✗ $3: got $1 want $2"; bad=$((bad+1)); fi; }
 
   # 1. The keystore's PKCS#11 test must actually run against the token.
-  OUT=$(cd control-plane && PQANON_TEST_PKCS11_MODULE="$SOFTHSM_MODULE" PQANON_TEST_PKCS11_TOKEN=pqanon-ci \
-    PQANON_TEST_PKCS11_PIN=1234 go test -count=1 -timeout 120s -run 'TestPKCS11' -v ./keystore/ 2>&1)
+  OUT=$(cd control-plane && SHAIP_TEST_PKCS11_MODULE="$SOFTHSM_MODULE" SHAIP_TEST_PKCS11_TOKEN=shaip-ci \
+    SHAIP_TEST_PKCS11_PIN=1234 go test -count=1 -timeout 120s -run 'TestPKCS11' -v ./keystore/ 2>&1)
   echo "$OUT" | grep -E '^(--- |ok|FAIL)'
   if echo "$OUT" | grep -q -- '--- PASS: TestPKCS11SoftHSM' && ! echo "$OUT" | grep -q -- '--- SKIP'; then
     ok=$((ok+1)); else echo "  ✗ PKCS#11 test did not run and pass"; bad=$((bad+1)); fi
 
   # 2. The live control plane signs its auth tokens and CRL inside the token.
   ( cd control-plane && go build -o bin/control-plane . ) || { rm -rf "$D"; unset SOFTHSM2_CONF; return 1; }
-  local P11="?module-path=$SOFTHSM_MODULE&pin-env=PQANON_HSM_PIN&create=1"
-  local ENVS=(PQANON_HSM_PIN=1234 LISTEN_ADDR=:8099
-    "TOKEN_SIGNER=pkcs11:token=pqanon-ci;object=cp-token$P11"
-    "CRL_SIGNER=pkcs11:token=pqanon-ci;object=cp-crl$P11")
+  local P11="?module-path=$SOFTHSM_MODULE&pin-env=SHAIP_HSM_PIN&create=1"
+  local ENVS=(SHAIP_HSM_PIN=1234 LISTEN_ADDR=:8099
+    "TOKEN_SIGNER=pkcs11:token=shaip-ci;object=cp-token$P11"
+    "CRL_SIGNER=pkcs11:token=shaip-ci;object=cp-crl$P11")
   env "${ENVS[@]}" "$BIN" >/tmp/hsm_cp.log 2>&1 &
   local PID=$!
   curl -fsS --retry 40 --retry-delay 1 --retry-connrefused "$B/health" >/dev/null || { kill $PID; rm -rf "$D"; unset SOFTHSM2_CONF; return 1; }
@@ -109,11 +109,11 @@ pg_contract() {
   D=$(mktemp -d)
   # initdb refuses to run as root; use the postgres account when we are root.
   if [ "$(id -u)" = "0" ]; then chown postgres:postgres "$D"; RUN=(runuser -u postgres --); fi
-  ${RUN[@]+"${RUN[@]}"} "$PG_BIN/initdb" -D "$D/data" -A trust -U pqanon >/dev/null 2>&1 || { rm -rf "$D"; return 1; }
+  ${RUN[@]+"${RUN[@]}"} "$PG_BIN/initdb" -D "$D/data" -A trust -U shaip >/dev/null 2>&1 || { rm -rf "$D"; return 1; }
   ${RUN[@]+"${RUN[@]}"} "$PG_BIN/pg_ctl" -D "$D/data" -o "-k $D -p 55432 -c listen_addresses=''" \
     -l "$D/log" -w start >/dev/null || { rm -rf "$D"; return 1; }
-  ${RUN[@]+"${RUN[@]}"} "$PG_BIN/createdb" -h "$D" -p 55432 -U pqanon pqanon_test
-  OUT=$(cd control-plane && PQANON_TEST_DATABASE_URL="postgres:///pqanon_test?host=$D&port=55432&user=pqanon" \
+  ${RUN[@]+"${RUN[@]}"} "$PG_BIN/createdb" -h "$D" -p 55432 -U shaip shaip_test
+  OUT=$(cd control-plane && SHAIP_TEST_DATABASE_URL="postgres:///shaip_test?host=$D&port=55432&user=shaip" \
     go test -count=1 -race -timeout 180s -run 'TestStoreContractPostgres' -v . 2>&1)
   ${RUN[@]+"${RUN[@]}"} "$PG_BIN/pg_ctl" -D "$D/data" -m fast -w stop >/dev/null 2>&1
   rm -rf "$D"
@@ -153,7 +153,7 @@ cp_e2e() {
   chk "$(curl -s -o /dev/null -w '%{http_code}' "$B/metrics")" 404 "metrics not on the public API"
 
   # Public status needs no auth.
-  chk "$(curl -s "$B/api/public/status" | python3 -c "import sys,json;print(json.load(sys.stdin)['protocol'])" 2>/dev/null)" "PQANON/1" "public status (unauth)"
+  chk "$(curl -s "$B/api/public/status" | python3 -c "import sys,json;print(json.load(sys.stdin)['protocol'])" 2>/dev/null)" "SHAIP/1" "public status (unauth)"
   # API key lifecycle: create (secret shown once) → list (hidden) → delete.
   local AKEY AKID
   AKEY=$(curl -s -X POST "$B/api/apikeys" -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' -d '{"name":"e2e"}')
@@ -187,7 +187,7 @@ cp_e2e() {
 
 # --- Unlinkable-token payments: real Rust client ↔ real Go mint (cross-language) ---
 pay_e2e() {
-  cargo build --release -q -p pqanon-client --bin pqanon || return 1
+  cargo build --release -q -p shaip-client --bin shaip || return 1
   ( cd control-plane && go build -o bin/control-plane . ) || return 1
   local BIN=control-plane/bin/control-plane B=http://127.0.0.1:8098 ok=0 bad=0
   local W; W=$(mktemp); local KEY; KEY=$(openssl rand -base64 32)
@@ -196,23 +196,23 @@ pay_e2e() {
   curl -fsS --retry 40 --retry-delay 1 --retry-connrefused "$B/health" >/dev/null || { kill $PID; rm -f "$W"; return 1; }
   pass() { ok=$((ok+1)); }; fail() { echo "  ✗ $1"; bad=$((bad+1)); }
 
-  ./target/release/pqanon plans --server "$B" | grep -q month && pass || fail "plans"
+  ./target/release/shaip plans --server "$B" | grep -q month && pass || fail "plans"
   local BUY OID
-  BUY=$(./target/release/pqanon buy --plan month --count 2 --server "$B" --store "$W")
+  BUY=$(./target/release/shaip buy --plan month --count 2 --server "$B" --store "$W")
   OID=$(echo "$BUY" | sed -n 's/^Order \([a-f0-9-]*\) .*/\1/p')
   [ -n "$OID" ] && pass || fail "buy (no order id)"
   # Collecting before payment must not hand out tokens.
-  ./target/release/pqanon collect --order "$OID" --server "$B" --store "$W" | grep -q awaiting_payment && pass || fail "collect-before-pay"
+  ./target/release/shaip collect --order "$OID" --server "$B" --store "$W" | grep -q awaiting_payment && pass || fail "collect-before-pay"
   curl -s -X POST "$B/api/pay/dev/settle" -H 'Content-Type: application/json' -d "{\"order_id\":\"$OID\"}" >/dev/null
   # Rust unblinds a signature the Go CIRCL mint produced.
-  ./target/release/pqanon collect --order "$OID" --server "$B" --store "$W" | grep -q "Collected 2" && pass || fail "collect/unblind"
+  ./target/release/shaip collect --order "$OID" --server "$B" --store "$W" | grep -q "Collected 2" && pass || fail "collect/unblind"
   # Go verifies a Rust-produced RFC 9474 signature and grants access.
-  ./target/release/pqanon redeem --plan month --server "$B" --store "$W" | grep -q "access granted" && pass || fail "redeem (interop)"
+  ./target/release/shaip redeem --plan month --server "$B" --store "$W" | grep -q "access granted" && pass || fail "redeem (interop)"
   # Second token still spends; a third does not (wallet now empty).
-  ./target/release/pqanon redeem --plan month --server "$B" --store "$W" | grep -q "access granted" && pass || fail "redeem 2nd token"
+  ./target/release/shaip redeem --plan month --server "$B" --store "$W" | grep -q "access granted" && pass || fail "redeem 2nd token"
   # The empty-wallet case exits non-zero by design, so capture output first
   # (a bare `cmd | grep` would trip `set -o pipefail` on the intended error).
-  local EMPTY; EMPTY=$(./target/release/pqanon redeem --plan month --server "$B" --store "$W" 2>&1 || true)
+  local EMPTY; EMPTY=$(./target/release/shaip redeem --plan month --server "$B" --store "$W" 2>&1 || true)
   echo "$EMPTY" | grep -q "no month tokens" && pass || fail "empty wallet refused"
 
   kill $PID 2>/dev/null; wait $PID 2>/dev/null; rm -f "$W"
@@ -222,9 +222,9 @@ pay_e2e() {
 
 # --- One-click enrollment: real Rust device ↔ real Go control plane ---
 enroll_e2e() {
-  cargo build --release -q -p pqanon-client --bin pqanon || return 1
+  cargo build --release -q -p shaip-client --bin shaip || return 1
   ( cd control-plane && go build -o bin/control-plane . ) || return 1
-  local BIN=control-plane/bin/control-plane CLI=./target/release/pqanon B=http://127.0.0.1:8095 ok=0 bad=0
+  local BIN=control-plane/bin/control-plane CLI=./target/release/shaip B=http://127.0.0.1:8095 ok=0 bad=0
   local KD W; KD=$(mktemp -d); W=$(mktemp -d)
   KEY_DIR="$KD" LISTEN_ADDR=:8095 "$BIN" >/tmp/enroll_e2e.log 2>&1 &
   local PID=$!
@@ -241,7 +241,7 @@ enroll_e2e() {
   TOK=$(cp_login "$B" "$(cp_register "$B")")
   [ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/api/enroll/issue")" = 401 ] && pass || fail "issue must need auth"
   URL=$(curl -s -X POST "$B/api/enroll/issue" -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' -d '{}' | j "['url']")
-  case "$URL" in "pqanon://enroll?t=PQE1."*) pass;; *) fail "deep link: $URL";; esac
+  case "$URL" in "shaip://enroll?t=PQE1."*) pass;; *) fail "deep link: $URL";; esac
 
   # A tampered link and a mis-pinned authority are both refused locally.
   FORGED=$(python3 -c "import sys;u=sys.argv[1];i=u.index('PQE1.')+8;print(u[:i]+('B' if u[i]!='B' else 'C')+u[i+1:])" "$URL")
@@ -279,11 +279,11 @@ enroll_e2e() {
   [ "$bad" -eq 0 ]
 }
 
-# --- The client facade + C ABI against a live, device-bound pqanond ---
+# --- The client facade + C ABI against a live, device-bound shaipd ---
 tunnel_e2e() {
-  cargo build --release -q -p pqanon-client -p pqanon-server -p pqanon-ffi || return 1
+  cargo build --release -q -p shaip-client -p shaip-server -p shaip-ffi || return 1
   ( cd control-plane && go build -o bin/control-plane . ) || return 1
-  local BIN=control-plane/bin/control-plane CLI=./target/release/pqanon D=./target/release/pqanond
+  local BIN=control-plane/bin/control-plane CLI=./target/release/shaip D=./target/release/shaipd
   local B=http://127.0.0.1:8093 KD W ok=0 bad=0 CP=0 SRV=0
   KD=$(mktemp -d); W=$(mktemp -d)
   pass() { ok=$((ok+1)); }; fail() { echo "  ✗ $1"; bad=$((bad+1)); }
@@ -297,7 +297,7 @@ tunnel_e2e() {
   }
 
   # The C program, compiled against the header and linked with the static library.
-  cc -std=c11 -Wall -Wextra -Werror -O2 -Iffi/include ffi/tests/smoke.c target/release/libpqanon_ffi.a \
+  cc -std=c11 -Wall -Wextra -Werror -O2 -Iffi/include ffi/tests/smoke.c target/release/libshaip_ffi.a \
      -lgcc_s -lutil -lrt -lpthread -lm -ldl -lc -o "$W/smoke" && pass || fail "C smoke test did not compile/link"
 
   KEY_DIR="$KD" LISTEN_ADDR=:8093 "$BIN" >/tmp/tunnel_cp.log 2>&1 & CP=$!
@@ -310,12 +310,12 @@ tunnel_e2e() {
   $CLI enroll "$URL" --server "$B" --authority-key "$AUTH" --ca-key "$CA" --identity "$W/dev.id" --name e2e >/dev/null 2>&1 && pass || fail "enroll"
   DEV=$(curl -s "$B/api/devices" -H "Authorization: Bearer $TOK" | j "[0]['id']")
 
-  # A device-bound pqanond: admits only certificates from this CA, refuses CRL-listed devices.
+  # A device-bound shaipd: admits only certificates from this CA, refuses CRL-listed devices.
   $D --identity "$W/srv.id" --print-public > "$W/pins" 2>/dev/null
   PQ=$(sed -n 's/^server_ml_dsa_pub *= *"\(.*\)"/\1/p' "$W/pins"); ED=$(sed -n 's/^server_ed_pub *= *"\(.*\)"/\1/p' "$W/pins")
   $D --identity "$W/srv.id" --listen 127.0.0.1:47201 --device-ca "$CA" --crl-url "$B/api/crl" --crl-pub "$CRLPUB" \
      --crl-refresh-secs 1 >/tmp/tunnel_srv.log 2>&1 & SRV=$!
-  up /tmp/tunnel_srv.log || fail "device-bound pqanond did not start"
+  up /tmp/tunnel_srv.log || fail "device-bound shaipd did not start"
   mkcfg enrolled 47201 "$W/dev.id" "$W/dev.id.cert"
   mkcfg stranger 47201 "$W/stranger.id"
 
@@ -327,7 +327,7 @@ tunnel_e2e() {
   # 3. An unenrolled identity is not admitted.
   OUT=$($CLI probe --config "$W/stranger.toml" --count 1 --timeout-ms 1500 2>&1 || true)
   echo "$OUT" | grep -q "did not confirm the session" && pass || fail "unenrolled identity admitted: $OUT"
-  # 4. Revoke the device: once pqanond refreshes the signed CRL, it is refused.
+  # 4. Revoke the device: once shaipd refreshes the signed CRL, it is refused.
   curl -s -X DELETE "$B/api/devices/$DEV" -H "Authorization: Bearer $TOK" >/dev/null
   sleep 2.5
   OUT=$($CLI probe --config "$W/enrolled.toml" --count 1 --timeout-ms 1500 2>&1 || true)
@@ -336,9 +336,9 @@ tunnel_e2e() {
 
   # 5. TUN mode: the server's kernel answers ICMP sent through the tunnel.
   if [ "$(id -u)" = "0" ] && [ -e /dev/net/tun ]; then
-    $D --identity "$W/srv.id" --listen 127.0.0.1:47202 --tun pqanon-e2e0 --tun-addr 10.77.0.1/24 \
+    $D --identity "$W/srv.id" --listen 127.0.0.1:47202 --tun shaip-e2e0 --tun-addr 10.77.0.1/24 \
        >/tmp/tunnel_tun.log 2>&1 & SRV=$!
-    up /tmp/tunnel_tun.log || fail "TUN-mode pqanond did not start"
+    up /tmp/tunnel_tun.log || fail "TUN-mode shaipd did not start"
     mkcfg tun 47202 "$W/tun.id"
     OUT=$($CLI probe --config "$W/tun.toml" --count 3 2>/dev/null || true)
     if echo "$OUT" | grep -q "assigned 10.77.0." && echo "$OUT" | grep -q "probe OK: 3/3" \
@@ -356,9 +356,9 @@ tunnel_e2e() {
 
 # --- Staking: paid bond → signed directory → equivocation slashed (real node key) ---
 stake_e2e() {
-  cargo build --release -q -p pqanon-client -p pqanon-server || return 1
+  cargo build --release -q -p shaip-client -p shaip-server || return 1
   ( cd control-plane && go build -o bin/control-plane . ) || return 1
-  local BIN=control-plane/bin/control-plane CLI=./target/release/pqanon D=./target/release/pqanond
+  local BIN=control-plane/bin/control-plane CLI=./target/release/shaip D=./target/release/shaipd
   local B=http://127.0.0.1:8091 KD W ok=0 bad=0 PID
   KD=$(mktemp -d); W=$(mktemp -d)
   pass() { ok=$((ok+1)); }; fail() { echo "  ✗ $1"; bad=$((bad+1)); }
@@ -376,7 +376,7 @@ stake_e2e() {
   TOK2=$(cp_login "$B" "$(cp_register "$B")")
   local A="Authorization: Bearer $TOK"
 
-  # The node's key is the real pqanond identity's Ed25519 key.
+  # The node's key is the real shaipd identity's Ed25519 key.
   $D --identity "$W/node.id" --print-public > "$W/pins" 2>/dev/null
   ED=$(sed -n 's/^server_ed_pub *= *"\(.*\)"/\1/p' "$W/pins")
   [ "$(code -X POST "$B/api/nodes" -H "$A" -H "$H" -d "{\"name\":\"liar\",\"address\":\"x:1\",\"public_key\":\"$ED\",\"stake_sats\":5000000}")" = 400 ] \
@@ -469,13 +469,13 @@ else
   skip  "enroll: one-click enrollment + revocation (x-lang)" "needs python3"
 fi
 if command -v python3 >/dev/null && command -v cc >/dev/null; then
-  stage "tunnel: client facade + C ABI vs device-bound pqanond" tunnel_e2e
+  stage "tunnel: client facade + C ABI vs device-bound shaipd" tunnel_e2e
 else
-  skip  "tunnel: client facade + C ABI vs device-bound pqanond" "needs python3 + a C compiler"
+  skip  "tunnel: client facade + C ABI vs device-bound shaipd" "needs python3 + a C compiler"
 fi
-# The VPN for real: client netns → ISP router → pqanond (TUN + NAT + DNS) → "internet" netns.
+# The VPN for real: client netns → ISP router → shaipd (TUN + NAT + DNS) → "internet" netns.
 vpn_lab() {
-  cargo build --release -q -p pqanon-client -p pqanon-server || return 1
+  cargo build --release -q -p shaip-client -p shaip-server || return 1
   ./scripts/e2e/vpn_lab.sh
 }
 if [ "$(id -u)" = "0" ] && [ -e /dev/net/tun ] && command -v ip >/dev/null && command -v nft >/dev/null \
@@ -492,7 +492,7 @@ fi
 
 # iOS core: the committed render vectors must still be what design/shaip-engine.js produces, and
 # SHAIPCore's engines must reproduce them op for op; the config/status/Protection model is tested;
-# and the app's own C-ABI Swift (clients/ios/FFI) drives the Rust core against a live pqanond.
+# and the app's own C-ABI Swift (clients/ios/FFI) drives the Rust core against a live shaipd.
 ios_core() {
   local tmp; tmp=$(mktemp)
   node clients/ios/scripts/engine-vectors.mjs clients/ios/design/shaip-engine.js "$tmp" >/dev/null || return 1
@@ -501,15 +501,15 @@ ios_core() {
   fi
   rm -f "$tmp"
   swift test --package-path clients/ios/SHAIPCore || return 1
-  cargo build --release -q -p pqanon-ffi -p pqanon-server || return 1
+  cargo build --release -q -p shaip-ffi -p shaip-server || return 1
   swift build --package-path clients/ios/FFIInterop >/dev/null || return 1
   local W PQ ED ID SP rc
   W=$(mktemp -d)
-  ./target/release/pqanond --identity "$W/srv.id" --print-public > "$W/pins" 2>/dev/null
+  ./target/release/shaipd --identity "$W/srv.id" --print-public > "$W/pins" 2>/dev/null
   PQ=$(sed -n 's/^server_ml_dsa_pub *= *"\(.*\)"/\1/p' "$W/pins")
   ED=$(sed -n 's/^server_ed_pub *= *"\(.*\)"/\1/p' "$W/pins")
   ID=$(sed -n 's/^identity_id *= *"\(.*\)"/\1/p' "$W/pins")
-  ./target/release/pqanond --identity "$W/srv.id" --listen 127.0.0.1:47311 > "$W/srv.log" 2>&1 & SP=$!
+  ./target/release/shaipd --identity "$W/srv.id" --listen 127.0.0.1:47311 > "$W/srv.log" 2>&1 & SP=$!
   for _ in $(seq 50); do grep -q listening "$W/srv.log" && break; sleep 0.1; done
   clients/ios/FFIInterop/.build/debug/FFIInterop 127.0.0.1:47311 "$PQ" "$ED" "$W/dev.id" "$ID"; rc=$?
   kill $SP 2>/dev/null; wait $SP 2>/dev/null; rm -rf "$W"
@@ -518,9 +518,9 @@ ios_core() {
 # Swift 6.0's compiler crashes (signal 11) building the swift-testing suite; 6.1+ is needed.
 swift_ok() { command -v swift >/dev/null && ! swift --version 2>&1 | grep -qE 'Swift version 6\.0(\.|[^0-9])'; }
 if swift_ok && command -v node >/dev/null; then
-  stage "ios: SHAIPCore + Swift↔Rust C ABI vs live pqanond" ios_core
+  stage "ios: SHAIPCore + Swift↔Rust C ABI vs live shaipd" ios_core
 else
-  skip  "ios: SHAIPCore + Swift↔Rust C ABI vs live pqanond" "needs swift ≥ 6.1 + node"
+  skip  "ios: SHAIPCore + Swift↔Rust C ABI vs live shaipd" "needs swift ≥ 6.1 + node"
 fi
 
 printf '\n════════════════════════════════════════════════════════\n SUMMARY\n────────────────────────────────────────────────────────\n'

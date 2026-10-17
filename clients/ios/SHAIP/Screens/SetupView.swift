@@ -3,7 +3,7 @@ import UniformTypeIdentifiers
 import SHAIPCore
 
 /// First run: import the server config the operator handed out (the same
-/// client.toml the `pqanon` CLI reads), then enroll the device if the server
+/// client.toml the `shaip` CLI reads), then enroll the device if the server
 /// requires it. Nothing works without a real server, so nothing pretends to.
 struct SetupView: View {
     @Environment(TunnelStore.self) private var store
@@ -142,7 +142,7 @@ struct ImportConfigSheet: View {
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Paste the client config from your server's operator. It needs the [server] address, server_ml_dsa_pub and server_ed_pub (from pqanond --print-public).")
+                Text("Paste the client config from your server's operator. It needs the [server] address, server_ml_dsa_pub and server_ed_pub (from shaipd --print-public).")
                     .ui(13, relativeTo: .footnote).foregroundStyle(Tok.dim(0.6)).fixedSize(horizontal: false, vertical: true)
                 TextEditor(text: $text)
                     .font(.system(size: 12, design: .monospaced))
@@ -190,7 +190,7 @@ struct ImportConfigSheet: View {
     }
 }
 
-/// Enroll this device with a `pqanon://enroll` link.
+/// Enroll this device with a `shaip://enroll` link.
 struct EnrollSheet: View {
     @Environment(TunnelStore.self) private var store
     @Environment(\.dismiss) private var dismiss
@@ -204,7 +204,7 @@ struct EnrollSheet: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Servers that admit enrolled devices only need this once per device. Paste the enrollment link from your account page; this iPhone proves it holds its own key and receives a certificate.")
                     .ui(13, relativeTo: .footnote).foregroundStyle(Tok.dim(0.6)).fixedSize(horizontal: false, vertical: true)
-                TextField("pqanon://enroll?t=…", text: $link, axis: .vertical)
+                TextField("shaip://enroll?t=…", text: $link, axis: .vertical)
                     .font(.system(size: 12, design: .monospaced))
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)

@@ -8,10 +8,10 @@ cargo build --release
 
 echo "starting control plane on :8080 (in-memory store)…"
 ( cd control-plane && ./bin/control-plane ) &
-echo "starting pqanon-mixd on :8443…"
-./target/release/pqanon-mixd --listen 0.0.0.0:8443 &
-echo "starting pqanond on :4430 (unprivileged demo port)…"
-./target/release/pqanond --listen 0.0.0.0:4430 &
+echo "starting shaip-mixd on :8443…"
+./target/release/shaip-mixd --listen 0.0.0.0:8443 &
+echo "starting shaipd on :4430 (unprivileged demo port)…"
+./target/release/shaipd --listen 0.0.0.0:4430 &
 
 echo
 echo "control plane:  http://localhost:8080/health"

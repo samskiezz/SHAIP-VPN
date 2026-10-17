@@ -1,31 +1,31 @@
-//! JNI bridge: lets the Android app call the real pqanon post-quantum core.
+//! JNI bridge: lets the Android app call the real shaip post-quantum core.
 //!
 //! These symbols are exported with JNI names so Kotlin's
-//! `external fun` declarations in `net.shaip.pqanon.vpn.PqNative` resolve to
-//! them after `System.loadLibrary("pqanon_jni")`. The same code builds for the
+//! `external fun` declarations in `net.shaip.vpn.PqNative` resolve to
+//! them after `System.loadLibrary("shaip_jni")`. The same code builds for the
 //! host (for the JVM round-trip test) and for every Android ABI.
 
 use jni::objects::JClass;
 use jni::sys::jstring;
 use jni::JNIEnv;
 
-use pqanon::handshake::Identity;
+use shaip::handshake::Identity;
 
 /// Version string of the post-quantum core the app is linked against.
 #[no_mangle]
-pub extern "system" fn Java_net_shaip_pqanon_vpn_PqNative_version(
+pub extern "system" fn Java_net_shaip_vpn_PqNative_version(
     mut env: JNIEnv,
     _class: JClass,
 ) -> jstring {
-    let v = format!("pqanon-core {}", env!("CARGO_PKG_VERSION"));
+    let v = format!("shaip-core {}", env!("CARGO_PKG_VERSION"));
     new_jstring(&mut env, &v)
 }
 
-/// Run a real post-quantum self-test: generate a PQANON/1 identity (ML-DSA-65 +
+/// Run a real post-quantum self-test: generate a SHAIP/1 identity (ML-DSA-65 +
 /// Ed25519 keygen) and report the key size and identity id. Proves the PQ core
 /// actually executes on the device, not a stub.
 #[no_mangle]
-pub extern "system" fn Java_net_shaip_pqanon_vpn_PqNative_selfTest(
+pub extern "system" fn Java_net_shaip_vpn_PqNative_selfTest(
     mut env: JNIEnv,
     _class: JClass,
 ) -> jstring {

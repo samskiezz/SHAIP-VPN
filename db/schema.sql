@@ -1,4 +1,4 @@
--- PQANON-CP/1 schema (§15). Target: PostgreSQL 16.
+-- SHAIP-CP/1 schema (§15). Target: PostgreSQL 16.
 --
 -- This file is embedded into the control-plane binary (migrate.go) and applied
 -- idempotently at startup, so the schema exists no matter how Postgres is

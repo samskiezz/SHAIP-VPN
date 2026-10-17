@@ -13,7 +13,7 @@
 // The descriptor is a deterministic, length-prefixed binary body signed with
 // pure Ed25519, wrapped as `PQD1.<base64url(body)>.<base64url(sig)>`. The body
 // begins with a length-prefixed domain magic, so it can never coincide with a
-// PQANON-HS/1 transcript (which starts with a 4-byte ML-KEM key length) or an
+// SHAIP-HS/1 transcript (which starts with a 4-byte ML-KEM key length) or an
 // enrollment proof — the same node key signs all three. The format matches the
 // Rust signer (client/src/descriptor.rs) byte-for-byte; TestCrossLanguageVector
 // pins it.
@@ -35,7 +35,7 @@ import (
 const Label = "PQD1"
 
 const (
-	magic   = "PQANON-NODEDESC-V1"
+	magic   = "SHAIP-NODEDESC-V1"
 	version = 1
 )
 

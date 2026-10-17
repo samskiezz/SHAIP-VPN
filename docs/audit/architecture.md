@@ -7,17 +7,17 @@ but not-yet-wired pieces are called out explicitly so the picture stays honest.
 
 | Component | Location | Language | Purpose |
 |---|---|---|---|
-| `pqanon` (library) | `client/` (lib name `pqanon`) | Rust | Core SHAIP/1 protocol: handshake, wire framing, obfuscation, transport, mix onion, routing |
-| `pqanon` (client bin) | `client/src/main.rs` | Rust | CLI: `keygen`, `selftest`, `run` |
-| `pqanond` | `server/src/bin/pqanond.rs` | Rust | Tunnel server daemon: handshake responder, session table, TUN device, egress NAT, DNS forwarder |
-| `pqanon-mixd` | `server/src/bin/pqanon-mixd.rs` | Rust | Mix node: peels one onion layer, replay-filters, forwards |
+| `shaip` (library) | `client/` (lib name `shaip`) | Rust | Core SHAIP/1 protocol: handshake, wire framing, obfuscation, transport, mix onion, routing |
+| `shaip` (client bin) | `client/src/main.rs` | Rust | CLI: `keygen`, `selftest`, `run` |
+| `shaipd` | `server/src/bin/shaipd.rs` | Rust | Tunnel server daemon: handshake responder, session table, TUN device, egress NAT, DNS forwarder |
+| `shaip-mixd` | `server/src/bin/shaip-mixd.rs` | Rust | Mix node: peels one onion layer, replay-filters, forwards |
 | Control plane | `control-plane/` | Go | Anonymous accounts (random account numbers), devices, nodes, payments, staking, signed CRL |
 | Web UI | `web-ui/` | TypeScript / Next.js | Operator dashboard |
 
 The Rust side is a three-package Cargo workspace (`client/`, `server/`, `ffi/`);
 `server` and `ffi` depend on `client` via
-`pqanon = { path = "../client", package = "pqanon-client" }`. `ffi/` builds the
-`pqanon-ffi` static library and C header (`ffi/include/pqanon.h`) that the iOS
+`shaip = { path = "../client", package = "shaip-client" }`. `ffi/` builds the
+`shaip-ffi` static library and C header (`ffi/include/shaip.h`) that the iOS
 Packet Tunnel links against. There is no single root crate and no `crates/*` split.
 
 ## Cryptography
@@ -53,7 +53,7 @@ A two-sided authenticated handshake (`client/src/handshake.rs`):
    same Ed25519 key that signed the transcript. Both sides then derive `k_c2s`,
    `k_s2c` and `conn_id`.
 
-`pqanon selftest` runs this in-process and asserts both sides derive identical
+`shaip selftest` runs this in-process and asserts both sides derive identical
 keys.
 
 ### Data path
@@ -82,7 +82,7 @@ keys.
 - Each layer is `ephemeral_x25519_pub(32) || nonce(12) || AEAD(flag || [next_addr] || inner)`.
 - A hop derives its per-cell key via `X25519(hop_sk, ephemeral_pub)` + HKDF,
   learning only the next hop.
-- `pqanon-mixd` peels one layer, drops exact **replays** via a Bloom filter
+- `shaip-mixd` peels one layer, drops exact **replays** via a Bloom filter
   (`client/src/bloom.rs`), and forwards the re-framed cell.
 
 ## Control plane API
@@ -131,13 +131,13 @@ settings; it has no request logger and stores no IP address
   each verified byte-for-byte against IANA's published trust-anchor file). The
   validating stub resolver sets the DNSSEC-OK bit, parses the wire response, and
   **drops `Bogus` answers** instead of returning them.
-- **No answer to probes on the UDP port.** `pqanond` replies to nothing it
+- **No answer to probes on the UDP port.** `shaipd` replies to nothing it
   can't open (OBF/2). It used to answer with a randomized TLS ServerHello
   record, but no real HTTPS server replies to stray UDP with a TLS record, so
   that reply was itself a fingerprint; it was removed. The live TLS decoy on
   TCP (`client/src/decoy.rs`) is unchanged.
 - **Globally-scheduled mix cover** (`client/src/mix_cover.rs`
-  `GlobalCoverScheduler`, wired into `pqanon-mixd --cover-peer`): one node-wide
+  `GlobalCoverScheduler`, wired into `shaip-mixd --cover-peer`): one node-wide
   Poisson emission process, independent of client count/activity, so the
   observable cover rate leaks nothing about the client population.
 
@@ -151,17 +151,17 @@ README disagree, the README is newer.)
 
 Genuinely not end-to-end today:
 
-- **No mixnet in the data path.** `pqanon-mixd` peels and forwards onion cells
+- **No mixnet in the data path.** `shaip-mixd` peels and forwards onion cells
   and runs a global cover-traffic scheduler, but the tunnel goes straight to one
-  server; `pqanon run --route anon` refuses rather than pretend. The per-hop
+  server; `shaip run --route anon` refuses rather than pretend. The per-hop
   exponential mix delay queue is also not wired.
 - **DNSSEC negative answers.** NSEC/NSEC3 non-existence and wildcard proofs are
   not implemented. The positive path — multi-algorithm RRSIG verification, the
   DS/DNSKEY chain walk, and the real IANA root anchors — is wired and tested
   (`client/src/dnssec.rs`). A live test against the real root also needs a DNS
   path that returns DNSKEY RRsets, which some sandboxed networks strip.
-- **Native app builds.** The iOS app's Rust core (via `pqanon-ffi`) is exercised
-  on Linux against a live `pqanond`, but the SwiftUI/NetworkExtension/WidgetKit
+- **Native app builds.** The iOS app's Rust core (via `shaip-ffi`) is exercised
+  on Linux against a live `shaipd`, but the SwiftUI/NetworkExtension/WidgetKit
   layer compiles only in Xcode on macOS; Android and desktop shells don't exist.
 
 What IS wired end-to-end: the IPv4 VPN (real TUN device, egress NAT, DNS

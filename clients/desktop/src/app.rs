@@ -397,7 +397,7 @@ impl DesktopApp {
                 ui.label(RichText::new(n).color(INK3).size(12.0));
             }
             ui.label(RichText::new(
-                "The desktop app drives the local tunnel engine (the pqanon client, shared with \
+                "The desktop app drives the local tunnel engine (the shaip client, shared with \
                  the CLI). The post-quantum handshake (ML-KEM-768 + ML-DSA-65) and the encrypted \
                  tunnel run in that engine; it needs admin/root to open the TUN device.",
             ).color(INK3).size(12.0));
@@ -552,26 +552,26 @@ impl DesktopApp {
     fn toggle_tunnel(&mut self) {
         match self.tunnel {
             Tunnel::Off => {
-                // Drive the local engine. The privileged tunnel helper (the pqanon
+                // Drive the local engine. The privileged tunnel helper (the shaip
                 // client, shared with the CLI) opens the TUN device; if it isn't on
                 // PATH we say so honestly rather than pretending to connect.
                 self.tunnel = Tunnel::Connecting;
-                match std::process::Command::new("pqanon").arg("--version").output() {
+                match std::process::Command::new("shaip").arg("--version").output() {
                     Ok(_) => {
                         self.tunnel = Tunnel::On;
-                        self.tunnel_note = Some("Engine found; the tunnel is managed by the pqanon helper.".into());
+                        self.tunnel_note = Some("Engine found; the tunnel is managed by the shaip helper.".into());
                     }
                     Err(_) => {
                         self.tunnel = Tunnel::Off;
                         self.tunnel_note = Some(
-                            "Tunnel engine (pqanon) not found on PATH. Install the pqanon client \
+                            "Tunnel engine (shaip) not found on PATH. Install the shaip client \
                              alongside the app to connect.".into(),
                         );
                     }
                 }
             }
             _ => {
-                let _ = std::process::Command::new("pqanon").arg("disconnect").output();
+                let _ = std::process::Command::new("shaip").arg("disconnect").output();
                 self.tunnel = Tunnel::Off;
                 self.tunnel_note = None;
             }

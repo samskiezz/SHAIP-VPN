@@ -1,7 +1,7 @@
 //! The tunnel server's session table: handshakes, sessions, address leases,
 //! and the fate of every datagram and TUN packet. No sockets and no TUN here
 //! (it returns what to send), so it is unit-tested with real handshakes;
-//! `pqanond` is the I/O shell around it.
+//! `shaipd` is the I/O shell around it.
 //!
 //! Per session:
 //! - **One session per client identity.** A new handshake from the same
@@ -10,7 +10,7 @@
 //! - **Retransmissions are idempotent.** A repeated CLIENT_HELLO is answered
 //!   with the cached SERVER_HELLO, a repeated CLIENT_FINISH with the cached
 //!   ACK, so a lost datagram never forks the handshake.
-//! - **Nothing to see on the wire** (PQANON-OBF/2, `pqanon::obf`). Handshake
+//! - **Nothing to see on the wire** (SHAIP-OBF/2, `shaip::obf`). Handshake
 //!   messages arrive as fragments sealed under the boot key and are
 //!   reassembled here; session packets have masked headers. A datagram that
 //!   is neither gets no reply at all, and before a client has completed the
@@ -31,15 +31,15 @@
 //!   traffic back, and are forgotten when the session ends.
 
 use crate::pool::Pool;
-use pqanon::client::{SessionInfo, CLIENT_HELLO_DATAGRAMS, MTU, TUNNEL_MTU};
-use pqanon::ctl::{self, Keepalive};
-use pqanon::dataplane::DataPlane;
-use pqanon::handshake::{ClientHandshake, DevicePolicy, Established, Identity, ServerHandshake};
-use pqanon::metrics;
-use pqanon::obf::{BootKey, Obfuscator, Reassembly, AMPLIFICATION_LIMIT, BOOT_DATAGRAM};
-use pqanon::retry::RetryCookies;
-use pqanon::transport::Session;
-use pqanon::wire::{Envelope, MsgType};
+use shaip::client::{SessionInfo, CLIENT_HELLO_DATAGRAMS, MTU, TUNNEL_MTU};
+use shaip::ctl::{self, Keepalive};
+use shaip::dataplane::DataPlane;
+use shaip::handshake::{ClientHandshake, DevicePolicy, Established, Identity, ServerHandshake};
+use shaip::metrics;
+use shaip::obf::{BootKey, Obfuscator, Reassembly, AMPLIFICATION_LIMIT, BOOT_DATAGRAM};
+use shaip::retry::RetryCookies;
+use shaip::transport::Session;
+use shaip::wire::{Envelope, MsgType};
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::{Duration, Instant};
@@ -494,7 +494,7 @@ impl Core {
             Forwarding::Tun(t) => t,
         };
         // Cryptokey routing: the only source a client may use is its own.
-        match pqanon::ipparse::source_ip(&payload) {
+        match shaip::ipparse::source_ip(&payload) {
             Some(IpAddr::V4(s)) if Some(s) == peer.assigned => {}
             _ => {
                 self.stats.spoofed += 1;
@@ -502,7 +502,7 @@ impl Core {
                 return Vec::new();
             }
         }
-        let Some(IpAddr::V4(dst)) = pqanon::ipparse::destination_ip(&payload) else {
+        let Some(IpAddr::V4(dst)) = shaip::ipparse::destination_ip(&payload) else {
             return Vec::new();
         };
         let in_tunnel = self.pool.as_ref().is_some_and(|p| p.contains(dst));
@@ -525,7 +525,7 @@ impl Core {
     /// A packet read from the TUN device: route it to the session that owns
     /// its destination address.
     pub fn on_tun_packet(&mut self, pkt: &[u8]) -> Option<Out> {
-        let Some(IpAddr::V4(dst)) = pqanon::ipparse::destination_ip(pkt) else {
+        let Some(IpAddr::V4(dst)) = shaip::ipparse::destination_ip(pkt) else {
             return None;
         };
         let addr = *self.routes.get(&dst)?;
@@ -600,7 +600,7 @@ impl Core {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pqanon::handshake::{ClientHandshake, PeerPublic};
+    use shaip::handshake::{ClientHandshake, PeerPublic};
 
     /// ML-DSA-65 needs more stack than the default test thread has.
     fn big_stack(f: impl FnOnce() + Send + 'static) {
@@ -674,7 +674,7 @@ mod tests {
                     hs.recv_server_hello(&env).unwrap();
                     break hs;
                 }
-                MsgType::Retry if pqanon::retry::is_empty(&cookie) => cookie.copy_from_slice(&env.payload),
+                MsgType::Retry if shaip::retry::is_empty(&cookie) => cookie.copy_from_slice(&env.payload),
                 other => panic!("unexpected reply {other:?}"),
             }
         };
@@ -978,7 +978,7 @@ mod tests {
             // A real hello, cut to fit one datagram (an attacker's would be).
             let mut hs = ClientHandshake::new(Identity::generate(), server.public(), 3);
             let mut hello = hs.client_hello([0u8; 32]).unwrap();
-            hello.payload.truncate(pqanon::obf::BOOT_CHUNK - 22);
+            hello.payload.truncate(shaip::obf::BOOT_CHUNK - 22);
             let out = send_hs(&mut core, &server.public(), src, &hello, 1, Instant::now());
             assert!(out.is_empty());
             assert_eq!((core.stats().handshakes_failed, core.pending()), (1, 0));

@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"pqanon/control-plane/keystore"
+	"shaip/control-plane/keystore"
 )
 
 // Server bundles the dependencies the HTTP handlers need.
@@ -185,7 +185,7 @@ func formatAccountNumber(n string) string {
 
 // dummyHash is a valid Argon2id hash of a random value, used to equalize login
 // timing for unknown users.
-var dummyHash, _ = hashPassword("pqanon-timing-equalizer")
+var dummyHash, _ = hashPassword("shaip-timing-equalizer")
 
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	fail := func(w http.ResponseWriter) {

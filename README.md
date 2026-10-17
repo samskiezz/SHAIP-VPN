@@ -21,23 +21,23 @@ ChaCha20-Poly1305, HKDF/HMAC-SHA256, Argon2id).
 
 | Component | Language | State | Verified by |
 |-----------|----------|-------|-------------|
-| `pqanon` client lib (`wire`, `handshake`, `obf`, `transport`, `mix`, `routing`, `kdf`) | Rust | **Working** | 25 unit tests |
+| `shaip` client lib (`wire`, `handshake`, `obf`, `transport`, `mix`, `routing`, `kdf`) | Rust | **Working** | 25 unit tests |
 | Full hybrid handshake (client **and** server sides) | Rust | **Working** | handshake + tunnel tests |
-| **The VPN, end to end**: `pqanon run` (full tunnel: routes, DNS, IPv6 block, optional kill switch, reconnect, rekey) ↔ `pqanond --tun --nat` (NAT, DNS forwarder, per-client addresses, keepalive, anti-spoofing) | Rust | **Working** | 4-namespace lab, 41 checks: traffic and DNS leave only from the server, 16 MiB intact, survives server restart and crash, kill switch holds after a client crash, the server's logs hold no address or client identity, a disconnected client's NAT state is deleted ([scripts/e2e/vpn_lab.sh](scripts/e2e/vpn_lab.sh)) |
-| `pqanon` CLI (`keygen`, `selftest`, `run`, `status`, `disconnect`, `down`, `probe`, `enroll`, `crl`) | Rust | **Working** | `pqanon selftest` + battery E2E stages |
-| `pqanon::supervisor` reconnecting link + `pqanon-ffi` C ABI for native shells | Rust + C | **Working** | restart/crash/hang/rekey test vs real `pqanond`; C and Swift programs against a live server ([docs/client-api.md](docs/client-api.md)) |
-| `pqanond` session core: one session per identity, stable addresses, idempotent handshake retransmits, idle expiry, Close on shutdown | Rust | **Working** | unit tests with real handshakes + the lab |
-| `pqanon-mixd` mix node (peels + forwards onion cells) | Rust | **Working, standalone** | mix round-trip tests. The tunnel does **not** route through mixes yet. |
+| **The VPN, end to end**: `shaip run` (full tunnel: routes, DNS, IPv6 block, optional kill switch, reconnect, rekey) ↔ `shaipd --tun --nat` (NAT, DNS forwarder, per-client addresses, keepalive, anti-spoofing) | Rust | **Working** | 4-namespace lab, 41 checks: traffic and DNS leave only from the server, 16 MiB intact, survives server restart and crash, kill switch holds after a client crash, the server's logs hold no address or client identity, a disconnected client's NAT state is deleted ([scripts/e2e/vpn_lab.sh](scripts/e2e/vpn_lab.sh)) |
+| `shaip` CLI (`keygen`, `selftest`, `run`, `status`, `disconnect`, `down`, `probe`, `enroll`, `crl`) | Rust | **Working** | `shaip selftest` + battery E2E stages |
+| `shaip::supervisor` reconnecting link + `shaip-ffi` C ABI for native shells | Rust + C | **Working** | restart/crash/hang/rekey test vs real `shaipd`; C and Swift programs against a live server ([docs/client-api.md](docs/client-api.md)) |
+| `shaipd` session core: one session per identity, stable addresses, idempotent handshake retransmits, idle expiry, Close on shutdown | Rust | **Working** | unit tests with real handshakes + the lab |
+| `shaip-mixd` mix node (peels + forwards onion cells) | Rust | **Working, standalone** | mix round-trip tests. The tunnel does **not** route through mixes yet. |
 | Control plane `SHAIP-CP/1` (anonymous accounts, devices, nodes, payments, CRL): no email, no request log, no stored addresses | Go | **Working** | `go test` incl. privacy tests (no address, id or path in any log line or stored record), live curl |
 | Web UI (account-number sign-up, dashboard, devices, buy access, delete account) | Next.js/TS | **Working** | `next build`, `tsc`, a browser run with no third-party requests |
-| iOS app: a Packet Tunnel extension running the Rust core; screens show only measured state and state the limits (`clients/ios`) | SwiftUI + Rust | **Written** (needs an Xcode 26 build) | the app's FFI Swift run against a live `pqanond` on Linux; Rust core clippy-clean for `aarch64-apple-ios`; `SHAIPCore` tests ([clients/ios/README.md](clients/ios/README.md)) |
+| iOS app: a Packet Tunnel extension running the Rust core; screens show only measured state and state the limits (`clients/ios`) | SwiftUI + Rust | **Written** (needs an Xcode 26 build) | the app's FFI Swift run against a live `shaipd` on Linux; Rust core clippy-clean for `aarch64-apple-ios`; `SHAIPCore` tests ([clients/ios/README.md](clients/ios/README.md)) |
 | Postgres schema + in-memory fallback | SQL/Go | **Working** | one store contract run against both, incl. real PostgreSQL |
 | Signing-key custody: key files + **PKCS#11 HSM**; persistent daemon identities | Go + Rust | **Working** | real SoftHSM2 token + restart checks ([docs/keys.md](docs/keys.md)) |
-| One-click device enrollment (`/api/enroll`, `pqanon enroll`) + device-cert tunnel admission + CRL revocation | Go + Rust | **Working** | cross-language enroll E2E + handshake tests ([docs/enrollment.md](docs/enrollment.md)) |
+| One-click device enrollment (`/api/enroll`, `shaip enroll`) + device-cert tunnel admission + CRL revocation | Go + Rust | **Working** | cross-language enroll E2E + handshake tests ([docs/enrollment.md](docs/enrollment.md)) |
 | Node staking: paid bonds, unbonding, permissionless slashing on signed-descriptor equivocation, stake-gated signed directory | Go + Rust | **Working** | store contract (real PostgreSQL) + cross-language stake E2E ([docs/staking.md](docs/staking.md)) |
 | DNSSEC resolver: RSA/ECDSA/Ed25519 RRSIG + chain-of-trust + real IANA root anchors | Rust | **Working** | 19 unit tests + live anchor check |
 | Unlinkable-token payments: Monero + Bitcoin/Lightning + Chaumian e-cash (`buy`/`collect`/`redeem`) | Rust + Go | **Working** | cross-language buy→redeem E2E |
-| Live TLS 1.3 decoy (`pqanon-decoy`, `pqanond --decoy`) | Rust | **Working** | openssl/curl + 2 integration tests |
+| Live TLS 1.3 decoy (`shaip-decoy`, `shaipd --decoy`) | Rust | **Working** | openssl/curl + 2 integration tests |
 | Monitoring: Prometheus `/metrics` + Grafana/Alertmanager (`docker compose up`) | Go + Rust | **Working** | metrics tests + live scrape |
 
 Everything above compiles and its tests pass. See **Known limitations** for what
@@ -45,7 +45,7 @@ remains.
 
 ## What it protects, and what it doesn't
 
-With `pqanon run` (or the iOS app) connected:
+With `shaip run` (or the iOS app) connected:
 
 - **Your traffic is encrypted to the server.** Every IPv4 packet goes through the
   tunnel, sealed with ChaCha20-Poly1305 under keys from a hybrid ML-KEM-768 +
@@ -57,7 +57,7 @@ With `pqanon run` (or the iOS app) connected:
 - **DNS goes through the tunnel**, to the server's resolver, not your network's.
 - **IPv6 is blocked** while connected (the tunnel carries IPv4 only).
 - **With the kill switch**, nothing leaves outside the tunnel, even if the
-  client crashes, until it reconnects or you run `pqanon down`.
+  client crashes, until it reconnects or you run `shaip down`.
 
 What it keeps about you: **nothing that identifies you.**
 
@@ -107,10 +107,10 @@ network addresses can still suggest a link, for example if you buy and connect
 from the same network. A Bitcoin payment is public on-chain.
 
 ```bash
-pqanon plans   --server <cp-url>                 # day / week / month / quarter, priced in XMR
-pqanon buy     --plan month --server <cp-url>    # prints a one-time Monero address
-pqanon collect --order <id>  --server <cp-url>   # unblinds tokens once the payment confirms
-pqanon redeem  --plan month  --server <cp-url>   # → a VPN access grant, unlinkable to payment
+shaip plans   --server <cp-url>                 # day / week / month / quarter, priced in XMR
+shaip buy     --plan month --server <cp-url>    # prints a one-time Monero address
+shaip collect --order <id>  --server <cp-url>   # unblinds tokens once the payment confirms
+shaip redeem  --plan month  --server <cp-url>   # → a VPN access grant, unlinkable to payment
 ```
 
 Full design, crypto choices, and threat model, including those limits:
@@ -119,13 +119,13 @@ Full design, crypto choices, and threat model, including those limits:
 ## Layout
 
 ```
-client/         Rust core library (lib "pqanon") + `pqanon` CLI binary
-server/         Rust daemons: pqanond (tunnel) + pqanon-mixd (mix node)
+client/         Rust core library (lib "shaip") + `shaip` CLI binary
+server/         Rust daemons: shaipd (tunnel) + shaip-mixd (mix node)
 control-plane/  Go REST API (SHAIP-CP/1): anonymous accounts, devices, nodes, payments, CRL
 db/             PostgreSQL schema (§15)
 web-ui/         Next.js dashboard
 clients/ios/    SwiftUI iOS app (SHAIP v2 design), SHAIPCore package, design reference
-examples/       client.toml (CLI and iOS app) and pqanond.service (a production server unit)
+examples/       client.toml (CLI and iOS app) and shaipd.service (a production server unit)
 scripts/        test-all.sh (the battery), e2e/vpn_lab.sh (the 4-namespace VPN lab), dpi-smoke.sh, run-local.sh
 ```
 
@@ -137,23 +137,23 @@ make test            # cargo test  +  go vet/test
 make build           # release binaries + control plane + web build
 
 # 2. Prove the whole crypto/transport/obfuscation stack end to end
-./target/release/pqanon selftest
+./target/release/shaip selftest
 #  → handshake OK (both sides derive identical keys)
 #  → DATA packet sealed → morphed → demorphed → opened OK
 #  → PQAN magic absent on the wire
 
 # 3. Generate persistent long-term identities (created 0600; see docs/keys.md)
-./target/release/pqanon keygen --out ~/.pqanon/client.id
-./target/release/pqanond --identity /var/lib/pqanon/pqanond.id --print-public
+./target/release/shaip keygen --out ~/.shaip/client.id
+./target/release/shaipd --identity /var/lib/shaip/shaipd.id --print-public
 #  → identity_id / server_ml_dsa_pub / server_ed_pub: paste into the client's [server]
 
 # 4. A real VPN. On the server (Linux, root): TUN, NAT out of eth0, DNS forwarder
-./target/release/pqanond --identity /var/lib/pqanon/pqanond.id --listen 0.0.0.0:443 \
-    --tun pqanon0 --nat eth0
+./target/release/shaipd --identity /var/lib/shaip/shaipd.id --listen 0.0.0.0:443 \
+    --tun shaip0 --nat eth0
 #    On the client: put the server's address and --print-public pins in a client.toml
-sudo ./target/release/pqanon run --config client.toml            # add --kill-switch to fail closed
-./target/release/pqanon status                                   # state, RTT, counters
-./target/release/pqanon disconnect                               # routes and DNS restored
+sudo ./target/release/shaip run --config client.toml            # add --kill-switch to fail closed
+./target/release/shaip status                                   # state, RTT, counters
+./target/release/shaip disconnect                               # routes and DNS restored
 
 # 5. Run the control plane + daemons locally
 ./scripts/run-local.sh
@@ -180,7 +180,7 @@ deletion work on the real code; nothing leaves the tab, and its accounts are
 gone on reload. The VPN connection and payments need the real servers.
 
 ```bash
-cd web-ui && npm install && ./preview/build.sh   # → preview/dist/{index.html,pqanon-cp.wasm}
+cd web-ui && npm install && ./preview/build.sh   # → preview/dist/{index.html,shaip-cp.wasm}
 ```
 
 ### iPhone app preview (in a browser)
@@ -261,8 +261,8 @@ remove functionality — they correct or complete it:
 
 ## Known limitations
 
-- **No mixnet in the data path.** `pqanon-mixd` peels and forwards onion cells,
-  but the tunnel goes straight to one server, and `pqanon run --route anon`
+- **No mixnet in the data path.** `shaip-mixd` peels and forwards onion cells,
+  but the tunnel goes straight to one server, and `shaip run --route anon`
   refuses rather than pretending. The cover-traffic rate controller (§9.4) and
   the mix delay queue (§10.5) aren't wired in either.
 - **Recognizable to anyone with the server's keys.** Handshakes are sealed

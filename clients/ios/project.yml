@@ -1,11 +1,11 @@
 # XcodeGen spec. On a Mac with Xcode 26 and rustup:
 #   brew install xcodegen
-#   ./scripts/build-ffi.sh          # the Rust core → Frameworks/PQAnonFFI.xcframework
+#   ./scripts/build-ffi.sh          # the Rust core → Frameworks/ShaipFFI.xcframework
 #   xcodegen generate && open SHAIP.xcodeproj
 #
 # Targets:
 #   SHAIP         the app (SwiftUI, iOS 26, Liquid Glass)
-#   SHAIPTunnel   the Packet Tunnel extension: the VPN itself, running the Rust core (pqanon-ffi)
+#   SHAIPTunnel   the Packet Tunnel extension: the VPN itself, running the Rust core (shaip-ffi)
 #   SHAIPWidgets  the Live Activity + Dynamic Island extension (ActivityKit / WidgetKit)
 # All link the local SHAIPCore package (config parsing, status model, rates, the Protection report,
 # render engines), which also builds and tests on its own: swift test --package-path SHAIPCore
@@ -40,7 +40,7 @@ targets:
       - path: FFI
     dependencies:
       - package: SHAIPCore
-      - framework: Frameworks/PQAnonFFI.xcframework
+      - framework: Frameworks/ShaipFFI.xcframework
         embed: false                      # a static library
       - target: SHAIPTunnel
       - target: SHAIPWidgets
@@ -70,7 +70,7 @@ targets:
       - path: Shared/AppGroup.swift
     dependencies:
       - package: SHAIPCore
-      - framework: Frameworks/PQAnonFFI.xcframework
+      - framework: Frameworks/ShaipFFI.xcframework
         embed: false
       - sdk: NetworkExtension.framework
     entitlements:
@@ -80,7 +80,7 @@ targets:
         com.apple.security.application-groups: [group.com.shaip.vpn]
     preBuildScripts:
       # Rebuilds the Rust core when its sources changed (cargo is incremental).
-      - name: Build Rust core (pqanon-ffi)
+      - name: Build Rust core (shaip-ffi)
         script: '"$PROJECT_DIR/scripts/build-ffi.sh"'
         basedOnDependencyAnalysis: false
     settings:

@@ -15,7 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"pqanon/control-plane/staking"
+	"shaip/control-plane/staking"
 )
 
 // PgStore is the Postgres-backed Store (schema in db/schema.sql).

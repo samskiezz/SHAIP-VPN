@@ -1,7 +1,7 @@
 //! Minimal message catalog for the CLI (§18 localization).
 //!
 //! Messages live in TOML files, one per language (`en.toml`, `es.toml`, …), in
-//! a directory loaded at startup. The active language comes from `PQANON_LANG`,
+//! a directory loaded at startup. The active language comes from `SHAIP_LANG`,
 //! else the language portion of `LANG`, else `en`. A missing key falls back to
 //! English and then to the key itself, so the daemons never panic or print an
 //! empty string for an untranslated message.
@@ -44,7 +44,7 @@ pub fn init() {
 }
 
 fn selected_lang() -> String {
-    if let Ok(l) = std::env::var("PQANON_LANG") {
+    if let Ok(l) = std::env::var("SHAIP_LANG") {
         if !l.is_empty() {
             return l;
         }
@@ -92,7 +92,7 @@ mod tests {
     #[test]
     fn missing_key_falls_back_to_itself() {
         // Fallback holds regardless of whether any catalog is loaded.
-        init_from("/nonexistent-pqanon-i18n");
+        init_from("/nonexistent-shaip-i18n");
         assert_eq!(t("__definitely_missing_key__"), "__definitely_missing_key__");
     }
 

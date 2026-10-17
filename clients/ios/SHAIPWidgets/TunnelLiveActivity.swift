@@ -130,7 +130,7 @@ struct LockScreenTunnelView: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(stateTitle(state))
                         .font(.system(size: 15, weight: .semibold)).foregroundStyle(Tok.ink).lineLimit(1)
-                    Text("SHAIP · PQANON/1").font(.system(size: 10, design: .monospaced)).foregroundStyle(Tok.dim(0.55))
+                    Text("SHAIP · SHAIP/1").font(.system(size: 10, design: .monospaced)).foregroundStyle(Tok.dim(0.55))
                 }
                 Spacer(minLength: 8)
                 SessionClock(state: state).font(.system(size: 15, weight: .semibold, design: .monospaced))

@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"pqanon/control-plane/enrollment"
+	"shaip/control-plane/enrollment"
 )
 
 // newDeviceKey is a device's Ed25519 identity key.
@@ -46,7 +46,7 @@ func issueToken(t *testing.T, h http.Handler, tok string) string {
 		URL   string `json:"url"`
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &out)
-	if !strings.HasPrefix(out.URL, "pqanon://enroll?t=") || !strings.Contains(out.URL, out.Token) {
+	if !strings.HasPrefix(out.URL, "shaip://enroll?t=") || !strings.Contains(out.URL, out.Token) {
 		t.Fatalf("bad deep link %q", out.URL)
 	}
 	return out.Token

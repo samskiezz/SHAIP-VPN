@@ -1,7 +1,7 @@
 import Foundation
 
 /// What the tunnel extension reports to the app (as JSON over
-/// `sendProviderMessage`), built from the Rust core's `PqanonStatus`. Every
+/// `sendProviderMessage`), built from the Rust core's `ShaipStatus`. Every
 /// field is measured or negotiated, never estimated: if something is not
 /// known it is `nil`, and the app shows a dash.
 public struct TunnelSnapshot: Codable, Hashable, Sendable {

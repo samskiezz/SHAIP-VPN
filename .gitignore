@@ -14,7 +14,7 @@ npm-debug.log*
 # Keys / secrets (never commit)
 *.key
 *.pem
-/etc/pqanon
+/etc/shaip
 
 # Env
 .env

@@ -12,7 +12,7 @@ use std::path::Path;
 use zeroize::Zeroizing;
 
 /// Leading magic of a stored X25519 static secret (a mix node's onion key).
-const X25519_MAGIC: &[u8] = b"PQANON-X25519-V1";
+const X25519_MAGIC: &[u8] = b"SHAIP-X25519-V1";
 
 /// Load a stored identity, refusing a file others can read.
 pub fn load_identity(path: &Path) -> Result<Identity> {
@@ -57,7 +57,7 @@ pub fn load_or_create_x25519(path: &Path) -> Result<(Zeroizing<[u8; 32]>, bool)>
         std::fs::read(path).with_context(|| format!("reading {}", path.display()))?,
     );
     let Some(body) = raw.strip_prefix(X25519_MAGIC) else {
-        bail!("{} is not a PQANON X25519 key file", path.display());
+        bail!("{} is not a SHAIP X25519 key file", path.display());
     };
     let Ok(arr) = <[u8; 32]>::try_from(body) else {
         bail!("{} has the wrong length", path.display());
@@ -85,7 +85,7 @@ mod tests {
 
     fn tmpdir(tag: &str) -> std::path::PathBuf {
         let d = std::env::temp_dir().join(format!(
-            "pqanon-ks-{tag}-{}-{}",
+            "shaip-ks-{tag}-{}-{}",
             std::process::id(),
             rand::random::<u32>()
         ));

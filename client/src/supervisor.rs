@@ -1,6 +1,6 @@
 //! Keeps a tunnel up for as long as the user wants it: keepalive pings,
 //! dead-peer detection, reconnection with backoff, and rekeying by a fresh
-//! handshake. Shared by the CLI (`pqanon run`) and native shells through the
+//! handshake. Shared by the CLI (`shaip run`) and native shells through the
 //! C ABI, so every front end gets the same behaviour.
 //!
 //! - **Keepalive.** Every `keepalive` interval the current session pings the

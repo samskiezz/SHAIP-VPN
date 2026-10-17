@@ -4,7 +4,7 @@
 //! is a real TLS server, not a canned blob.
 
 use anyhow::Result;
-use pqanon::decoy::{DecoyConfig, TlsDecoy, DEFAULT_INDEX_HTML};
+use shaip::decoy::{DecoyConfig, TlsDecoy, DEFAULT_INDEX_HTML};
 use rustls::pki_types::ServerName;
 use std::sync::Arc;
 use std::time::Duration;
@@ -15,7 +15,7 @@ use tokio_rustls::TlsConnector;
 /// A directory of the test's own: the tests run in parallel, and sharing one
 /// let a test trust the certificate the other had just replaced.
 fn temp_dir(test: &str) -> std::path::PathBuf {
-    let p = std::env::temp_dir().join(format!("pqanon-decoy-test-{}-{test}", std::process::id()));
+    let p = std::env::temp_dir().join(format!("shaip-decoy-test-{}-{test}", std::process::id()));
     std::fs::create_dir_all(&p).ok();
     p
 }

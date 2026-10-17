@@ -253,7 +253,7 @@ func (r *BtcpayRail) NewCharge(ctx context.Context, orderID string, price Price)
 	reqBody := map[string]any{
 		"amount":   btc,
 		"currency": "BTC",
-		"metadata": map[string]string{"orderId": orderID, "source": "pqanon"},
+		"metadata": map[string]string{"orderId": orderID, "source": "shaip"},
 		"checkout": map[string]any{"expirationMinutes": 30},
 	}
 	var inv struct {

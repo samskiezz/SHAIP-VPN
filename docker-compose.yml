@@ -7,14 +7,14 @@ services:
     command: ["postgres", "-c", "log_error_verbosity=terse", "-c", "log_min_error_statement=panic",
               "-c", "log_statement=none", "-c", "log_connections=off", "-c", "log_disconnections=off"]
     environment:
-      POSTGRES_USER: pqanon
-      POSTGRES_PASSWORD: pqanon
-      POSTGRES_DB: pqanon
+      POSTGRES_USER: shaip
+      POSTGRES_PASSWORD: shaip
+      POSTGRES_DB: shaip
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./db/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U pqanon"]
+      test: ["CMD-SHELL", "pg_isready -U shaip"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -23,7 +23,7 @@ services:
     build: ./control-plane
     ports: ["8080:8080"]
     environment:
-      DATABASE_URL: postgres://pqanon:pqanon@db:5432/pqanon
+      DATABASE_URL: postgres://shaip:shaip@db:5432/shaip
       LISTEN_ADDR: ":8080"
       # Metrics on their own port, reachable inside the compose network only
       # (not published): public counters would show when someone pays.
@@ -42,8 +42,8 @@ services:
   # The VPN server: a TUN device, NAT out of the container's eth0, the DNS
   # forwarder on the tunnel address, and a persistent identity that clients pin.
   # Print the pins for clients' [server] table with:
-  #   docker compose run --rm pqanond --identity /var/lib/pqanon/pqanond.id --print-public
-  pqanond:
+  #   docker compose run --rm shaipd --identity /var/lib/shaip/shaipd.id --print-public
+  shaipd:
     build:
       context: .
       dockerfile: server/Dockerfile
@@ -53,17 +53,17 @@ services:
     sysctls:
       net.ipv4.ip_forward: "1"
     volumes:
-      - pqanond-data:/var/lib/pqanon
-    command: ["--identity", "/var/lib/pqanon/pqanond.id", "--listen", "0.0.0.0:443",
-              "--tun", "pqanon0", "--nat", "eth0", "--metrics", "0.0.0.0:9100"]
+      - shaipd-data:/var/lib/shaip
+    command: ["--identity", "/var/lib/shaip/shaipd.id", "--listen", "0.0.0.0:443",
+              "--tun", "shaip0", "--nat", "eth0", "--metrics", "0.0.0.0:9100"]
     ports:
       - "443:443/udp"
 
-  pqanon-mixd:
+  shaip-mixd:
     build:
       context: .
       dockerfile: server/Dockerfile
-    entrypoint: ["/usr/local/bin/pqanon-mixd"]
+    entrypoint: ["/usr/local/bin/shaip-mixd"]
     command: ["--listen", "0.0.0.0:8443", "--metrics", "0.0.0.0:9101"]
     ports:
       - "8443:8443/udp"
@@ -121,11 +121,11 @@ services:
   postgres-exporter:
     image: prometheuscommunity/postgres-exporter:v0.17.1
     environment:
-      DATA_SOURCE_NAME: postgresql://pqanon:pqanon@db:5432/pqanon?sslmode=disable
+      DATA_SOURCE_NAME: postgresql://shaip:shaip@db:5432/shaip?sslmode=disable
     depends_on: [db]
 
 volumes:
-  pqanond-data:
+  shaipd-data:
   pgdata:
   prometheus-data:
   grafana-data:

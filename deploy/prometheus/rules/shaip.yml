@@ -1,0 +1,77 @@
+# SHAIP VPN alert rules (§16). Every expression here references a metric that is
+# actually emitted: shaip_cp_* from the control plane (client_golang),
+# shaip_server_* / shaip_mix_* from the Rust daemons' /metrics, and the
+# standard `up`, `node_*`, `pg_*` series from the exporters in docker-compose.
+groups:
+  - name: shaip.availability
+    rules:
+      - alert: InstanceDown
+        expr: up == 0
+        for: 2m
+        labels: { severity: page }
+        annotations:
+          summary: "{{ $labels.job }} target {{ $labels.instance }} is down"
+
+  - name: shaip.control-plane
+    rules:
+      - alert: ControlPlaneErrorRate
+        expr: |
+          sum(rate(shaip_cp_errors_total[5m]))
+            / sum(rate(shaip_cp_requests_total[5m])) > 0.02
+        for: 10m
+        labels: { severity: warn }
+        annotations:
+          summary: "Control-plane 5xx rate above 2%"
+
+      - alert: ControlPlaneLatencyHigh
+        expr: |
+          histogram_quantile(0.99,
+            sum by (le) (rate(shaip_cp_request_duration_seconds_bucket[5m]))) > 0.5
+        for: 10m
+        labels: { severity: warn }
+        annotations:
+          summary: "Control-plane p99 request latency > 500ms"
+
+      - alert: AuthFailureSpike
+        expr: rate(shaip_cp_auth_failures_total[5m]) > 5
+        for: 5m
+        labels: { severity: warn }
+        annotations:
+          summary: "Elevated auth failures (possible credential stuffing)"
+
+      - alert: TokenForgerySpike
+        expr: rate(shaip_cp_redemptions_total{result="invalid"}[5m]) > 0.5
+        for: 5m
+        labels: { severity: warn }
+        annotations:
+          summary: "Forged e-cash tokens being presented for redemption"
+
+  - name: shaip.tunnel
+    rules:
+      - alert: HandshakeFailureRatioHigh
+        expr: |
+          sum(rate(shaip_server_handshakes_failed_total[10m]))
+            / (sum(rate(shaip_server_handshakes_ok_total[10m]))
+               + sum(rate(shaip_server_handshakes_failed_total[10m]))) > 0.5
+        for: 10m
+        labels: { severity: warn }
+        annotations:
+          summary: "Over half of tunnel handshakes are failing"
+
+  - name: shaip.resources
+    rules:
+      - alert: DiskFillingUp
+        expr: |
+          (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"}
+             / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}) < 0.1
+        for: 15m
+        labels: { severity: warn }
+        annotations:
+          summary: "Less than 10% disk free on {{ $labels.instance }} {{ $labels.mountpoint }}"
+
+      - alert: PostgresDown
+        expr: pg_up == 0
+        for: 2m
+        labels: { severity: page }
+        annotations:
+          summary: "Postgres is unreachable from the exporter"

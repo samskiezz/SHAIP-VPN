@@ -2,9 +2,9 @@
 //!
 //! A prober that scans the host's TCP port completes a genuine TLS handshake
 //! against a genuine certificate and is served a genuine web page, while the
-//! PQANON service lives on the UDP port, where every datagram is random bytes
+//! SHAIP service lives on the UDP port, where every datagram is random bytes
 //! to anyone without the server's keys and anything the server can't open gets
-//! no answer at all (`obf.rs`, PQANON-OBF/2). Canned answers on the UDP port
+//! no answer at all (`obf.rs`, SHAIP-OBF/2). Canned answers on the UDP port
 //! would be worse than silence: no real HTTPS server replies to stray UDP with
 //! a TLS record, so the reply itself would mark the host.
 //!
@@ -49,7 +49,7 @@ pub const DEFAULT_INDEX_HTML: &str = r#"<!DOCTYPE html>
 /// There is no option to log visitors. Anyone may connect to the decoy, a
 /// customer whose network blocks UDP included, so it never records who
 /// connected, the name or path they asked for, or when; a completed handshake
-/// only advances the `pqanon_server_decoy_probes_total` counter.
+/// only advances the `shaip_server_decoy_probes_total` counter.
 pub struct DecoyConfig {
     pub listen: std::net::SocketAddr,
     pub cert_path: PathBuf,
@@ -62,8 +62,8 @@ impl Default for DecoyConfig {
     fn default() -> Self {
         Self {
             listen: "0.0.0.0:443".parse().unwrap(),
-            cert_path: PathBuf::from("/etc/pqanon/decoy/cert.pem"),
-            key_path: PathBuf::from("/etc/pqanon/decoy/key.pem"),
+            cert_path: PathBuf::from("/etc/shaip/decoy/cert.pem"),
+            key_path: PathBuf::from("/etc/shaip/decoy/key.pem"),
             index_html: DEFAULT_INDEX_HTML.to_string(),
             handshake_timeout: Duration::from_secs(10),
         }

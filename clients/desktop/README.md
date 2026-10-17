@@ -4,7 +4,7 @@ A native desktop client for the SHAIP / SHAIP VPN post-quantum VPN, written in
 Rust with `egui`/`eframe`. It carries the same glass design language as the web
 UI, iOS and Android — deep-graphite gradient, translucent glass panels, cyan
 signal accent, mono labels (clients/ios/design/HANDOFF.md) — and talks to the
-same `PQANON-CP/1` control plane.
+same `SHAIP-CP/1` control plane.
 
 ## What is real here
 
@@ -25,22 +25,22 @@ same `PQANON-CP/1` control plane.
 
 ## The tunnel
 
-The Connect control drives the local **pqanon tunnel engine** (the Rust client,
+The Connect control drives the local **shaip tunnel engine** (the Rust client,
 shared with the CLI and proven by the netns lab), which opens the TUN device and
-runs the PQANON/1 post-quantum handshake (ML-KEM-768 + ML-DSA-65) and the
+runs the SHAIP/1 post-quantum handshake (ML-KEM-768 + ML-DSA-65) and the
 encrypted tunnel. The GUI launches/stops that privileged helper; if it isn't on
 PATH the app says so honestly rather than pretending to connect.
 
 ## Offline preview
 
-`PQANON_DEMO=1` seeds sample infrastructure data (demo node names, a placeholder
+`SHAIP_DEMO=1` seeds sample infrastructure data (demo node names, a placeholder
 account number — never customer data) so the signed-in screens render without a
-backend; `PQANON_SCREEN=dashboard|servers|buy` picks the tab. Used for
+backend; `SHAIP_SCREEN=dashboard|servers|buy` picks the tab. Used for
 screenshots and offline demos.
 
 ## Config
 
-`PQANON_API` sets the control-plane base URL (default `http://127.0.0.1:8080`).
+`SHAIP_API` sets the control-plane base URL (default `http://127.0.0.1:8080`).
 
 ## Layout
 

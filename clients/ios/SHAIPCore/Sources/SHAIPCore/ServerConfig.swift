@@ -2,15 +2,15 @@ import Foundation
 
 /// The server this device tunnels to: where it is and the public keys it must
 /// prove it holds. It is the `[server]` table of the same client config the
-/// `pqanon` CLI reads (examples/client.toml), so an operator hands out one file
+/// `shaip` CLI reads (examples/client.toml), so an operator hands out one file
 /// for every platform; an optional `[enroll]` table carries what device
 /// enrollment needs for servers that admit enrolled devices only.
 public struct ServerConfig: Codable, Hashable, Sendable {
     /// Shown to the user (defaults to the address's host).
     public var label: String
-    /// `host:port` of the pqanond UDP listener.
+    /// `host:port` of the shaipd UDP listener.
     public var address: String
-    /// Pinned ML-DSA-65 public key, hex (`pqanond --print-public`).
+    /// Pinned ML-DSA-65 public key, hex (`shaipd --print-public`).
     public var mlDsaPub: String
     /// Pinned Ed25519 public key, hex.
     public var edPub: String
@@ -49,7 +49,7 @@ public struct ServerConfig: Codable, Hashable, Sendable {
         }
     }
 
-    /// Parse a pqanon client config. Only the keys this app needs are read;
+    /// Parse a shaip client config. Only the keys this app needs are read;
     /// everything else (the CLI's `[client]` table, comments) is ignored.
     public static func parse(_ text: String) throws -> ServerConfig {
         let t = tables(text)

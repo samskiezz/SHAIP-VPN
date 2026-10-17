@@ -85,8 +85,8 @@ func TestFileSignerAcceptsRawAndBase64Seeds(t *testing.T) {
 func TestEnvSigner(t *testing.T) {
 	seed := make([]byte, ed25519.SeedSize)
 	_, _ = rand.Read(seed)
-	t.Setenv("PQANON_TEST_SEED", base64.StdEncoding.EncodeToString(seed))
-	s, err := Open("env:PQANON_TEST_SEED")
+	t.Setenv("SHAIP_TEST_SEED", base64.StdEncoding.EncodeToString(seed))
+	s, err := Open("env:SHAIP_TEST_SEED")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,11 +94,11 @@ func TestEnvSigner(t *testing.T) {
 	if got, _ := Ed25519Public(s); !got.Equal(want) {
 		t.Fatal("env signer derived the wrong key")
 	}
-	t.Setenv("PQANON_TEST_SEED", "too-short")
-	if _, err := Open("env:PQANON_TEST_SEED"); err == nil {
+	t.Setenv("SHAIP_TEST_SEED", "too-short")
+	if _, err := Open("env:SHAIP_TEST_SEED"); err == nil {
 		t.Fatal("bad env seed must be rejected")
 	}
-	if _, err := Open("env:PQANON_TEST_UNSET_VAR"); err == nil {
+	if _, err := Open("env:SHAIP_TEST_UNSET_VAR"); err == nil {
 		t.Fatal("unset env var must be rejected")
 	}
 }
@@ -122,8 +122,8 @@ func TestEphemeralAndUnknownSpecs(t *testing.T) {
 }
 
 func TestParsePKCS11Spec(t *testing.T) {
-	t.Setenv("PQANON_TEST_PIN", "1234")
-	cfg, err := parsePKCS11("pkcs11:token=pq%20anon;object=device-ca?module-path=/usr/lib/softhsm/libsofthsm2.so&pin-env=PQANON_TEST_PIN&create=1")
+	t.Setenv("SHAIP_TEST_PIN", "1234")
+	cfg, err := parsePKCS11("pkcs11:token=pq%20anon;object=device-ca?module-path=/usr/lib/softhsm/libsofthsm2.so&pin-env=SHAIP_TEST_PIN&create=1")
 	if err != nil {
 		t.Fatal(err)
 	}

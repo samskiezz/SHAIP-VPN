@@ -31,7 +31,7 @@ mod tests {
 
     #[test]
     fn roundtrip() {
-        let dir = std::env::temp_dir().join(format!("pqanon-sw-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("shaip-sw-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let f = dir.join("k");
         write_private(&f, b"secret").unwrap();

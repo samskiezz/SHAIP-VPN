@@ -3,7 +3,7 @@
 //!
 //! An operator issues a short-lived **enrollment token** (authorizing one device
 //! to join an account) and delivers it to the device out of band — a QR code or
-//! a `pqanon://enroll?t=...` deep link. The device verifies that token against a
+//! a `shaip://enroll?t=...` deep link. The device verifies that token against a
 //! **pinned enrollment-authority key** before trusting it, generates its own
 //! Ed25519 identity keypair, and sends the public half back. The control plane
 //! then issues a **device certificate** binding that key to the account, signed
@@ -27,8 +27,8 @@ pub const LABEL_ENROLL: &str = "PQE1";
 /// Wire label of a device certificate.
 pub const LABEL_CERT: &str = "PQC1";
 
-const MAGIC_ENROLL: &[u8] = b"PQANON-ENROLL-V1";
-const MAGIC_CERT: &[u8] = b"PQANON-DEVCERT-V1";
+const MAGIC_ENROLL: &[u8] = b"SHAIP-ENROLL-V1";
+const MAGIC_CERT: &[u8] = b"SHAIP-DEVCERT-V1";
 const VERSION: u8 = 1;
 
 /// The account field of every device certificate the control plane issues.
@@ -249,16 +249,16 @@ pub fn verify_device_cert(
 
 /// Build the deep-link URL a device opens to start enrollment.
 pub fn enroll_url(token: &str) -> String {
-    format!("pqanon://enroll?t={token}&v=1")
+    format!("shaip://enroll?t={token}&v=1")
 }
 
-/// Extract the token from a `pqanon://enroll?t=<token>&v=1` deep link. Only the
+/// Extract the token from a `shaip://enroll?t=<token>&v=1` deep link. Only the
 /// string wrapping is handled here; the caller still verifies the token with
 /// [`verify_enroll_token`].
 pub fn parse_enroll_url(url: &str) -> Result<String, EnrollError> {
     let rest = url
-        .strip_prefix("pqanon://enroll?")
-        .ok_or_else(|| EnrollError::BadFormat("not a pqanon enroll URL".into()))?;
+        .strip_prefix("shaip://enroll?")
+        .ok_or_else(|| EnrollError::BadFormat("not a shaip enroll URL".into()))?;
     for kv in rest.split('&') {
         if let Some(tok) = kv.strip_prefix("t=") {
             if tok.is_empty() {
@@ -430,9 +430,9 @@ mod tests {
     #[test]
     fn deep_link_round_trip() {
         let url = enroll_url(ENROLL_TOKEN);
-        assert_eq!(url, format!("pqanon://enroll?t={ENROLL_TOKEN}&v=1"));
+        assert_eq!(url, format!("shaip://enroll?t={ENROLL_TOKEN}&v=1"));
         assert_eq!(parse_enroll_url(&url).unwrap(), ENROLL_TOKEN);
         assert!(parse_enroll_url("https://example.com/enroll?t=x").is_err());
-        assert!(parse_enroll_url("pqanon://enroll?v=1").is_err());
+        assert!(parse_enroll_url("shaip://enroll?v=1").is_err());
     }
 }

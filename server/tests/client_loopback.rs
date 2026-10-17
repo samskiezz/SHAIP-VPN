@@ -1,10 +1,10 @@
-//! The `pqanon::client` facade against the real `pqanond` binary over loopback
+//! The `shaip::client` facade against the real `shaipd` binary over loopback
 //! UDP: confirmed sessions, packets both ways, concurrent send/recv, a wrong
 //! server pin refused, and a device-bound server refusing a client with no
 //! device certificate.
 
-use pqanon::client::{ClientConfig, Tunnel};
-use pqanon::handshake::{Identity, PeerPublic};
+use shaip::client::{ClientConfig, Tunnel};
+use shaip::handshake::{Identity, PeerPublic};
 use std::io::{BufRead, BufReader};
 use std::net::SocketAddr;
 use std::process::{Child, Command, Stdio};
@@ -56,13 +56,13 @@ fn hexd(s: &str) -> Vec<u8> {
     (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
 }
 
-/// Start pqanond with a persistent identity and extra args; return its
+/// Start shaipd with a persistent identity and extra args; return its
 /// listening address and the pins a client needs.
 fn start(extra: &[&str]) -> Daemon {
-    let dir = std::env::temp_dir().join(format!("pqanond-lb-{}-{}", std::process::id(), rand::random::<u32>()));
+    let dir = std::env::temp_dir().join(format!("shaipd-lb-{}-{}", std::process::id(), rand::random::<u32>()));
     std::fs::create_dir_all(&dir).unwrap();
     let id = dir.join("srv.id");
-    let bin = env!("CARGO_BIN_EXE_pqanond");
+    let bin = env!("CARGO_BIN_EXE_shaipd");
 
     let out = Command::new(bin)
         .args(["--identity", id.to_str().unwrap(), "--print-public"])
@@ -89,8 +89,8 @@ fn start(extra: &[&str]) -> Daemon {
     // The log redacts every address (the daemon's own included) but not the
     // port.
     let addr = loop {
-        let line = strip_ansi(&lines.next().expect("pqanond exited early").unwrap());
-        if !line.contains("pqanond listening") {
+        let line = strip_ansi(&lines.next().expect("shaipd exited early").unwrap());
+        if !line.contains("shaipd listening") {
             continue;
         }
         if let Some(rest) = line.split("port=").nth(1) {

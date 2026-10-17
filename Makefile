@@ -5,10 +5,10 @@ all: build
 build: client server control web
 
 client:
-	cargo build --release -p pqanon-client
+	cargo build --release -p shaip-client
 
 server:
-	cargo build --release -p pqanon-server
+	cargo build --release -p shaip-server
 
 control:
 	cd control-plane && go build -o bin/control-plane .
@@ -30,7 +30,7 @@ test-all:
 	./scripts/test-all.sh
 
 selftest: client
-	./target/release/pqanon selftest
+	./target/release/shaip selftest
 
 fmt:
 	cargo fmt

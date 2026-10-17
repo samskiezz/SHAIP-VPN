@@ -1,8 +1,8 @@
-//! `pqanon::client` — the connection facade every front end shares: the CLI's
-//! TUN loop (`pqanon run`), `pqanon probe`, and native apps through the C ABI
-//! in `pqanon-ffi`.
+//! `shaip::client` — the connection facade every front end shares: the CLI's
+//! TUN loop (`shaip run`), `shaip probe`, and native apps through the C ABI
+//! in `shaip-ffi`.
 //!
-//! [`Tunnel::connect`] runs the PQANON-HS/1 handshake over UDP and returns only
+//! [`Tunnel::connect`] runs the SHAIP-HS/1 handshake over UDP and returns only
 //! once the server has **confirmed** the session with a sealed ACK. That ACK
 //! proves the server derived the same keys *and admitted this client*. A
 //! device-bound server silently drops an unenrolled or revoked device, which
@@ -57,13 +57,13 @@ const _: () = assert!(AMPLIFICATION_LIMIT * CLIENT_HELLO_DATAGRAMS * BOOT_DATAGR
 /// What [`Tunnel::connect`] needs.
 #[derive(Clone)]
 pub struct ClientConfig {
-    /// `host:port` of the pqanond UDP listener.
+    /// `host:port` of the shaipd UDP listener.
     pub server: String,
-    /// The server's pinned public identity (`pqanond --print-public`).
+    /// The server's pinned public identity (`shaipd --print-public`).
     pub server_pub: PeerPublic,
     /// This client's long-term identity.
     pub identity: Identity,
-    /// Device certificate for device-bound servers (from `pqanon enroll`).
+    /// Device certificate for device-bound servers (from `shaip enroll`).
     pub device_cert: Option<String>,
     /// How long to wait for the handshake and the server's confirmation.
     pub handshake_timeout: Duration,
@@ -87,8 +87,8 @@ pub struct SessionInfo {
     pub keepalive: bool,
 }
 
-const ACK_MAGIC_V1: &[u8] = b"PQANON-ACK-V1";
-const ACK_MAGIC_V2: &[u8] = b"PQANON-ACK-V2";
+const ACK_MAGIC_V1: &[u8] = b"SHAIP-ACK-V1";
+const ACK_MAGIC_V2: &[u8] = b"SHAIP-ACK-V2";
 const ACK_FLAG_KEEPALIVE: u8 = 0x01;
 
 impl SessionInfo {
@@ -195,7 +195,7 @@ impl std::fmt::Display for SessionClosed {
 
 impl std::error::Error for SessionClosed {}
 
-/// An established, server-confirmed PQANON session over UDP.
+/// An established, server-confirmed SHAIP session over UDP.
 ///
 /// `send` and `recv` take `&self`, so one task (or thread) can send while
 /// another receives — the shape of every TUN or packet-flow loop.
@@ -244,7 +244,7 @@ impl Tunnel {
         let deadline = Instant::now() + cfg.handshake_timeout;
         let mut buf = vec![0u8; RECV_BUF];
 
-        // PQANON-HS/1 over the OBF/2 boot layer: each message is split into
+        // SHAIP-HS/1 over the OBF/2 boot layer: each message is split into
         // small datagrams sealed under a key from the server's pinned public
         // keys. The server is authenticated against those keys while
         // processing SERVER_HELLO.
@@ -531,8 +531,8 @@ mod tests {
         ] {
             assert_eq!(SessionInfo::decode(&info.encode()).unwrap(), info);
         }
-        assert!(SessionInfo::decode(b"PQANON-ACK-V2").is_err());
-        assert!(SessionInfo::decode(b"PQANON-ACK-V1").is_err());
+        assert!(SessionInfo::decode(b"SHAIP-ACK-V2").is_err());
+        assert!(SessionInfo::decode(b"SHAIP-ACK-V1").is_err());
         assert!(SessionInfo::decode(b"nonsense-wrong-magic-1234").is_err());
     }
 

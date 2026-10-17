@@ -17,53 +17,53 @@ import (
 
 var (
 	mRequests = promauto.NewCounterVec(prometheus.CounterOpts{
-		Namespace: "pqanon", Subsystem: "cp", Name: "requests_total",
+		Namespace: "shaip", Subsystem: "cp", Name: "requests_total",
 		Help: "Total HTTP requests, by method, route pattern, and status.",
 	}, []string{"method", "route", "status"})
 
 	mErrors = promauto.NewCounterVec(prometheus.CounterOpts{
-		Namespace: "pqanon", Subsystem: "cp", Name: "errors_total",
+		Namespace: "shaip", Subsystem: "cp", Name: "errors_total",
 		Help: "HTTP 5xx responses, by route pattern.",
 	}, []string{"route"})
 
 	mDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
-		Namespace: "pqanon", Subsystem: "cp", Name: "request_duration_seconds",
+		Namespace: "shaip", Subsystem: "cp", Name: "request_duration_seconds",
 		Help: "Request latency in seconds.", Buckets: prometheus.DefBuckets,
 	}, []string{"method", "route"})
 
 	mAuthFailures = promauto.NewCounter(prometheus.CounterOpts{
-		Namespace: "pqanon", Subsystem: "cp", Name: "auth_failures_total",
+		Namespace: "shaip", Subsystem: "cp", Name: "auth_failures_total",
 		Help: "Rejected bearer tokens at the auth middleware.",
 	})
 
 	mOrders = promauto.NewCounterVec(prometheus.CounterOpts{
-		Namespace: "pqanon", Subsystem: "cp", Name: "orders_total",
+		Namespace: "shaip", Subsystem: "cp", Name: "orders_total",
 		Help: "Payment orders created, by rail and denomination.",
 	}, []string{"rail", "denom"})
 
 	mRedemptions = promauto.NewCounterVec(prometheus.CounterOpts{
-		Namespace: "pqanon", Subsystem: "cp", Name: "redemptions_total",
+		Namespace: "shaip", Subsystem: "cp", Name: "redemptions_total",
 		Help: "Token redemptions, by denomination and result (ok/spent/invalid).",
 	}, []string{"denom", "result"})
 
 	mCompClaims = promauto.NewCounterVec(prometheus.CounterOpts{
-		Namespace: "pqanon", Subsystem: "cp", Name: "comp_claims_total",
+		Namespace: "shaip", Subsystem: "cp", Name: "comp_claims_total",
 		Help: "Comp/discount code claims, by result (ok/invalid/exhausted).",
 	}, []string{"result"})
 
 	mEnrollments = promauto.NewCounterVec(prometheus.CounterOpts{
-		Namespace: "pqanon", Subsystem: "cp", Name: "enrollments_total",
+		Namespace: "shaip", Subsystem: "cp", Name: "enrollments_total",
 		Help: "Device enrollment events, by result (issued/claimed/rejected).",
 	}, []string{"result"})
 
 	mStake = promauto.NewCounterVec(prometheus.CounterOpts{
-		Namespace: "pqanon", Subsystem: "cp", Name: "stake_events_total",
+		Namespace: "shaip", Subsystem: "cp", Name: "stake_events_total",
 		Help: "Staking events, by kind (bond_opened/bond_credited/slashed/slash_rejected).",
 	}, []string{"kind"})
 
 	startTime = time.Now()
 	_         = promauto.NewGaugeFunc(prometheus.GaugeOpts{
-		Namespace: "pqanon", Subsystem: "cp", Name: "uptime_seconds",
+		Namespace: "shaip", Subsystem: "cp", Name: "uptime_seconds",
 		Help: "Process uptime in seconds.",
 	}, func() float64 { return time.Since(startTime).Seconds() })
 )

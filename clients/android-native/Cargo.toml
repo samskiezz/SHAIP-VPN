@@ -1,15 +1,15 @@
 [package]
-name = "pqanon-android-jni"
+name = "shaip-android-jni"
 version = "0.1.0"
 edition = "2021"
-description = "JNI bridge from the Android app to the pqanon post-quantum core"
+description = "JNI bridge from the Android app to the shaip post-quantum core"
 
 [lib]
-name = "pqanon_jni"
+name = "shaip_jni"
 crate-type = ["cdylib"]
 
 [dependencies]
-pqanon = { path = "../../client", package = "pqanon-client" }
+shaip = { path = "../../client", package = "shaip-client" }
 jni = "0.21"
 hex = "0.4"
 

@@ -1,4 +1,4 @@
-//! End-to-end tunnel test over real UDP loopback sockets: full PQANON-HS/1
+//! End-to-end tunnel test over real UDP loopback sockets: full SHAIP-HS/1
 //! handshake over the OBF/2 boot layer (every message split into sealed
 //! 1200-byte datagrams), then a morphed DATA packet echoed back.
 //!
@@ -6,11 +6,11 @@
 //! runs on a dedicated thread with a generous stack (the default 2 MB test-
 //! harness thread stack is too small for both handshake sides concurrently).
 
-use pqanon::handshake::{ClientHandshake, Identity, ServerHandshake};
-use pqanon::client::CLIENT_HELLO_DATAGRAMS;
-use pqanon::obf::{BootKey, Obfuscator, Reassembly, BOOT_DATAGRAM};
-use pqanon::transport::Session;
-use pqanon::wire::{Envelope, MsgType};
+use shaip::handshake::{ClientHandshake, Identity, ServerHandshake};
+use shaip::client::CLIENT_HELLO_DATAGRAMS;
+use shaip::obf::{BootKey, Obfuscator, Reassembly, BOOT_DATAGRAM};
+use shaip::transport::Session;
+use shaip::wire::{Envelope, MsgType};
 use std::net::SocketAddr;
 use tokio::net::UdpSocket;
 

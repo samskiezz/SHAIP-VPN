@@ -147,7 +147,7 @@ func TestPublicStatusNoAuth(t *testing.T) {
 	if s["status"] != "operational" {
 		t.Fatalf("expected operational with seeded nodes, got %v", s["status"])
 	}
-	if s["protocol"] != "PQANON/1" {
+	if s["protocol"] != "SHAIP/1" {
 		t.Fatalf("missing protocol tag: %v", s)
 	}
 }

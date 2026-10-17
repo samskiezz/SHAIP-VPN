@@ -1,4 +1,4 @@
-//! PQANON-HS/1 — hybrid post-quantum handshake (§6, §7).
+//! SHAIP-HS/1 — hybrid post-quantum handshake (§6, §7).
 //!
 //! The specification lists the client half of the handshake. A handshake that
 //! actually runs needs both halves, so this module implements client **and**
@@ -9,7 +9,7 @@
 //! - X25519 (classical ECDH): ephemeral on both sides, giving `ss_x`.
 //!
 //! `ss_mix = HKDF(ikm = ss_pq || ss_x, salt = client_nonce || server_nonce,
-//! info = "PQANON-HS/1")`. Breaking either KEM alone is insufficient.
+//! info = "SHAIP-HS/1")`. Breaking either KEM alone is insufficient.
 //!
 //! Both sides mutually authenticate by signing the transcript with long-term
 //! ML-DSA-65 **and** Ed25519 keys. The client's long-term verifying keys (and,
@@ -129,13 +129,13 @@ impl Identity {
     }
 
     /// Proof of possession for an enrollment claim: an Ed25519 signature over
-    /// `PQANON-ENROLL-CLAIM-V1:<token>`, byte-for-byte what the control plane
+    /// `SHAIP-ENROLL-CLAIM-V1:<token>`, byte-for-byte what the control plane
     /// verifies. The ASCII prefix keeps it from being valid anywhere else this
     /// key signs — a handshake transcript starts with a length-prefixed ML-KEM
     /// key, never with this text.
     pub fn sign_enrollment_claim(&self, token: &str) -> [u8; 64] {
         self.ed
-            .sign(format!("PQANON-ENROLL-CLAIM-V1:{token}").as_bytes())
+            .sign(format!("SHAIP-ENROLL-CLAIM-V1:{token}").as_bytes())
             .to_bytes()
     }
 
@@ -186,7 +186,7 @@ impl Identity {
         let vk_len = std::mem::size_of::<EncodedVerifyingKey<MlDsa65>>();
         let rest = b
             .strip_prefix(IDENTITY_MAGIC)
-            .ok_or_else(|| anyhow!("not a PQANON identity (bad magic)"))?;
+            .ok_or_else(|| anyhow!("not a SHAIP identity (bad magic)"))?;
         if rest.len() != 32 + sk_len + vk_len {
             bail!("identity has the wrong length ({} bytes)", b.len());
         }
@@ -211,9 +211,9 @@ impl Identity {
 }
 
 /// Leading magic of a serialized [`Identity`].
-const IDENTITY_MAGIC: &[u8] = b"PQANON-IDENTITY-V1";
+const IDENTITY_MAGIC: &[u8] = b"SHAIP-IDENTITY-V1";
 /// Message signed when loading an identity to prove its key halves match.
-const IDENTITY_SELFTEST: &[u8] = b"PQANON-IDENTITY-SELFTEST-V1";
+const IDENTITY_SELFTEST: &[u8] = b"SHAIP-IDENTITY-SELFTEST-V1";
 
 /// The public half of an [`Identity`]: pinned ML-DSA-65 + Ed25519 verifying keys.
 #[derive(Clone)]
@@ -316,12 +316,12 @@ fn finish_cipher(ss_mix: &[u8; 32]) -> ChaCha20Poly1305 {
     // Scoped: at module level KeyInit would make HMAC's `new_from_slice`
     // ambiguous (HMAC implements both KeyInit and Mac).
     use chacha20poly1305::KeyInit;
-    let key = kdf::hkdf::<32>(ss_mix, None, b"PQANON-HS/1 client-finish");
+    let key = kdf::hkdf::<32>(ss_mix, None, b"SHAIP-HS/1 client-finish");
     ChaCha20Poly1305::new(Key::from_slice(&key))
 }
 
 fn finish_aad(hs_conn_id: u64) -> Vec<u8> {
-    let mut aad = b"PQANON-HS/1 CLIENT_FINISH".to_vec();
+    let mut aad = b"SHAIP-HS/1 CLIENT_FINISH".to_vec();
     aad.extend_from_slice(&hs_conn_id.to_be_bytes());
     aad
 }
@@ -759,7 +759,7 @@ impl ServerHandshake {
 }
 
 /// `ss_mix = HKDF(ikm = ss_pq || ss_x, salt = client_nonce || server_nonce,
-/// info = "PQANON-HS/1")` (§6.3).
+/// info = "SHAIP-HS/1")` (§6.3).
 fn derive_ss_mix(
     ss_pq: &[u8],
     ss_x: &[u8; 32],
@@ -772,7 +772,7 @@ fn derive_ss_mix(
     let mut salt = Vec::with_capacity(64);
     salt.extend_from_slice(client_nonce);
     salt.extend_from_slice(server_nonce);
-    kdf::hkdf::<32>(&ikm, Some(&salt), b"PQANON-HS/1")
+    kdf::hkdf::<32>(&ikm, Some(&salt), b"SHAIP-HS/1")
 }
 
 #[cfg(test)]

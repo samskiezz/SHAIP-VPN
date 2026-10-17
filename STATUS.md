@@ -42,12 +42,12 @@ Everything else below is real.
 | Servers screen from the signed node directory (web) | **Real** | lists real nodes; sandbox registers one and sees it appear |
 | Web product end to end, clicked in a browser (register → dashboard → devices → redeem a code → delete account, plus the safety gates) | **Real** | `web-ui/e2e/run.sh` — 11/11 checks against the real control plane |
 | iOS **core logic** (config parsing, telemetry, render engine) | **Real** | `swift test` (13 tests) — builds on Linux, Foundation-only |
-| iOS ↔ Rust boundary (the app's FFI Swift against a live `pqanond`) | **Real** | `clients/ios/FFIInterop` runs in the battery on Linux |
+| iOS ↔ Rust boundary (the app's FFI Swift against a live `shaipd`) | **Real** | `clients/ios/FFIInterop` runs in the battery on Linux |
 | **Android app** (Kotlin + Jetpack Compose, same glass design; login, dashboard, Servers directory, devices, buy-access + code redeem; wired to the real control plane) | **Real — builds to an APK on Linux** | `cd clients/android && ./gradlew assembleDebug` → `app-debug.apk` (no macOS needed) |
-| Android VpnService (owns the TUN + connection lifecycle) | **Real skeleton** | `clients/android/.../vpn/PqanonVpnService.kt`; does not black-hole traffic until the tunnel data path lands |
-| Android ↔ Rust PQ core over JNI | **Real** | `clients/android-native` builds `libpqanon_jni.so` for arm64-v8a / x86_64 / armeabi-v7a (cargo-ndk), bundled in the APK; the Dashboard runs a live on-device ML-DSA-65 keygen. Proven by a JVM round-trip test (`cargo test`) and a Rust unit test |
+| Android VpnService (owns the TUN + connection lifecycle) | **Real skeleton** | `clients/android/.../vpn/ShaipVpnService.kt`; does not black-hole traffic until the tunnel data path lands |
+| Android ↔ Rust PQ core over JNI | **Real** | `clients/android-native` builds `libshaip_jni.so` for arm64-v8a / x86_64 / armeabi-v7a (cargo-ndk), bundled in the APK; the Dashboard runs a live on-device ML-DSA-65 keygen. Proven by a JVM round-trip test (`cargo test`) and a Rust unit test |
 | **Desktop app** (Rust + egui, same glass design; login, dashboard, Servers, Buy access + code redeem; wired to the real control plane) | **Real — cross-builds to Linux + Windows from Linux** | `cd clients/desktop && cargo build --release` (Linux ELF) and `--target x86_64-pc-windows-gnu` (Windows PE32+ GUI .exe); screens rendered headless under Xvfb |
-| Desktop tunnel control | **Real control surface** | drives the local `pqanon` engine (shared Rust core); honest when the engine isn't installed |
+| Desktop tunnel control | **Real control surface** | drives the local `shaip` engine (shared Rust core); honest when the engine isn't installed |
 | Full battery | **16 stages, 0 failed** | `scripts/test-all.sh` |
 
 ## What is written but UNVERIFIED (needs a Mac to compile)
@@ -98,8 +98,8 @@ on the roadmap; none will be faked.
 ## The shortest path to a working product
 
 1. **Stand up one server** (any Linux host, ~30 min): `docker compose up -d`
-   brings up the control plane, the web dashboard, Postgres, and `pqanond`
-   (see `docker-compose.yml`). Run `pqanond --identity … --print-public` to get
+   brings up the control plane, the web dashboard, Postgres, and `shaipd`
+   (see `docker-compose.yml`). Run `shaipd --identity … --print-public` to get
    the `[server]` block for clients. Terminate TLS in front with logging off.
 2. **Free access for testing or promos.** Set `COMP_CODES="MYCODE:pro:365:50"` on the
    control plane (or `POST /api/admin/comp-codes` as an admin) and redeem the code on

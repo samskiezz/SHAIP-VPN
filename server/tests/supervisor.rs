@@ -1,11 +1,11 @@
-//! The reconnecting client (`pqanon::supervisor::ManagedTunnel`) against the
-//! real `pqanond` binary: keepalive RTT, a graceful server restart (the server
+//! The reconnecting client (`shaip::supervisor::ManagedTunnel`) against the
+//! real `shaipd` binary: keepalive RTT, a graceful server restart (the server
 //! sends Close), a crash, a hang that only unanswered keepalives reveal, and a
 //! scheduled rekey — with packets flowing again after each.
 
-use pqanon::client::ClientConfig;
-use pqanon::handshake::{Identity, PeerPublic};
-use pqanon::supervisor::{LinkState, ManagedTunnel, SupervisorConfig};
+use shaip::client::ClientConfig;
+use shaip::handshake::{Identity, PeerPublic};
+use shaip::supervisor::{LinkState, ManagedTunnel, SupervisorConfig};
 use std::io::{BufRead, BufReader};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -17,10 +17,10 @@ struct Daemon {
 }
 
 impl Daemon {
-    /// Start pqanond (echo mode) with `identity` on `listen`; returns once it
+    /// Start shaipd (echo mode) with `identity` on `listen`; returns once it
     /// is listening, with the bound address.
     fn start(identity: &Path, listen: &str) -> (Daemon, SocketAddr) {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_pqanond"))
+        let mut child = Command::new(env!("CARGO_BIN_EXE_shaipd"))
             .args(["--identity", identity.to_str().unwrap(), "--listen", listen])
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
@@ -31,8 +31,8 @@ impl Daemon {
         let host = listen.rsplit_once(':').unwrap().0;
         let mut lines = BufReader::new(child.stderr.take().unwrap()).lines();
         let addr = loop {
-            let line = strip_ansi(&lines.next().expect("pqanond exited early").unwrap());
-            if !line.contains("pqanond listening") {
+            let line = strip_ansi(&lines.next().expect("shaipd exited early").unwrap());
+            if !line.contains("shaipd listening") {
                 continue;
             }
             if let Some(rest) = line.split("port=").nth(1) {
@@ -90,7 +90,7 @@ fn strip_ansi(s: &str) -> String {
 }
 
 fn pins(identity: &Path) -> PeerPublic {
-    let out = Command::new(env!("CARGO_BIN_EXE_pqanond"))
+    let out = Command::new(env!("CARGO_BIN_EXE_shaipd"))
         .args(["--identity", identity.to_str().unwrap(), "--print-public"])
         .output()
         .unwrap();
@@ -106,7 +106,7 @@ fn pins(identity: &Path) -> PeerPublic {
 }
 
 /// Wait until `cond` holds for the link's status.
-async fn wait_until(link: &ManagedTunnel, what: &str, limit: Duration, cond: impl Fn(&pqanon::supervisor::Status) -> bool) {
+async fn wait_until(link: &ManagedTunnel, what: &str, limit: Duration, cond: impl Fn(&shaip::supervisor::Status) -> bool) {
     let start = Instant::now();
     while !cond(&link.status()) {
         assert!(start.elapsed() < limit, "timed out waiting for: {what} (status {:?})", link.status());
@@ -114,7 +114,7 @@ async fn wait_until(link: &ManagedTunnel, what: &str, limit: Duration, cond: imp
     }
 }
 
-/// One packet out, the same packet back (pqanond in echo mode).
+/// One packet out, the same packet back (shaipd in echo mode).
 async fn echo(link: &ManagedTunnel, tag: u8) {
     let pkt = vec![tag; 300];
     // A reconnect can race the first packet; retry a few times.
@@ -201,7 +201,7 @@ async fn scenario(dir: PathBuf) {
 
 #[test]
 fn the_link_survives_restarts_crashes_and_rekeys() {
-    let dir = std::env::temp_dir().join(format!("pqanon-sup-{}-{}", std::process::id(), rand::random::<u32>()));
+    let dir = std::env::temp_dir().join(format!("shaip-sup-{}-{}", std::process::id(), rand::random::<u32>()));
     std::fs::create_dir_all(&dir).unwrap();
     let d2 = dir.clone();
     // ML-DSA-65 handshakes want more stack than a default test thread has.

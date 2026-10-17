@@ -2,7 +2,7 @@
 # Builds the hosted web preview into web-ui/preview/dist:
 #   index.html      the real pages (web-ui/pages) bundled, with React from
 #                   cdnjs, Tailwind compiled, and Go's wasm_exec.js inlined
-#   pqanon-cp.wasm  the real control plane (control-plane/wasm_main.go)
+#   shaip-cp.wasm  the real control plane (control-plane/wasm_main.go)
 # The page is a single-page shell over the same components the Next.js app
 # serves; its API calls go to the control plane running in the tab.
 set -euo pipefail
@@ -11,7 +11,7 @@ OUT=dist
 rm -rf "$OUT" && mkdir -p "$OUT"
 
 ( cd ../../control-plane &&
-  GOOS=js GOARCH=wasm go build -trimpath -ldflags="-s -w" -o ../web-ui/preview/$OUT/pqanon-cp.wasm . &&
+  GOOS=js GOARCH=wasm go build -trimpath -ldflags="-s -w" -o ../web-ui/preview/$OUT/shaip-cp.wasm . &&
   cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" ../web-ui/preview/$OUT/wasm_exec.js )
 
 npx --yes esbuild@0.23.1 main.tsx --bundle --minify --format=iife --target=es2019 \

@@ -1,4 +1,4 @@
-//! PQANON-OBF/2 — what goes on the wire (§9).
+//! SHAIP-OBF/2 — what goes on the wire (§9).
 //!
 //! Goal: to anyone without the keys, every datagram is indistinguishable from
 //! random bytes: no magic, no fixed header bytes, no byte that repeats across
@@ -67,12 +67,12 @@ pub struct Obfuscator {
 }
 
 impl Obfuscator {
-    /// The header-protection key: `HKDF(ss_mix, info = "PQANON-OBF/2 hp {epoch}")`.
+    /// The header-protection key: `HKDF(ss_mix, info = "SHAIP-OBF/2 hp {epoch}")`.
     /// Both ends of a session derive it; nobody else can.
     pub fn new(ss_mix: &[u8; 32], epoch: u16) -> Self {
         let hk = Hkdf::<Sha256>::new(None, ss_mix);
         let mut hp_key = [0u8; 32];
-        hk.expand(format!("PQANON-OBF/2 hp {epoch}").as_bytes(), &mut hp_key)
+        hk.expand(format!("SHAIP-OBF/2 hp {epoch}").as_bytes(), &mut hp_key)
             .expect("32 bytes within HKDF bound");
         Self {
             hp_key,
@@ -173,7 +173,7 @@ pub const BOOT_CHUNK: usize = BOOT_DATAGRAM - BOOT_NONCE - TAG_LEN - FRAG_HEADER
 pub const BOOT_MAX_FRAGMENTS: usize = 8;
 
 /// The handshake-layer key, derived from the server's pinned public keys:
-/// `HKDF(salt = "PQANON-OBF/2 boot", ikm = ML-DSA-65 key || Ed25519 key)`.
+/// `HKDF(salt = "SHAIP-OBF/2 boot", ikm = ML-DSA-65 key || Ed25519 key)`.
 /// The client has them from its config; the server from its identity.
 #[derive(Clone)]
 pub struct BootKey {
@@ -193,7 +193,7 @@ impl BootKey {
     pub fn for_server(server: &PeerPublic) -> Self {
         let mut ikm = server.pq_bytes();
         ikm.extend_from_slice(&server.ed_bytes());
-        let hk = Hkdf::<Sha256>::new(Some(b"PQANON-OBF/2 boot"), &ikm);
+        let hk = Hkdf::<Sha256>::new(Some(b"SHAIP-OBF/2 boot"), &ikm);
         let mut key = [0u8; 32];
         hk.expand(b"handshake datagrams", &mut key)
             .expect("32 bytes within HKDF bound");

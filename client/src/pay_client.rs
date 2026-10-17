@@ -47,12 +47,12 @@ pub struct Token {
     pub sig_b64: String,
 }
 
-/// Default wallet path: $HOME/.pqanon/wallet.json (or ./pqanon-wallet.json).
+/// Default wallet path: $HOME/.shaip/wallet.json (or ./shaip-wallet.json).
 pub fn default_wallet_path() -> PathBuf {
     if let Ok(home) = std::env::var("HOME") {
-        return PathBuf::from(home).join(".pqanon").join("wallet.json");
+        return PathBuf::from(home).join(".shaip").join("wallet.json");
     }
-    PathBuf::from("pqanon-wallet.json")
+    PathBuf::from("shaip-wallet.json")
 }
 
 fn load_wallet(path: &Path) -> Result<Wallet> {
@@ -74,7 +74,7 @@ fn save_wallet(path: &Path, w: &Wallet) -> Result<()> {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            if dir.file_name().is_some_and(|n| n == ".pqanon") {
+            if dir.file_name().is_some_and(|n| n == ".shaip") {
                 let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
             }
         }
@@ -133,7 +133,7 @@ fn denomination_key(server: &str, plan: &str) -> Result<String> {
         }
     }
     Err(anyhow!(
-        "unknown plan {plan:?}; run `pqanon plans --server {server}` to list them"
+        "unknown plan {plan:?}; run `shaip plans --server {server}` to list them"
     ))
 }
 
@@ -213,7 +213,7 @@ pub fn buy(server: &str, plan: &str, count: usize, rail: Option<&str>, wallet_pa
         println!("  URI:     {uri}");
     }
     println!(
-        "\nAfter the payment confirms, run:\n  pqanon collect --order {order_id} --server {server}"
+        "\nAfter the payment confirms, run:\n  shaip collect --order {order_id} --server {server}"
     );
     Ok(())
 }
@@ -276,7 +276,7 @@ pub fn collect(server: &str, order_id: &str, wallet_path: &Path) -> Result<()> {
     wallet.tokens.extend(new_tokens);
     wallet.pending.remove(idx);
     save_wallet(wallet_path, &wallet)?;
-    println!("Collected {n} {denom} token(s). Redeem one with:\n  pqanon redeem --plan {denom} --server {server}");
+    println!("Collected {n} {denom} token(s). Redeem one with:\n  shaip redeem --plan {denom} --server {server}");
     Ok(())
 }
 
@@ -289,7 +289,7 @@ pub fn list_tokens(wallet_path: &Path) -> Result<()> {
         *by_denom.entry(t.denom.clone()).or_default() += 1;
     }
     if by_denom.is_empty() {
-        println!("No tokens. Buy some with `pqanon buy --plan <plan> --server <url>`.");
+        println!("No tokens. Buy some with `shaip buy --plan <plan> --server <url>`.");
     } else {
         println!("Spendable tokens:");
         for (denom, n) in by_denom {
@@ -343,7 +343,7 @@ mod tests {
 
     #[test]
     fn empty_or_missing_wallet_loads_as_default() {
-        let dir = std::env::temp_dir().join(format!("pqanon-wtest-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("shaip-wtest-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let missing = dir.join("missing.json");
         assert!(load_wallet(&missing).unwrap().tokens.is_empty());
@@ -358,7 +358,7 @@ mod tests {
 
     #[test]
     fn wallet_roundtrips() {
-        let dir = std::env::temp_dir().join(format!("pqanon-wtest2-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("shaip-wtest2-{}", std::process::id()));
         let path = dir.join("wallet.json");
         let mut w = Wallet::default();
         w.tokens.push(Token {

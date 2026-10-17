@@ -1,15 +1,15 @@
-//! Drives the real `pqanond` binary: a persistent identity is created once,
+//! Drives the real `shaipd` binary: a persistent identity is created once,
 //! reloaded on every later run, and printed in the exact form a client pins.
 
 use std::process::Command;
 
-fn pqanond() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_pqanond"))
+fn shaipd() -> Command {
+    Command::new(env!("CARGO_BIN_EXE_shaipd"))
 }
 
 fn tmpdir() -> std::path::PathBuf {
     let d = std::env::temp_dir().join(format!(
-        "pqanond-id-{}-{}",
+        "shaipd-id-{}-{}",
         std::process::id(),
         rand::random::<u32>()
     ));
@@ -30,14 +30,14 @@ fn field<'a>(out: &'a str, key: &str) -> &'a str {
 #[test]
 fn print_public_is_stable_and_pinnable() {
     let dir = tmpdir();
-    let id_path = dir.join("pqanond.id");
+    let id_path = dir.join("shaipd.id");
 
     let run = || {
-        let out = pqanond()
+        let out = shaipd()
             .args(["--identity", id_path.to_str().unwrap(), "--print-public"])
             .output()
-            .expect("run pqanond");
-        assert!(out.status.success(), "pqanond failed: {}", String::from_utf8_lossy(&out.stderr));
+            .expect("run shaipd");
+        assert!(out.status.success(), "shaipd failed: {}", String::from_utf8_lossy(&out.stderr));
         String::from_utf8(out.stdout).unwrap()
     };
     let first = run();
@@ -57,7 +57,7 @@ fn print_public_is_stable_and_pinnable() {
     let ed = hex_decode(field(&first, "server_ed_pub"));
     assert_eq!(pq.len(), 1952, "ML-DSA-65 verifying key");
     assert_eq!(ed.len(), 32, "Ed25519 verifying key");
-    let pinned = pqanon::handshake::PeerPublic::from_bytes(&pq, &ed).unwrap();
+    let pinned = shaip::handshake::PeerPublic::from_bytes(&pq, &ed).unwrap();
     assert_eq!(hex_encode(&pinned.identity_id()), field(&first, "identity_id"));
 
     let _ = std::fs::remove_dir_all(&dir);
@@ -65,7 +65,7 @@ fn print_public_is_stable_and_pinnable() {
 
 #[test]
 fn print_public_without_identity_is_refused() {
-    let out = pqanond().arg("--print-public").output().expect("run pqanond");
+    let out = shaipd().arg("--print-public").output().expect("run shaipd");
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("--identity"));
 }

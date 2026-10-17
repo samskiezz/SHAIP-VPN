@@ -160,7 +160,7 @@ export default function Pay() {
         </div>
         <p className="mt-2 text-xs text-ink-2">
           Buy from the app:{" "}
-          <code className="rounded bg-white/10 px-1">pqanon buy --plan month --server &lt;url&gt;</code>
+          <code className="rounded bg-white/10 px-1">shaip buy --plan month --server &lt;url&gt;</code>
         </p>
       </section>
 
@@ -200,7 +200,7 @@ export default function Pay() {
             </p>
             <p className="mt-2 text-ink-2">
               Paste this access grant into the app (Setup → Paste config, or{" "}
-              <code className="rounded bg-white/10 px-1 text-signal">pqanon redeem --grant …</code>):
+              <code className="rounded bg-white/10 px-1 text-signal">shaip redeem --grant …</code>):
             </p>
             <textarea
               readOnly

@@ -34,7 +34,7 @@ var ed25519ECParams = []byte{0x06, 0x03, 0x2b, 0x65, 0x70}
 
 // selfTestMessage is signed once at open time to prove the token's signatures
 // verify as pure Ed25519 before any real artifact is signed.
-var selfTestMessage = []byte("PQANON-KEYSTORE-SELFTEST-V1")
+var selfTestMessage = []byte("SHAIP-KEYSTORE-SELFTEST-V1")
 
 // A process loads each PKCS#11 module once: C_Initialize is process-global, so
 // signers sharing a module share one context, which is never finalized.

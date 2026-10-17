@@ -1,6 +1,6 @@
 # Log Schema
 
-`pqanond`, `pqanon-mixd`, `pqanon-decoy`, the `pqanon` client and the Go control
+`shaipd`, `shaip-mixd`, `shaip-decoy`, the `shaip` client and the Go control
 plane write plain-text logs to stderr. This document lists what each one logs.
 
 ## The rule: nothing about a customer
@@ -32,37 +32,37 @@ per-session line. Unit tests run a whole session lifecycle in the server core at
 trace level, and a whole customer journey through the control plane's router,
 and assert the same.
 
-## `pqanond` (tunnel server)
+## `shaipd` (tunnel server)
 
 Startup and configuration only:
 
 | Event | Fields |
 |---|---|
 | created a new persistent server identity | `path` |
-| pqanond identity | `server_identity` (the server's own) |
+| shaipd identity | `server_identity` (the server's own) |
 | device-bound / open admission | — |
 | CRL loaded / refreshed / refresh failed | `revoked_devices` (a count), `error` |
 | server TUN up | `device`, `gateway`, `prefix`, `mtu` |
 | DNS forwarder up | `listen`, `upstream` |
 | egress NAT on / removed | `tun`, `egress`, `subnet` |
-| pqanond listening (echo / TUN mode) | `listen`, `port` |
+| shaipd listening (echo / TUN mode) | `listen`, `port` |
 | half-open handshake limit reached (at most once a minute) | `limit` |
-| pqanond stopping; every client was sent Close | `clients_told` (a count) |
+| shaipd stopping; every client was sent Close | `clients_told` (a count) |
 | TUN read failed, metrics server failed, DNS forwarder stopped | `error` |
 
-## `pqanon-mixd` (mix node)
+## `shaip-mixd` (mix node)
 
 | Event | Fields |
 |---|---|
 | created a new persistent mix key / ephemeral key warning | `path` |
-| pqanon-mixd identity | `mix_pubkey` (its own) |
-| pqanon-mixd listening | `listen` |
+| shaip-mixd identity | `mix_pubkey` (its own) |
+| shaip-mixd listening | `listen` |
 | global cover traffic enabled | `rate`, `peers` (a count) |
 
 Cells are never logged: not where one came from, where it went, its size or
 when. A mix that logged that would undo the mixing it exists for.
 
-## TLS decoy (`pqanon-decoy`, `pqanond --decoy`)
+## TLS decoy (`shaip-decoy`, `shaipd --decoy`)
 
 | Event | Fields |
 |---|---|
@@ -80,7 +80,7 @@ ports. It has no request logger and reads neither the client's address nor
 forwarding headers, so a request leaves no log line. A handler panic is logged
 with its value and stack, never the request.
 
-## `pqanon` (client)
+## `shaip` (client)
 
 The client runs on the customer's own machine and logs for its owner: the
 server it connects to, its tunnel address, reconnects and errors. It never logs
@@ -89,6 +89,6 @@ the destinations of traffic or DNS names.
 ## Localization
 
 User-facing CLI strings are keyed in `i18n/*.toml` and resolved through
-`pqanon::i18n` (active language from `PQANON_LANG`, else `LANG`, else `en`;
+`shaip::i18n` (active language from `SHAIP_LANG`, else `LANG`, else `en`;
 missing keys fall back to English then to the key). Structured log *targets* and
 field names are not localized — only human-readable message bodies.

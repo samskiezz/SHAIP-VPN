@@ -50,4 +50,4 @@ function start() {
   createRoot(document.getElementById("app")!).render(<Shell />);
 }
 
-(window as unknown as { pqanonStart: () => void }).pqanonStart = start;
+(window as unknown as { shaipStart: () => void }).shaipStart = start;

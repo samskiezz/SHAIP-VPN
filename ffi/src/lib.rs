@@ -1,41 +1,41 @@
-//! C ABI for native SHAIP VPN front ends (`include/pqanon.h`).
+//! C ABI for native SHAIP VPN front ends (`include/shaip.h`).
 //!
 //! A native shell — an iOS/macOS Network Extension, an Android `VpnService`, a
 //! Windows service — owns the OS packet interface and calls into this library
-//! to enroll the device and run the tunnel. It is the same `pqanon` code the
+//! to enroll the device and run the tunnel. It is the same `shaip` code the
 //! CLI runs, not a parallel copy:
 //!
-//! - `pqanon_session_*` is what an app should use: the reconnecting link the
-//!   CLI's `pqanon run` uses (`pqanon::supervisor`), with keepalive RTT,
+//! - `shaip_session_*` is what an app should use: the reconnecting link the
+//!   CLI's `shaip run` uses (`shaip::supervisor`), with keepalive RTT,
 //!   dead-peer detection, reconnection and rekeying, and a status snapshot to
 //!   show the user.
-//! - `pqanon_tunnel_*` is one bare session (no keepalive, no reconnect), for
+//! - `shaip_tunnel_*` is one bare session (no keepalive, no reconnect), for
 //!   probes and tests.
 //!
 //! Every entry point is null-safe and panic-safe: a panic becomes an error
 //! return and never unwinds into C. Strings handed to C (errors, ids,
 //! accounts) are heap-allocated and must be released with
-//! `pqanon_string_free`. One thread may send while another receives on the
+//! `shaip_string_free`. One thread may send while another receives on the
 //! same tunnel.
 
-use pqanon::client::{ClientConfig, Tunnel};
-use pqanon::handshake::PeerPublic;
-use pqanon::supervisor::{LinkState, ManagedTunnel, SupervisorConfig};
+use shaip::client::{ClientConfig, Tunnel};
+use shaip::handshake::PeerPublic;
+use shaip::supervisor::{LinkState, ManagedTunnel, SupervisorConfig};
 use std::ffi::{c_char, c_int, c_long, CStr, CString};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::Path;
 use std::time::Duration;
 
 /// An established tunnel plus the runtime that drives its socket.
-pub struct PqanonTunnel {
+pub struct ShaipTunnel {
     rt: tokio::runtime::Runtime,
     tunnel: Tunnel,
 }
 
-/// Traffic counters (mirrors `pqanon::client::TunnelStats`).
+/// Traffic counters (mirrors `shaip::client::TunnelStats`).
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
-pub struct PqanonStats {
+pub struct ShaipStats {
     pub packets_sent: u64,
     pub bytes_sent: u64,
     pub packets_received: u64,
@@ -61,7 +61,7 @@ fn guard<T>(err: *mut *mut c_char, fallback: T, f: impl FnOnce() -> Result<T, St
             fallback
         }
         Err(_) => {
-            set_err(err, "internal panic in pqanon (a bug)");
+            set_err(err, "internal panic in shaip (a bug)");
             fallback
         }
     }
@@ -89,8 +89,8 @@ fn unix_now() -> i64 {
         .unwrap_or(0)
 }
 
-/// The connection arguments shared by `pqanon_tunnel_connect` and
-/// `pqanon_session_start`, copied out of C memory (so they can move to
+/// The connection arguments shared by `shaip_tunnel_connect` and
+/// `shaip_session_start`, copied out of C memory (so they can move to
 /// another thread).
 struct ConnectArgs {
     server: String,
@@ -131,7 +131,7 @@ impl ConnectArgs {
         let pq = hex::decode(self.pq_hex.trim()).map_err(|e| format!("server_ml_dsa_pub_hex: {e}"))?;
         let ed = hex::decode(self.ed_hex.trim()).map_err(|e| format!("server_ed_pub_hex: {e}"))?;
         let server_pub = PeerPublic::from_bytes(&pq, &ed).map_err(|e| format!("server pins: {e:#}"))?;
-        let identity = pqanon::keystore::load_or_create_identity(Path::new(&self.identity_path))
+        let identity = shaip::keystore::load_or_create_identity(Path::new(&self.identity_path))
             .map_err(|e| format!("{e:#}"))?
             .0;
         let device_cert = match self.device_cert_path {
@@ -160,7 +160,7 @@ impl ConnectArgs {
 /// `guard`.
 fn on_big_stack<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
     match std::thread::Builder::new()
-        .name("pqanon-handshake".into())
+        .name("shaip-handshake".into())
         .stack_size(16 << 20)
         .spawn(f)
         .map(|h| h.join())
@@ -185,17 +185,17 @@ fn runtime() -> Result<tokio::runtime::Runtime, String> {
 
 /// Library version (static string; do not free).
 #[no_mangle]
-pub extern "C" fn pqanon_version() -> *const c_char {
+pub extern "C" fn shaip_version() -> *const c_char {
     concat!(env!("CARGO_PKG_VERSION"), "\0").as_ptr().cast()
 }
 
-/// Connect to a pqanond server and wait for it to confirm the session.
+/// Connect to a shaipd server and wait for it to confirm the session.
 ///
 /// # Safety
 /// String arguments must be NULL or valid NUL-terminated strings;
 /// `device_cert_path` may be NULL. `err` may be NULL or point to a `char *`.
 #[no_mangle]
-pub unsafe extern "C" fn pqanon_tunnel_connect(
+pub unsafe extern "C" fn shaip_tunnel_connect(
     server: *const c_char,
     server_ml_dsa_pub_hex: *const c_char,
     server_ed_pub_hex: *const c_char,
@@ -203,7 +203,7 @@ pub unsafe extern "C" fn pqanon_tunnel_connect(
     device_cert_path: *const c_char,
     timeout_ms: u32,
     err: *mut *mut c_char,
-) -> *mut PqanonTunnel {
+) -> *mut ShaipTunnel {
     guard(err, std::ptr::null_mut(), || {
         let args = ConnectArgs::from_c(server, server_ml_dsa_pub_hex, server_ed_pub_hex, identity_path, device_cert_path, timeout_ms)?;
         let (rt, tunnel) = on_big_stack(move || {
@@ -212,18 +212,18 @@ pub unsafe extern "C" fn pqanon_tunnel_connect(
             let tunnel = rt.block_on(Tunnel::connect(cfg)).map_err(|e| format!("{e:#}"))?;
             Ok::<_, String>((rt, tunnel))
         })?;
-        Ok(Box::into_raw(Box::new(PqanonTunnel { rt, tunnel })))
+        Ok(Box::into_raw(Box::new(ShaipTunnel { rt, tunnel })))
     })
 }
 
 /// Send one IP packet. Returns 0, or -1 on error.
 ///
 /// # Safety
-/// `t` must come from `pqanon_tunnel_connect`; `pkt` must point to `len`
+/// `t` must come from `shaip_tunnel_connect`; `pkt` must point to `len`
 /// readable bytes (or be NULL with `len == 0`).
 #[no_mangle]
-pub unsafe extern "C" fn pqanon_tunnel_send(
-    t: *const PqanonTunnel,
+pub unsafe extern "C" fn shaip_tunnel_send(
+    t: *const ShaipTunnel,
     pkt: *const u8,
     len: usize,
     err: *mut *mut c_char,
@@ -241,14 +241,14 @@ pub unsafe extern "C" fn pqanon_tunnel_send(
 
 /// Receive one IP packet into `buf`. Returns its length, 0 if `timeout_ms`
 /// elapsed first, or -1 on error (including a packet larger than `cap`;
-/// `PQANON_MAX_PACKET` always suffices).
+/// `SHAIP_MAX_PACKET` always suffices).
 ///
 /// # Safety
-/// `t` must come from `pqanon_tunnel_connect`; `buf` must point to `cap`
+/// `t` must come from `shaip_tunnel_connect`; `buf` must point to `cap`
 /// writable bytes.
 #[no_mangle]
-pub unsafe extern "C" fn pqanon_tunnel_recv(
-    t: *const PqanonTunnel,
+pub unsafe extern "C" fn shaip_tunnel_recv(
+    t: *const ShaipTunnel,
     buf: *mut u8,
     cap: usize,
     timeout_ms: u32,
@@ -278,9 +278,9 @@ pub unsafe extern "C" fn pqanon_tunnel_recv(
 /// (`0x0A4D0002` = 10.77.0.2), or 0 if it assigned none (echo-mode server).
 ///
 /// # Safety
-/// `t` must be NULL or come from `pqanon_tunnel_connect`.
+/// `t` must be NULL or come from `shaip_tunnel_connect`.
 #[no_mangle]
-pub unsafe extern "C" fn pqanon_tunnel_assigned_ipv4(t: *const PqanonTunnel) -> u32 {
+pub unsafe extern "C" fn shaip_tunnel_assigned_ipv4(t: *const ShaipTunnel) -> u32 {
     t.as_ref()
         .and_then(|t| t.tunnel.info().assigned_v4)
         .map(u32::from)
@@ -290,14 +290,14 @@ pub unsafe extern "C" fn pqanon_tunnel_assigned_ipv4(t: *const PqanonTunnel) -> 
 /// Copy the traffic counters into `out`. Returns 0, or -1 if an argument is NULL.
 ///
 /// # Safety
-/// `t` must come from `pqanon_tunnel_connect`; `out` must be writable.
+/// `t` must come from `shaip_tunnel_connect`; `out` must be writable.
 #[no_mangle]
-pub unsafe extern "C" fn pqanon_tunnel_stats(t: *const PqanonTunnel, out: *mut PqanonStats) -> c_int {
+pub unsafe extern "C" fn shaip_tunnel_stats(t: *const ShaipTunnel, out: *mut ShaipStats) -> c_int {
     let (Some(t), false) = (t.as_ref(), out.is_null()) else {
         return -1;
     };
     let s = t.tunnel.stats();
-    *out = PqanonStats {
+    *out = ShaipStats {
         packets_sent: s.packets_sent,
         bytes_sent: s.bytes_sent,
         packets_received: s.packets_received,
@@ -310,34 +310,34 @@ pub unsafe extern "C" fn pqanon_tunnel_stats(t: *const PqanonTunnel, out: *mut P
 /// Close the tunnel and free it. NULL is a no-op.
 ///
 /// # Safety
-/// `t` must be NULL or come from `pqanon_tunnel_connect`, and must not be
+/// `t` must be NULL or come from `shaip_tunnel_connect`, and must not be
 /// used afterwards.
 #[no_mangle]
-pub unsafe extern "C" fn pqanon_tunnel_close(t: *mut PqanonTunnel) {
+pub unsafe extern "C" fn shaip_tunnel_close(t: *mut ShaipTunnel) {
     if !t.is_null() {
         let _ = catch_unwind(AssertUnwindSafe(|| drop(Box::from_raw(t))));
     }
 }
 
-// --- Reconnecting session (pqanon::supervisor) ------------------------------
+// --- Reconnecting session (shaip::supervisor) ------------------------------
 
 /// A link that stays up: reconnects, rekeys, keepalive RTT.
-pub struct PqanonSession {
+pub struct ShaipSession {
     // Declared first so it drops first: its sockets go before their runtime.
     link: ManagedTunnel,
     rt: tokio::runtime::Runtime,
 }
 
-/// `PqanonStatus.state` values.
-pub const PQANON_STATE_CONNECTED: i32 = 0;
-pub const PQANON_STATE_RECONNECTING: i32 = 1;
-pub const PQANON_STATE_STOPPED: i32 = 2;
+/// `ShaipStatus.state` values.
+pub const SHAIP_STATE_CONNECTED: i32 = 0;
+pub const SHAIP_STATE_RECONNECTING: i32 = 1;
+pub const SHAIP_STATE_STOPPED: i32 = 2;
 
-/// A status snapshot (mirrors `pqanon::supervisor::Status`).
+/// A status snapshot (mirrors `shaip::supervisor::Status`).
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
-pub struct PqanonStatus {
-    /// PQANON_STATE_*.
+pub struct ShaipStatus {
+    /// SHAIP_STATE_*.
     pub state: i32,
     /// Server-assigned tunnel address, host order; 0 if none.
     pub assigned_ipv4: u32,
@@ -355,16 +355,16 @@ pub struct PqanonStatus {
     pub reconnects: u32,
     pub rekeys: u32,
     /// Totals across every session of this link.
-    pub stats: PqanonStats,
+    pub stats: ShaipStats,
     /// Outbound packets dropped because no session was up.
     pub dropped_offline: u64,
-    /// The server's identity id (`pqanond --print-public` shows it as
+    /// The server's identity id (`shaipd --print-public` shows it as
     /// `identity_id`), proven by the handshake against the pinned keys.
     pub server_identity: [u8; 16],
 }
 
-/// Connect to a pqanond server, wait for it to confirm the first session, and
-/// keep the link up from then on. Arguments as for `pqanon_tunnel_connect`.
+/// Connect to a shaipd server, wait for it to confirm the first session, and
+/// keep the link up from then on. Arguments as for `shaip_tunnel_connect`.
 /// Returns NULL (and `*err`) if the first connection fails — wrong pins, not
 /// admitted, unreachable — so a misconfiguration surfaces at once.
 ///
@@ -372,7 +372,7 @@ pub struct PqanonStatus {
 /// String arguments must be NULL or valid NUL-terminated strings;
 /// `device_cert_path` may be NULL. `err` may be NULL or point to a `char *`.
 #[no_mangle]
-pub unsafe extern "C" fn pqanon_session_start(
+pub unsafe extern "C" fn shaip_session_start(
     server: *const c_char,
     server_ml_dsa_pub_hex: *const c_char,
     server_ed_pub_hex: *const c_char,
@@ -380,7 +380,7 @@ pub unsafe extern "C" fn pqanon_session_start(
     device_cert_path: *const c_char,
     timeout_ms: u32,
     err: *mut *mut c_char,
-) -> *mut PqanonSession {
+) -> *mut ShaipSession {
     guard(err, std::ptr::null_mut(), || {
         let args = ConnectArgs::from_c(server, server_ml_dsa_pub_hex, server_ed_pub_hex, identity_path, device_cert_path, timeout_ms)?;
         let (link, rt) = on_big_stack(move || {
@@ -391,7 +391,7 @@ pub unsafe extern "C" fn pqanon_session_start(
                 .map_err(|e| format!("{e:#}"))?;
             Ok::<_, String>((link, rt))
         })?;
-        Ok(Box::into_raw(Box::new(PqanonSession { link, rt })))
+        Ok(Box::into_raw(Box::new(ShaipSession { link, rt })))
     })
 }
 
@@ -399,10 +399,10 @@ pub unsafe extern "C" fn pqanon_session_start(
 /// (and counted), never sent elsewhere. Returns 0, or -1 for bad arguments.
 ///
 /// # Safety
-/// `s` must come from `pqanon_session_start` and not be freed; `pkt` must
+/// `s` must come from `shaip_session_start` and not be freed; `pkt` must
 /// point to `len` readable bytes (or be NULL with `len == 0`).
 #[no_mangle]
-pub unsafe extern "C" fn pqanon_session_send(s: *const PqanonSession, pkt: *const u8, len: usize) -> c_int {
+pub unsafe extern "C" fn shaip_session_send(s: *const ShaipSession, pkt: *const u8, len: usize) -> c_int {
     guard(std::ptr::null_mut(), -1, || {
         let s = s.as_ref().ok_or("session is NULL")?;
         if pkt.is_null() && len > 0 {
@@ -416,14 +416,14 @@ pub unsafe extern "C" fn pqanon_session_send(s: *const PqanonSession, pkt: *cons
 
 /// Receive one IP packet into `buf`, across reconnects. Returns its length, 0
 /// if `timeout_ms` elapsed first, or -1 once the session is stopped (or for a
-/// packet larger than `cap`; `PQANON_MAX_PACKET` always suffices).
+/// packet larger than `cap`; `SHAIP_MAX_PACKET` always suffices).
 ///
 /// # Safety
-/// `s` must come from `pqanon_session_start` and not be freed; `buf` must
+/// `s` must come from `shaip_session_start` and not be freed; `buf` must
 /// point to `cap` writable bytes.
 #[no_mangle]
-pub unsafe extern "C" fn pqanon_session_recv(
-    s: *const PqanonSession,
+pub unsafe extern "C" fn shaip_session_recv(
+    s: *const ShaipSession,
     buf: *mut u8,
     cap: usize,
     timeout_ms: u32,
@@ -452,21 +452,21 @@ pub unsafe extern "C" fn pqanon_session_recv(
 /// Copy a status snapshot into `out`. Returns 0, or -1 if an argument is NULL.
 ///
 /// # Safety
-/// `s` must come from `pqanon_session_start` and not be freed; `out` must be
+/// `s` must come from `shaip_session_start` and not be freed; `out` must be
 /// writable.
 #[no_mangle]
-pub unsafe extern "C" fn pqanon_session_status(s: *const PqanonSession, out: *mut PqanonStatus) -> c_int {
+pub unsafe extern "C" fn shaip_session_status(s: *const ShaipSession, out: *mut ShaipStatus) -> c_int {
     guard(std::ptr::null_mut(), -1, || {
         let (Some(s), false) = (s.as_ref(), out.is_null()) else {
             return Err("NULL argument".into());
         };
         let st = s.link.status();
         let v4 = |a: Option<std::net::Ipv4Addr>| a.map(u32::from).unwrap_or(0);
-        *out = PqanonStatus {
+        *out = ShaipStatus {
             state: match st.state {
-                LinkState::Connected => PQANON_STATE_CONNECTED,
-                LinkState::Reconnecting => PQANON_STATE_RECONNECTING,
-                LinkState::Stopped => PQANON_STATE_STOPPED,
+                LinkState::Connected => SHAIP_STATE_CONNECTED,
+                LinkState::Reconnecting => SHAIP_STATE_RECONNECTING,
+                LinkState::Stopped => SHAIP_STATE_STOPPED,
             },
             assigned_ipv4: v4(st.info.assigned_v4),
             prefix_len: st.info.prefix_len,
@@ -481,7 +481,7 @@ pub unsafe extern "C" fn pqanon_session_status(s: *const PqanonSession, out: *mu
                 .unwrap_or(0),
             reconnects: st.reconnects,
             rekeys: st.rekeys,
-            stats: PqanonStats {
+            stats: ShaipStats {
                 packets_sent: st.stats.packets_sent,
                 bytes_sent: st.stats.bytes_sent,
                 packets_received: st.stats.packets_received,
@@ -499,9 +499,9 @@ pub unsafe extern "C" fn pqanon_session_status(s: *const PqanonSession, out: *mu
 /// for the OS's tunnel-endpoint setting. Free it; NULL on bad arguments.
 ///
 /// # Safety
-/// `s` must come from `pqanon_session_start` and not be freed.
+/// `s` must come from `shaip_session_start` and not be freed.
 #[no_mangle]
-pub unsafe extern "C" fn pqanon_session_server_addr(s: *const PqanonSession) -> *mut c_char {
+pub unsafe extern "C" fn shaip_session_server_addr(s: *const ShaipSession) -> *mut c_char {
     match s.as_ref() {
         Some(s) => to_c(s.link.status().server_addr.to_string()),
         None => std::ptr::null_mut(),
@@ -511,9 +511,9 @@ pub unsafe extern "C" fn pqanon_session_server_addr(s: *const PqanonSession) -> 
 /// Why the last session ended or the last attempt failed (free it), or NULL.
 ///
 /// # Safety
-/// `s` must come from `pqanon_session_start` and not be freed.
+/// `s` must come from `shaip_session_start` and not be freed.
 #[no_mangle]
-pub unsafe extern "C" fn pqanon_session_last_error(s: *const PqanonSession) -> *mut c_char {
+pub unsafe extern "C" fn shaip_session_last_error(s: *const ShaipSession) -> *mut c_char {
     s.as_ref()
         .and_then(|s| s.link.status().last_error)
         .map(to_c)
@@ -525,9 +525,9 @@ pub unsafe extern "C" fn pqanon_session_last_error(s: *const PqanonSession) -> *
 /// if `s` is NULL.
 ///
 /// # Safety
-/// `s` must come from `pqanon_session_start` and not be freed.
+/// `s` must come from `shaip_session_start` and not be freed.
 #[no_mangle]
-pub unsafe extern "C" fn pqanon_session_reconnect(s: *const PqanonSession) -> c_int {
+pub unsafe extern "C" fn shaip_session_reconnect(s: *const ShaipSession) -> c_int {
     match s.as_ref() {
         Some(s) => {
             s.link.reconnect_now("the network changed");
@@ -538,26 +538,26 @@ pub unsafe extern "C" fn pqanon_session_reconnect(s: *const PqanonSession) -> c_
 }
 
 /// Close the session (telling the server) and stop reconnecting. Blocked and
-/// later `pqanon_session_recv` calls return -1. The session stays allocated:
-/// free it with `pqanon_session_free` once no other thread is inside a
-/// `pqanon_session_*` call. NULL is a no-op.
+/// later `shaip_session_recv` calls return -1. The session stays allocated:
+/// free it with `shaip_session_free` once no other thread is inside a
+/// `shaip_session_*` call. NULL is a no-op.
 ///
 /// # Safety
-/// `s` must be NULL or come from `pqanon_session_start` and not be freed.
+/// `s` must be NULL or come from `shaip_session_start` and not be freed.
 #[no_mangle]
-pub unsafe extern "C" fn pqanon_session_stop(s: *const PqanonSession) {
+pub unsafe extern "C" fn shaip_session_stop(s: *const ShaipSession) {
     if let Some(s) = s.as_ref() {
         let _ = catch_unwind(AssertUnwindSafe(|| s.rt.block_on(s.link.stop())));
     }
 }
 
 /// Free a session (stopping it first if needed). No other thread may be
-/// inside a `pqanon_session_*` call on it. NULL is a no-op.
+/// inside a `shaip_session_*` call on it. NULL is a no-op.
 ///
 /// # Safety
-/// `s` must be NULL or come from `pqanon_session_start`, freed only once.
+/// `s` must be NULL or come from `shaip_session_start`, freed only once.
 #[no_mangle]
-pub unsafe extern "C" fn pqanon_session_free(s: *mut PqanonSession) {
+pub unsafe extern "C" fn shaip_session_free(s: *mut ShaipSession) {
     if !s.is_null() {
         let _ = catch_unwind(AssertUnwindSafe(|| {
             let s = Box::from_raw(s);
@@ -567,7 +567,7 @@ pub unsafe extern "C" fn pqanon_session_free(s: *mut PqanonSession) {
     }
 }
 
-/// Verify a `pqanon://enroll` link (or bare token) against the pinned
+/// Verify a `shaip://enroll` link (or bare token) against the pinned
 /// enrollment-authority key, locally — what a deep-link handler checks before
 /// asking the user to confirm. Returns 0 and sets `*account_out`, or -1.
 ///
@@ -575,7 +575,7 @@ pub unsafe extern "C" fn pqanon_session_free(s: *mut PqanonSession) {
 /// String arguments must be NULL or valid NUL-terminated strings;
 /// `account_out` and `err` may be NULL or point to a `char *`.
 #[no_mangle]
-pub unsafe extern "C" fn pqanon_enroll_link_verify(
+pub unsafe extern "C" fn shaip_enroll_link_verify(
     link: *const c_char,
     authority_pub_hex: *const c_char,
     account_out: *mut *mut c_char,
@@ -583,14 +583,14 @@ pub unsafe extern "C" fn pqanon_enroll_link_verify(
 ) -> c_int {
     guard(err, -1, || {
         let link = arg(link, "link")?;
-        let authority = pqanon::enroll_client::parse_pin(arg(authority_pub_hex, "authority_pub_hex")?, "authority key")
+        let authority = shaip::enroll_client::parse_pin(arg(authority_pub_hex, "authority_pub_hex")?, "authority key")
             .map_err(|e| e.to_string())?;
-        let token = if link.starts_with("pqanon://") {
-            pqanon::enrollment::parse_enroll_url(link).map_err(|e| e.to_string())?
+        let token = if link.starts_with("shaip://") {
+            shaip::enrollment::parse_enroll_url(link).map_err(|e| e.to_string())?
         } else {
             link.trim().to_string()
         };
-        let claims = pqanon::enrollment::verify_enroll_token(&authority, &token, unix_now())
+        let claims = shaip::enrollment::verify_enroll_token(&authority, &token, unix_now())
             .map_err(|e| format!("refusing this enrollment link: {e}"))?;
         if !account_out.is_null() {
             *account_out = to_c(claims.account);
@@ -609,7 +609,7 @@ pub unsafe extern "C" fn pqanon_enroll_link_verify(
 /// String arguments must be NULL or valid NUL-terminated strings; `err` may
 /// be NULL or point to a `char *`.
 #[no_mangle]
-pub unsafe extern "C" fn pqanon_enroll(
+pub unsafe extern "C" fn shaip_enroll(
     link: *const c_char,
     server: *const c_char,
     authority_pub_hex: *const c_char,
@@ -619,15 +619,15 @@ pub unsafe extern "C" fn pqanon_enroll(
     err: *mut *mut c_char,
 ) -> *mut c_char {
     guard(err, std::ptr::null_mut(), || {
-        let authority = pqanon::enroll_client::parse_pin(arg(authority_pub_hex, "authority_pub_hex")?, "authority key")
+        let authority = shaip::enroll_client::parse_pin(arg(authority_pub_hex, "authority_pub_hex")?, "authority key")
             .map_err(|e| e.to_string())?;
-        let ca = pqanon::enroll_client::parse_pin(arg(ca_pub_hex, "ca_pub_hex")?, "CA key").map_err(|e| e.to_string())?;
+        let ca = shaip::enroll_client::parse_pin(arg(ca_pub_hex, "ca_pub_hex")?, "CA key").map_err(|e| e.to_string())?;
         let (link, server) = (arg(link, "link")?.to_string(), arg(server, "server")?.to_string());
         let identity = arg(identity_path, "identity_path")?.to_string();
         let name = if name.is_null() { "device".to_string() } else { arg(name, "name")?.to_string() };
         // Creating the identity on first use is ML-DSA-65 key generation.
         let device_id = on_big_stack(move || {
-            pqanon::enroll_client::enroll(&link, &server, &authority, &ca, Path::new(&identity), &name, None)
+            shaip::enroll_client::enroll(&link, &server, &authority, &ca, Path::new(&identity), &name, None)
                 .map(|done| hex::encode(done.cert.device_id))
                 .map_err(|e| format!("{e:#}"))
         })?;
@@ -640,7 +640,7 @@ pub unsafe extern "C" fn pqanon_enroll(
 /// # Safety
 /// `s` must be NULL or a string returned by this library, freed only once.
 #[no_mangle]
-pub unsafe extern "C" fn pqanon_string_free(s: *mut c_char) {
+pub unsafe extern "C" fn shaip_string_free(s: *mut c_char) {
     if !s.is_null() {
         drop(CString::from_raw(s));
     }
@@ -652,7 +652,7 @@ mod tests {
     /// cannot silently fall behind the library.
     #[test]
     fn header_declares_every_export() {
-        let header = include_str!("../include/pqanon.h");
+        let header = include_str!("../include/shaip.h");
         let src = include_str!("lib.rs");
         let exports: Vec<&str> = src
             .lines()
@@ -661,7 +661,7 @@ mod tests {
             .collect();
         assert!(exports.len() >= 10, "found only {exports:?}");
         for f in exports {
-            assert!(header.contains(&format!("{f}(")), "{f} is exported but not declared in pqanon.h");
+            assert!(header.contains(&format!("{f}(")), "{f} is exported but not declared in shaip.h");
         }
     }
 
@@ -670,7 +670,7 @@ mod tests {
         use std::ffi::{c_char, CStr};
         let mut err: *mut c_char = std::ptr::null_mut();
         let t = unsafe {
-            super::pqanon_tunnel_connect(
+            super::shaip_tunnel_connect(
                 std::ptr::null(), std::ptr::null(), std::ptr::null(),
                 std::ptr::null(), std::ptr::null(), 100, &mut err,
             )
@@ -678,9 +678,9 @@ mod tests {
         assert!(t.is_null());
         let msg = unsafe { CStr::from_ptr(err) }.to_str().unwrap().to_string();
         assert!(msg.contains("server is NULL"), "{msg}");
-        unsafe { super::pqanon_string_free(err) };
-        assert_eq!(unsafe { super::pqanon_tunnel_send(std::ptr::null(), std::ptr::null(), 0, std::ptr::null_mut()) }, -1);
-        assert_eq!(unsafe { super::pqanon_tunnel_assigned_ipv4(std::ptr::null()) }, 0);
-        unsafe { super::pqanon_tunnel_close(std::ptr::null_mut()) };
+        unsafe { super::shaip_string_free(err) };
+        assert_eq!(unsafe { super::shaip_tunnel_send(std::ptr::null(), std::ptr::null(), 0, std::ptr::null_mut()) }, -1);
+        assert_eq!(unsafe { super::shaip_tunnel_assigned_ipv4(std::ptr::null()) }, 0);
+        unsafe { super::shaip_tunnel_close(std::ptr::null_mut()) };
     }
 }

@@ -1,9 +1,9 @@
-//! `pqanon` — SHAIP VPN client daemon / CLI.
+//! `shaip` — SHAIP VPN client daemon / CLI.
 //!
 //! Subcommands:
 //! - `keygen` — generate a long-term identity and print its id + keys.
 //! - `selftest` — run a full in-process handshake + a DATA packet through
-//!   obfuscation, proving the PQANON/1 stack.
+//!   obfuscation, proving the SHAIP/1 stack.
 //! - `run --config FILE` — load a client config and start the tunnel (the TUN
 //!   read/write loop is the integration point described in §19; this wires up
 //!   transport + obfuscation).
@@ -12,14 +12,14 @@
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use pqanon::handshake::{ClientHandshake, Identity, ServerHandshake};
-use pqanon::obf::Obfuscator;
-use pqanon::transport::Session;
-use pqanon::wire::MsgType;
+use shaip::handshake::{ClientHandshake, Identity, ServerHandshake};
+use shaip::obf::Obfuscator;
+use shaip::transport::Session;
+use shaip::wire::MsgType;
 
 #[derive(Parser)]
 #[command(
-    name = "pqanon",
+    name = "shaip",
     version,
     about = "SHAIP VPN post-quantum anonymizing VPN client"
 )]
@@ -37,7 +37,7 @@ enum Cmd {
         #[arg(long)]
         out: Option<String>,
     },
-    /// Run an end-to-end self-test of the PQANON/1 stack.
+    /// Run an end-to-end self-test of the SHAIP/1 stack.
     Selftest,
     /// Create a real TUN device and prove IP packets flow from the kernel
     /// (Linux; needs CAP_NET_ADMIN).
@@ -45,7 +45,7 @@ enum Cmd {
     /// Start the VPN from a config file: every IPv4 packet and DNS lookup goes
     /// through the tunnel, IPv6 is blocked (the tunnel carries IPv4 only), and
     /// the session is kept alive, rekeyed, and re-established on failure
-    /// (Linux; needs CAP_NET_ADMIN). Stop with Ctrl-C or `pqanon disconnect`.
+    /// (Linux; needs CAP_NET_ADMIN). Stop with Ctrl-C or `shaip disconnect`.
     Run {
         #[arg(short, long)]
         config: String,
@@ -53,7 +53,7 @@ enum Cmd {
         #[arg(long)]
         split_tunnel: bool,
         /// Reject all traffic outside the tunnel, and keep doing so if this
-        /// process dies, until it reconnects or `pqanon down` runs.
+        /// process dies, until it reconnects or `shaip down` runs.
         #[arg(long)]
         kill_switch: bool,
         /// Keep the system resolver instead of the server's (lookups to a
@@ -77,12 +77,12 @@ enum Cmd {
         #[arg(short, long, default_value = "fast")]
         route: String,
     },
-    /// Show the state of a running `pqanon run`.
+    /// Show the state of a running `shaip run`.
     Status,
-    /// Stop a running `pqanon run` (it closes the session and restores
+    /// Stop a running `shaip run` (it closes the session and restores
     /// routes, DNS and firewall).
     Disconnect,
-    /// Undo what a `pqanon run` that crashed left behind: the kill switch,
+    /// Undo what a `shaip run` that crashed left behind: the kill switch,
     /// the resolv.conf rewrite, the host route.
     Down,
     /// Resolve a name through the DNSSEC-validating resolver and print the
@@ -148,11 +148,11 @@ enum Cmd {
         #[arg(long)]
         store: Option<String>,
     },
-    /// Enroll this device from a pqanon://enroll link: verify it against the
+    /// Enroll this device from a shaip://enroll link: verify it against the
     /// pinned enrollment-authority key, prove possession of this device's
     /// identity key, and store the device certificate the control plane issues.
     Enroll {
-        /// The pqanon://enroll?t=… link (or the bare PQE1 token).
+        /// The shaip://enroll?t=… link (or the bare PQE1 token).
         link: String,
         /// Control-plane base URL.
         #[arg(short, long)]
@@ -215,7 +215,7 @@ enum Cmd {
 fn wallet_path(store: Option<String>) -> std::path::PathBuf {
     store
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(pqanon::pay_client::default_wallet_path)
+        .unwrap_or_else(shaip::pay_client::default_wallet_path)
 }
 
 fn main() {
@@ -237,7 +237,7 @@ fn cli_main() -> Result<()> {
     // Load the localization catalog (i18n/*.toml) if present. Absent or
     // partial catalogs fall back to English and then to the message key, so
     // this never fails.
-    pqanon::i18n::init();
+    shaip::i18n::init();
 
     let cli = Cli::parse();
     match cli.cmd {
@@ -275,25 +275,25 @@ fn cli_main() -> Result<()> {
             trust_key,
             require_signed,
         } => resolve_cmd(&name, &server, &rtype, trust_key.as_deref(), require_signed),
-        Cmd::Plans { server } => pqanon::pay_client::plans(&server),
+        Cmd::Plans { server } => shaip::pay_client::plans(&server),
         Cmd::Buy {
             server,
             plan,
             count,
             rail,
             store,
-        } => pqanon::pay_client::buy(&server, &plan, count, rail.as_deref(), &wallet_path(store)),
+        } => shaip::pay_client::buy(&server, &plan, count, rail.as_deref(), &wallet_path(store)),
         Cmd::Collect {
             server,
             order,
             store,
-        } => pqanon::pay_client::collect(&server, &order, &wallet_path(store)),
-        Cmd::Tokens { store } => pqanon::pay_client::list_tokens(&wallet_path(store)),
+        } => shaip::pay_client::collect(&server, &order, &wallet_path(store)),
+        Cmd::Tokens { store } => shaip::pay_client::list_tokens(&wallet_path(store)),
         Cmd::Redeem {
             server,
             plan,
             store,
-        } => pqanon::pay_client::redeem(&server, &plan, &wallet_path(store)),
+        } => shaip::pay_client::redeem(&server, &plan, &wallet_path(store)),
         Cmd::Enroll {
             link,
             server,
@@ -303,7 +303,7 @@ fn cli_main() -> Result<()> {
             name,
             cert_out,
         } => {
-            let name = name.as_deref().unwrap_or(pqanon::enroll_client::this_platform());
+            let name = name.as_deref().unwrap_or(shaip::enroll_client::this_platform());
             enroll_cmd(&link, &server, &authority_key, &ca_key, &identity, name, cert_out.as_deref())
         }
         Cmd::Crl { url, pubkey, max_age } => crl_cmd(&url, &pubkey, max_age),
@@ -325,7 +325,7 @@ fn enroll_cmd(
     name: &str,
     cert_out: Option<&str>,
 ) -> Result<()> {
-    use pqanon::enroll_client::{enroll, parse_pin};
+    use shaip::enroll_client::{enroll, parse_pin};
     let authority = parse_pin(authority_key, "--authority-key")?;
     let ca = parse_pin(ca_key, "--ca-key")?;
     let done = enroll(
@@ -349,7 +349,7 @@ fn directory_cmd(url: &str, authorities: &[String]) -> Result<()> {
         let (name, key) = a
             .split_once('=')
             .ok_or_else(|| anyhow::anyhow!("--authority must be NAME=HEXKEY, got {a:?}"))?;
-        registry.insert(name.to_string(), pqanon::enroll_client::parse_pin(key, "--authority key")?);
+        registry.insert(name.to_string(), shaip::enroll_client::parse_pin(key, "--authority key")?);
     }
     let resp = ureq::get(url)
         .timeout(std::time::Duration::from_secs(10))
@@ -357,11 +357,11 @@ fn directory_cmd(url: &str, authorities: &[String]) -> Result<()> {
         .map_err(|e| anyhow::anyhow!("GET {url}: {e}"))?;
     let mut body = Vec::new();
     resp.into_reader().take(8 << 20).read_to_end(&mut body)?;
-    let consensus = pqanon::directory::parse(&body).map_err(|e| anyhow::anyhow!("{e}"))?;
-    let now = pqanon::crl::format_rfc3339_utc(
+    let consensus = shaip::directory::parse(&body).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let now = shaip::crl::format_rfc3339_utc(
         std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs() as i64,
     );
-    let valid = pqanon::directory::verify(&consensus, &registry, &now)
+    let valid = shaip::directory::verify(&consensus, &registry, &now)
         .map_err(|e| anyhow::anyhow!("directory rejected: {e}"))?;
     println!(
         "directory verified: {} node(s), {valid}/{} authority signature(s), valid until {}",
@@ -379,8 +379,8 @@ fn directory_cmd(url: &str, authorities: &[String]) -> Result<()> {
 }
 
 fn crl_cmd(url: &str, pubkey: &str, max_age: i64) -> Result<()> {
-    let pinned = pqanon::enroll_client::parse_pin(pubkey, "--pubkey")?;
-    let crl = pqanon::crl::fetch(url, &pinned, max_age)?;
+    let pinned = shaip::enroll_client::parse_pin(pubkey, "--pubkey")?;
+    let crl = shaip::crl::fetch(url, &pinned, max_age)?;
     println!("CRL verified (issued at unix {})", crl.issued_at);
     let mut devices: Vec<String> = crl.revoked_devices.iter().map(hex::encode).collect();
     devices.sort();
@@ -404,8 +404,8 @@ fn resolve_cmd(
     trust_key: Option<&str>,
     require_signed: bool,
 ) -> Result<()> {
-    use pqanon::dns_resolver::{UdpDnsTransport, ValidatingResolver, TYPE_A, TYPE_AAAA};
-    use pqanon::dnssec::{Dnskey, DNSKEY_FLAG_ZONE};
+    use shaip::dns_resolver::{UdpDnsTransport, ValidatingResolver, TYPE_A, TYPE_AAAA};
+    use shaip::dnssec::{Dnskey, DNSKEY_FLAG_ZONE};
 
     let rr_type = match rtype.to_ascii_lowercase().as_str() {
         "a" => TYPE_A,
@@ -451,7 +451,7 @@ fn resolve_cmd(
 /// it, trigger a packet into its subnet, and capture that packet off the device.
 #[cfg(target_os = "linux")]
 fn tun_test() -> Result<()> {
-    use pqanon::tun::TunDevice;
+    use shaip::tun::TunDevice;
     use std::sync::mpsc;
 
     let dev = std::sync::Arc::new(TunDevice::open("pqtest0")?);
@@ -470,10 +470,10 @@ fn tun_test() -> Result<()> {
             match reader.read(&mut buf) {
                 Ok(n) if n > 0 => {
                     let pkt = &buf[..n];
-                    if pqanon::ipparse::destination_ip(pkt)
+                    if shaip::ipparse::destination_ip(pkt)
                         == Some(std::net::IpAddr::V4(std::net::Ipv4Addr::new(10, 99, 0, 2)))
                     {
-                        let src = pqanon::ipparse::source_ip(pkt);
+                        let src = shaip::ipparse::source_ip(pkt);
                         let _ = tx.send((src, n));
                         return;
                     }
@@ -491,7 +491,7 @@ fn tun_test() -> Result<()> {
     // Trigger: send UDP into the subnet; the kernel emits it out the TUN device.
     let sock = std::net::UdpSocket::bind("0.0.0.0:0")?;
     for _ in 0..3 {
-        let _ = sock.send_to(b"pqanon tun probe", "10.99.0.2:9999");
+        let _ = sock.send_to(b"shaip tun probe", "10.99.0.2:9999");
     }
 
     match rx.recv_timeout(std::time::Duration::from_secs(3)) {
@@ -514,7 +514,7 @@ fn tun_test() -> Result<()> {
 fn keygen(out: Option<&str>) -> Result<()> {
     let id = match out {
         Some(path) => {
-            let (id, created) = pqanon::keystore::load_or_create_identity(std::path::Path::new(path))?;
+            let (id, created) = shaip::keystore::load_or_create_identity(std::path::Path::new(path))?;
             if !created {
                 eprintln!("{path} already exists; showing its public keys (unchanged)");
             }
@@ -532,7 +532,7 @@ fn keygen(out: Option<&str>) -> Result<()> {
 /// Drive a full handshake between an in-process client and server, then send one
 /// DATA packet through the session and the obfuscation layer and read it back.
 fn selftest() -> Result<()> {
-    tracing::info!("PQANON/1 self-test starting");
+    tracing::info!("SHAIP/1 self-test starting");
 
     let server_id = Identity::generate();
     let client_id = Identity::generate();
@@ -601,13 +601,13 @@ fn selftest() -> Result<()> {
 /// The client-config fields (`examples/client.toml`) that `run` and `probe`
 /// share.
 struct ClientToml {
-    tunnel: pqanon::client::ClientConfig,
+    tunnel: shaip::client::ClientConfig,
     tun_device: String,
     tun_address: Option<String>,
 }
 
 fn load_client_toml(path: &str, timeout: std::time::Duration) -> Result<ClientToml> {
-    use pqanon::handshake::PeerPublic;
+    use shaip::handshake::PeerPublic;
 
     let raw = std::fs::read_to_string(path)
         .map_err(|e| anyhow::anyhow!("reading config {path}: {e}"))?;
@@ -628,7 +628,7 @@ fn load_client_toml(path: &str, timeout: std::time::Duration) -> Result<ClientTo
     if server_pq_hex.starts_with("hex") || server_ed_hex.starts_with("hex") {
         anyhow::bail!(
             "fill [server].server_ml_dsa_pub / server_ed_pub with the server's real public keys \
-             (run `pqanond --identity <file> --print-public` on the server)"
+             (run `shaipd --identity <file> --print-public` on the server)"
         );
     }
     let server_pub = PeerPublic::from_bytes(
@@ -639,13 +639,13 @@ fn load_client_toml(path: &str, timeout: std::time::Duration) -> Result<ClientTo
     // A persistent identity lets a server allow-list this client; without one a
     // fresh identity is generated per run (fine only for open demo servers).
     let identity = match gstr("client", "identity") {
-        Some(p) => pqanon::keystore::load_or_create_identity(std::path::Path::new(&p))?.0,
+        Some(p) => shaip::keystore::load_or_create_identity(std::path::Path::new(&p))?.0,
         None => {
             tracing::warn!("no [client].identity: using a throwaway identity for this run");
             Identity::generate()
         }
     };
-    // Device certificate from `pqanon enroll`, for device-bound servers.
+    // Device certificate from `shaip enroll`, for device-bound servers.
     let device_cert = match gstr("client", "device_cert") {
         Some(p) => Some(
             std::fs::read_to_string(&p)
@@ -657,19 +657,19 @@ fn load_client_toml(path: &str, timeout: std::time::Duration) -> Result<ClientTo
     };
 
     Ok(ClientToml {
-        tunnel: pqanon::client::ClientConfig {
+        tunnel: shaip::client::ClientConfig {
             server,
             server_pub,
             identity,
             device_cert,
             handshake_timeout: timeout,
         },
-        tun_device: gstr("client", "tun_device").unwrap_or_else(|| "pqanon-c0".into()),
+        tun_device: gstr("client", "tun_device").unwrap_or_else(|| "shaip-c0".into()),
         tun_address: gstr("client", "tun_address"),
     })
 }
 
-/// `pqanon run` options.
+/// `shaip run` options.
 struct RunOpts {
     config: String,
     split_tunnel: bool,
@@ -687,9 +687,9 @@ struct RunOpts {
 /// it, pump packets both ways, and undo everything on exit.
 #[cfg(target_os = "linux")]
 fn run(o: RunOpts) -> Result<()> {
-    use pqanon::netcfg::{FullTunnel, FullTunnelOpts};
-    use pqanon::supervisor::{ManagedTunnel, SupervisorConfig};
-    use pqanon::tun::{AsyncTun, TunDevice};
+    use shaip::netcfg::{FullTunnel, FullTunnelOpts};
+    use shaip::supervisor::{ManagedTunnel, SupervisorConfig};
+    use shaip::tun::{AsyncTun, TunDevice};
     use std::sync::{Arc, OnceLock};
 
     if o.route != "fast" {
@@ -709,7 +709,7 @@ fn run(o: RunOpts) -> Result<()> {
     rt.block_on(async move {
         // A run that crashed may have left DNS rewritten or a host route; a
         // kill switch it left stays closed until this run replaces it.
-        for done in pqanon::netcfg::cleanup_after_crash(o.kill_switch)? {
+        for done in shaip::netcfg::cleanup_after_crash(o.kill_switch)? {
             tracing::info!("recovered from a previous run: {done}");
         }
         let server_addr = tokio::net::lookup_host(&cfg.tunnel.server)
@@ -719,7 +719,7 @@ fn run(o: RunOpts) -> Result<()> {
             .ok_or_else(|| anyhow::anyhow!("{} did not resolve", cfg.tunnel.server))?;
 
         let net: Arc<OnceLock<FullTunnel>> = Arc::new(OnceLock::new());
-        let mut sup = SupervisorConfig::new(pqanon::client::ClientConfig {
+        let mut sup = SupervisorConfig::new(shaip::client::ClientConfig {
             server: server_addr.to_string(),
             ..cfg.tunnel
         });
@@ -734,7 +734,7 @@ fn run(o: RunOpts) -> Result<()> {
         }));
         let link = Arc::new(ManagedTunnel::start(sup).await.map_err(|e| {
             if o.kill_switch {
-                e.context("first connection failed (if a kill switch from an earlier run is blocking it, run `pqanon down`)")
+                e.context("first connection failed (if a kill switch from an earlier run is blocking it, run `shaip down`)")
             } else {
                 e
             }
@@ -776,7 +776,7 @@ fn run(o: RunOpts) -> Result<()> {
         let _ = net.set(ft);
         tracing::info!(
             device = %tun.name(), address = %format!("{tun_ip}/{tun_prefix}"), mtu = info.effective_mtu(),
-            "{}", pqanon::i18n::t("tunnel_up")
+            "{}", shaip::i18n::t("tunnel_up")
         );
         println!(
             "connected: {tun_ip}/{tun_prefix} on {} via {server_addr}; {}; DNS {}; IPv6 {}; kill switch {}",
@@ -817,12 +817,12 @@ fn run(o: RunOpts) -> Result<()> {
 /// assigns a different address after a reconnect (e.g. it lost its leases).
 #[cfg(target_os = "linux")]
 async fn watch_link(
-    link: std::sync::Arc<pqanon::supervisor::ManagedTunnel>,
-    tun: std::sync::Arc<pqanon::tun::AsyncTun>,
-    net: std::sync::Arc<std::sync::OnceLock<pqanon::netcfg::FullTunnel>>,
+    link: std::sync::Arc<shaip::supervisor::ManagedTunnel>,
+    tun: std::sync::Arc<shaip::tun::AsyncTun>,
+    net: std::sync::Arc<std::sync::OnceLock<shaip::netcfg::FullTunnel>>,
     prefix: u8,
 ) {
-    use pqanon::supervisor::LinkState;
+    use shaip::supervisor::LinkState;
     let mut changes = link.changes();
     let mut state = LinkState::Connected;
     let mut addr = link.status().info.assigned_v4;
@@ -856,15 +856,15 @@ async fn watch_link(
 }
 
 fn status_path() -> std::path::PathBuf {
-    std::env::var_os("PQANON_STATUS_FILE")
+    std::env::var_os("SHAIP_STATUS_FILE")
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::PathBuf::from("/run/pqanon.status"))
+        .unwrap_or_else(|| std::path::PathBuf::from("/run/shaip.status"))
 }
 
-/// Keep a small status file current for `pqanon status` / `disconnect`.
+/// Keep a small status file current for `shaip status` / `disconnect`.
 #[cfg(target_os = "linux")]
 async fn write_status(
-    link: std::sync::Arc<pqanon::supervisor::ManagedTunnel>,
+    link: std::sync::Arc<shaip::supervisor::ManagedTunnel>,
     server: std::net::SocketAddr,
     device: String,
 ) {
@@ -898,7 +898,7 @@ async fn write_status(
             st.rekeys,
             st.last_error.as_deref().unwrap_or("-"),
         );
-        let _ = pqanon::secure_write::write_private(&status_path(), text.as_bytes());
+        let _ = shaip::secure_write::write_private(&status_path(), text.as_bytes());
     }
 }
 
@@ -911,7 +911,7 @@ fn status_cmd() -> Result<()> {
         // The file is 0600: which server you use is nobody else's business on
         // a shared machine.
         Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
-            anyhow::bail!("the tunnel status is readable by root only: run `sudo pqanon status`")
+            anyhow::bail!("the tunnel status is readable by root only: run `sudo shaip status`")
         }
         Err(_) => {
             println!("state=NotRunning");
@@ -922,7 +922,7 @@ fn status_cmd() -> Result<()> {
 
 #[cfg(target_os = "linux")]
 fn disconnect_cmd() -> Result<()> {
-    let text = std::fs::read_to_string(status_path()).map_err(|_| anyhow::anyhow!("no running `pqanon run` (no status file)"))?;
+    let text = std::fs::read_to_string(status_path()).map_err(|_| anyhow::anyhow!("no running `shaip run` (no status file)"))?;
     let pid: i32 = text
         .lines()
         .find_map(|l| l.strip_prefix("pid="))
@@ -932,7 +932,7 @@ fn disconnect_cmd() -> Result<()> {
     if unsafe { libc::kill(pid, libc::SIGTERM) } != 0 {
         anyhow::bail!("could not signal pid {pid}: {}", std::io::Error::last_os_error());
     }
-    println!("asked pqanon (pid {pid}) to disconnect");
+    println!("asked shaip (pid {pid}) to disconnect");
     Ok(())
 }
 
@@ -943,7 +943,7 @@ fn disconnect_cmd() -> Result<()> {
 
 #[cfg(target_os = "linux")]
 fn down_cmd() -> Result<()> {
-    let done = pqanon::netcfg::cleanup_after_crash(false)?;
+    let done = shaip::netcfg::cleanup_after_crash(false)?;
     if done.is_empty() {
         println!("nothing to undo");
     }
@@ -971,8 +971,8 @@ async fn shutdown_signal() {
 /// TUN → tunnel.
 #[cfg(target_os = "linux")]
 async fn pump_up(
-    tun: std::sync::Arc<pqanon::tun::AsyncTun>,
-    link: std::sync::Arc<pqanon::supervisor::ManagedTunnel>,
+    tun: std::sync::Arc<shaip::tun::AsyncTun>,
+    link: std::sync::Arc<shaip::supervisor::ManagedTunnel>,
 ) -> Result<()> {
     let mut b = vec![0u8; 65536];
     loop {
@@ -986,8 +986,8 @@ async fn pump_up(
 /// Tunnel → TUN.
 #[cfg(target_os = "linux")]
 async fn pump_down(
-    tun: std::sync::Arc<pqanon::tun::AsyncTun>,
-    link: std::sync::Arc<pqanon::supervisor::ManagedTunnel>,
+    tun: std::sync::Arc<shaip::tun::AsyncTun>,
+    link: std::sync::Arc<shaip::supervisor::ManagedTunnel>,
 ) -> Result<()> {
     loop {
         let pkt = link.recv().await?;
@@ -999,7 +999,7 @@ async fn pump_down(
 /// tunnel address. A TUN-mode server's kernel answers with a real echo reply;
 /// an echo-mode server returns the request verbatim. No TUN device is needed.
 fn probe(config: &str, count: u16, timeout_ms: u64) -> Result<()> {
-    use pqanon::client::Tunnel;
+    use shaip::client::Tunnel;
     use std::net::Ipv4Addr;
     use std::time::{Duration, Instant};
 
@@ -1022,7 +1022,7 @@ fn probe(config: &str, count: u16, timeout_ms: u64) -> Result<()> {
         let id: u16 = rand::random();
         let mut answered = 0u16;
         for seq in 1..=count {
-            let req = pqanon::icmp::echo_request(src, dst, id, seq, b"pqanon probe");
+            let req = shaip::icmp::echo_request(src, dst, id, seq, b"shaip probe");
             let started = Instant::now();
             tunnel.send(&req).await?;
             let answer = tokio::time::timeout(wait, async {
@@ -1031,7 +1031,7 @@ fn probe(config: &str, count: u16, timeout_ms: u64) -> Result<()> {
                     if pkt == req {
                         return Ok::<_, anyhow::Error>("echoed by the server");
                     }
-                    if pqanon::icmp::parse_echo_reply(&pkt) == Some((dst, id, seq)) {
+                    if shaip::icmp::parse_echo_reply(&pkt) == Some((dst, id, seq)) {
                         return Ok("ICMP echo reply from the server's kernel");
                     }
                 }

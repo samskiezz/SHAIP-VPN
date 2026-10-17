@@ -1,4 +1,4 @@
-//! PQANON/1 common envelope — §5 of the specification.
+//! SHAIP/1 common envelope — §5 of the specification.
 //!
 //! Every cleartext datagram, at every layer, before obfuscation, uses the
 //! 22-byte header below. The header is passed to ChaCha20-Poly1305 as
@@ -58,7 +58,7 @@ impl MsgType {
     }
 }
 
-/// A fully-formed PQANON/1 envelope prior to (or after) AEAD.
+/// A fully-formed SHAIP/1 envelope prior to (or after) AEAD.
 #[derive(Debug, Clone)]
 pub struct Envelope {
     pub msg_type: MsgType,
@@ -150,7 +150,7 @@ impl Envelope {
     /// Serialize a handshake (pre-key) message as `header || payload`, with no
     /// AEAD. Handshake payloads carry public KEM keys and signatures, which are
     /// self-authenticating; confidentiality before a session key exists is not
-    /// required, and obfuscation (PQANON-OBF/1) still hides them on the wire.
+    /// required, and obfuscation (SHAIP-OBF/1) still hides them on the wire.
     pub fn to_plain(&self) -> Vec<u8> {
         let header = self.header_bytes();
         let mut out = Vec::with_capacity(HEADER_LEN + self.payload.len());

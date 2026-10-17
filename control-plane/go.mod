@@ -1,4 +1,4 @@
-module pqanon/control-plane
+module shaip/control-plane
 
 go 1.26.0
 

@@ -37,7 +37,7 @@ struct SettingsView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("SHAIP \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "") · core \(pqanonVersion)")
+                    Text("SHAIP \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "") · core \(shaipVersion)")
                         .mono(11, .medium).foregroundStyle(Tok.dim(0.55))
                     Text("Pre-release software. SHAIP VPN has not yet had an independent security audit.")
                         .ui(12, relativeTo: .footnote).foregroundStyle(Tok.dim(0.45)).fixedSize(horizontal: false, vertical: true)

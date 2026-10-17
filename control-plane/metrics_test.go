@@ -30,10 +30,10 @@ func TestMetricsEndpointExposesRealSeries(t *testing.T) {
 	// counters (orders/redemptions) only emit once labelled, so they are
 	// asserted in the payment-flow test, which actually redeems.
 	for _, want := range []string{
-		"pqanon_cp_requests_total",
-		"pqanon_cp_request_duration_seconds",
-		"pqanon_cp_auth_failures_total",
-		"pqanon_cp_uptime_seconds",
+		"shaip_cp_requests_total",
+		"shaip_cp_request_duration_seconds",
+		"shaip_cp_auth_failures_total",
+		"shaip_cp_uptime_seconds",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("/metrics missing series %q", want)

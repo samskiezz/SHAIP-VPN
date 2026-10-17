@@ -205,9 +205,9 @@ func TestUnlinkablePaymentFlow(t *testing.T) {
 	// and redeemed ok / was refused / was forged).
 	m := do(t, metricsRoutes(), "GET", "/metrics", "", nil).Body.String()
 	for _, want := range []string{
-		`pqanon_cp_orders_total{denom="month",rail="dev"}`,
-		`pqanon_cp_redemptions_total{denom="month",result="ok"}`,
-		`pqanon_cp_redemptions_total{denom="month",result="invalid"}`,
+		`shaip_cp_orders_total{denom="month",rail="dev"}`,
+		`shaip_cp_redemptions_total{denom="month",result="ok"}`,
+		`shaip_cp_redemptions_total{denom="month",result="invalid"}`,
 	} {
 		if !strings.Contains(m, want) {
 			t.Errorf("metrics missing %q", want)

@@ -24,38 +24,38 @@ retention no longer than you need.
 ## What exports metrics
 
 - **Control plane** (Go, `client_golang`) on `METRICS_ADDR`, `GET /metrics`:
-  - `pqanon_cp_requests_total{method,route,status}` — route labelled by chi
+  - `shaip_cp_requests_total{method,route,status}` — route labelled by chi
     pattern, not raw path, so cardinality stays bounded
-  - `pqanon_cp_errors_total{route}` (5xx)
-  - `pqanon_cp_request_duration_seconds` (histogram)
-  - `pqanon_cp_auth_failures_total`
-  - `pqanon_cp_uptime_seconds`
-  - `pqanon_cp_orders_total{rail,denom}` and
-    `pqanon_cp_redemptions_total{denom,result}` (ok/spent/invalid)
-- **Tunnel daemon** `pqanond --metrics 127.0.0.1:9100`:
-  - `pqanon_server_handshakes_ok_total`, `pqanon_server_handshakes_failed_total`,
-    `pqanon_server_handshakes_dropped_total` (at the half-open limit)
-  - `pqanon_server_sessions_established_total`, `pqanon_server_sessions_ended_total`,
-    `pqanon_server_sessions_active`, `pqanon_server_handshakes_pending`
-  - `pqanon_server_pool_exhausted_total` (sessions refused: no tunnel address free)
-  - `pqanon_server_data_packets_total`, `pqanon_server_keepalives_total`,
-    `pqanon_server_client_bytes_in_total`, `pqanon_server_client_bytes_out_total`
-  - `pqanon_server_spoofed_packets_total`, `pqanon_server_filtered_packets_total`
-  - `pqanon_server_decoy_probes_total` — increments when a prober completes a
+  - `shaip_cp_errors_total{route}` (5xx)
+  - `shaip_cp_request_duration_seconds` (histogram)
+  - `shaip_cp_auth_failures_total`
+  - `shaip_cp_uptime_seconds`
+  - `shaip_cp_orders_total{rail,denom}` and
+    `shaip_cp_redemptions_total{denom,result}` (ok/spent/invalid)
+- **Tunnel daemon** `shaipd --metrics 127.0.0.1:9100`:
+  - `shaip_server_handshakes_ok_total`, `shaip_server_handshakes_failed_total`,
+    `shaip_server_handshakes_dropped_total` (at the half-open limit)
+  - `shaip_server_sessions_established_total`, `shaip_server_sessions_ended_total`,
+    `shaip_server_sessions_active`, `shaip_server_handshakes_pending`
+  - `shaip_server_pool_exhausted_total` (sessions refused: no tunnel address free)
+  - `shaip_server_data_packets_total`, `shaip_server_keepalives_total`,
+    `shaip_server_client_bytes_in_total`, `shaip_server_client_bytes_out_total`
+  - `shaip_server_spoofed_packets_total`, `shaip_server_filtered_packets_total`
+  - `shaip_server_decoy_probes_total` — increments when a prober completes a
     TLS handshake against the decoy
-- **Mix daemon** `pqanon-mixd --metrics 127.0.0.1:9101`:
-  - `pqanon_mix_cells_forwarded_total`, `pqanon_mix_cover_cells_total`,
-    `pqanon_mix_cells_dropped_total`, `pqanon_mix_forward_failed_total`,
-    `pqanon_mix_payloads_delivered_total`
+- **Mix daemon** `shaip-mixd --metrics 127.0.0.1:9101`:
+  - `shaip_mix_cells_forwarded_total`, `shaip_mix_cover_cells_total`,
+    `shaip_mix_cells_dropped_total`, `shaip_mix_forward_failed_total`,
+    `shaip_mix_payloads_delivered_total`
 - Standard **node-exporter** and **postgres-exporter** for host and DB.
 
 The Rust daemons expose metrics over plain HTTP with a tiny built-in server
-(`pqanon::metrics`): a handful of lock-free atomic counters rendered in the
+(`shaip::metrics`): a handful of lock-free atomic counters rendered in the
 Prometheus text format, no extra dependency.
 
 ## Alerts
 
-`deploy/prometheus/rules/pqanon.yml` — all against the series above plus the
+`deploy/prometheus/rules/shaip.yml` — all against the series above plus the
 standard `up`, `node_*`, `pg_*`:
 
 - `InstanceDown` (any target), `PostgresDown`
@@ -70,9 +70,9 @@ Alertmanager delivery.
 ## Verifying it locally
 
 ```sh
-pqanond --listen 127.0.0.1:4455 --decoy 127.0.0.1:8444 --metrics 127.0.0.1:9100
-curl -s http://127.0.0.1:9100/metrics | grep pqanon_server_
-# probe the decoy, then watch pqanon_server_decoy_probes_total increment:
+shaipd --listen 127.0.0.1:4455 --decoy 127.0.0.1:8444 --metrics 127.0.0.1:9100
+curl -s http://127.0.0.1:9100/metrics | grep shaip_server_
+# probe the decoy, then watch shaip_server_decoy_probes_total increment:
 openssl s_client -connect 127.0.0.1:8444 -tls1_3 </dev/null
 curl -s http://127.0.0.1:9100/metrics | grep decoy_probes
 ```

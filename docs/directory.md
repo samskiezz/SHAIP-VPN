@@ -70,7 +70,7 @@ The control plane serves a live consensus at `GET /api/directory`. It is signed
 by its directory-authority key (`DIRECTORY_SIGNER`, or `KEY_DIR/directory.key`,
 HSM-capable) and lists only nodes with enough **paid, bonded stake** that are
 not jailed for equivocation (see [staking.md](staking.md)).
-`pqanon directory --url … --authority NAME=HEX` fetches it, verifies it with the
+`shaip directory --url … --authority NAME=HEX` fetches it, verifies it with the
 Rust verifier above, and lists the admitted nodes. The battery's `stake` stage
 checks a node appearing once bonded and disappearing once slashed.
 

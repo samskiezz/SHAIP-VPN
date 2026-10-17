@@ -10,7 +10,7 @@ pub fn enable(path: &std::path::Path) -> std::io::Result<()> {
          X-GNOME-Autostart-enabled=true\nHidden=false\n",
         path.display()
     );
-    std::fs::write(dir.join("pqanon.desktop"), unit)
+    std::fs::write(dir.join("shaip.desktop"), unit)
 }
 
 #[cfg(not(target_os = "linux"))]

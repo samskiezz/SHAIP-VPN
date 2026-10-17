@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Build the Rust core (crate pqanon-ffi: the same code `pqanon run` uses on
-# Linux) for iOS and package it as Frameworks/PQAnonFFI.xcframework, which the
+# Build the Rust core (crate shaip-ffi: the same code `shaip run` uses on
+# Linux) for iOS and package it as Frameworks/ShaipFFI.xcframework, which the
 # app and the tunnel extension link. The C header and module map come from
-# ffi/include, so Swift can `import PQAnonFFI`.
+# ffi/include, so Swift can `import ShaipFFI`.
 #
 # Run on a Mac with Xcode and rustup (https://rustup.rs). Also runs as the
 # tunnel target's pre-build phase; cargo only rebuilds what changed.
@@ -22,17 +22,17 @@ SIMS=(aarch64-apple-ios-sim x86_64-apple-ios)
 rustup target add "$DEVICE" "${SIMS[@]}" >/dev/null
 
 for t in "$DEVICE" "${SIMS[@]}"; do
-  cargo rustc --manifest-path "$ROOT/Cargo.toml" -p pqanon-ffi --lib --release --target "$t" --crate-type staticlib
+  cargo rustc --manifest-path "$ROOT/Cargo.toml" -p shaip-ffi --lib --release --target "$t" --crate-type staticlib
 done
 
 mkdir -p "$OUT/sim"
-lipo -create "$ROOT/target/aarch64-apple-ios-sim/release/libpqanon_ffi.a" \
-             "$ROOT/target/x86_64-apple-ios/release/libpqanon_ffi.a" \
-     -output "$OUT/sim/libpqanon_ffi.a"
+lipo -create "$ROOT/target/aarch64-apple-ios-sim/release/libshaip_ffi.a" \
+             "$ROOT/target/x86_64-apple-ios/release/libshaip_ffi.a" \
+     -output "$OUT/sim/libshaip_ffi.a"
 
-rm -rf "$OUT/PQAnonFFI.xcframework"
+rm -rf "$OUT/ShaipFFI.xcframework"
 xcodebuild -create-xcframework \
-  -library "$ROOT/target/$DEVICE/release/libpqanon_ffi.a" -headers "$ROOT/ffi/include" \
-  -library "$OUT/sim/libpqanon_ffi.a" -headers "$ROOT/ffi/include" \
-  -output "$OUT/PQAnonFFI.xcframework" >/dev/null
-echo "built $OUT/PQAnonFFI.xcframework"
+  -library "$ROOT/target/$DEVICE/release/libshaip_ffi.a" -headers "$ROOT/ffi/include" \
+  -library "$OUT/sim/libshaip_ffi.a" -headers "$ROOT/ffi/include" \
+  -output "$OUT/ShaipFFI.xcframework" >/dev/null
+echo "built $OUT/ShaipFFI.xcframework"

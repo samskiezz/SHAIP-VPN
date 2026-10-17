@@ -10,12 +10,12 @@ import (
 	"fmt"
 	"time"
 
-	"pqanon/control-plane/keystore"
+	"shaip/control-plane/keystore"
 )
 
 // Token is a compact EdDSA-signed bearer token: base64url(claims).base64url(sig)
 // where sig = Ed25519(server_key, base64url(claims)). This is the control
-// plane's own auth token (PQANON-CP/1); it is distinct from the tunnel's
+// plane's own auth token (SHAIP-CP/1); it is distinct from the tunnel's
 // handshake authentication. It carries an opaque subject and an expiry, and
 // nothing about the person.
 type Token struct {

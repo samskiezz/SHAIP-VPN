@@ -1,6 +1,6 @@
 //! Minimal IPv4 ICMP echo packets, for probing a tunnel end to end.
 //!
-//! `pqanon probe` sends an echo request through the tunnel to the server's
+//! `shaip probe` sends an echo request through the tunnel to the server's
 //! tunnel address. A TUN-mode server hands it to its kernel, which answers with
 //! a real echo reply that comes back through the tunnel. An echo-mode server
 //! returns the request verbatim. Checksums are computed per RFC 791/792 so a
@@ -77,7 +77,7 @@ mod tests {
     fn checksums_verify_and_a_reply_parses() {
         let src = Ipv4Addr::new(10, 77, 0, 2);
         let dst = Ipv4Addr::new(10, 77, 0, 1);
-        let req = echo_request(src, dst, 0x1234, 7, b"pqanon probe");
+        let req = echo_request(src, dst, 0x1234, 7, b"shaip probe");
         // A correct header checksums to zero over itself.
         assert_eq!(checksum(&req[..20]), 0);
         assert_eq!(checksum(&req[20..]), 0);

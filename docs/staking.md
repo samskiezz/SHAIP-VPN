@@ -16,11 +16,11 @@ Each property below is enforced by code and tested, not just described.
 
 Each epoch a node publishes **one** descriptor: its id, the epoch, its address,
 its mix (X25519) and node (Ed25519) keys, its capacity and its region. The
-descriptor is signed with the node's Ed25519 key, which for `pqanond` is its
+descriptor is signed with the node's Ed25519 key, which for `shaipd` is its
 identity key:
 
 ```bash
-pqanond --identity /var/lib/pqanon/pqanond.id --sign-descriptor \
+shaipd --identity /var/lib/shaip/shaipd.id --sign-descriptor \
   --node-id <id from POST /api/nodes> --epoch 42 --advertise 203.0.113.5:443 \
   --region CH --capacity-mbps 500 [--mix-pub <hex>]
 #  PQD1.<base64url(body)>.<base64url(sig)>
@@ -56,7 +56,7 @@ The directory is signed by the control plane acting as a directory authority.
 Its key (`DIRECTORY_SIGNER`, or `KEY_DIR/directory.key`) is resolved like every
 other key and can live in an HSM. `GET /api/enroll/keys` publishes
 `directory_authority` and `directory_pub` for pinning, and
-`pqanon directory --url … --authority NAME=HEX` verifies and lists the nodes.
+`shaip directory --url … --authority NAME=HEX` verifies and lists the nodes.
 
 ## Tested
 
@@ -76,7 +76,7 @@ other key and can live in an HSM. `GET /api/enroll/keys` publishes
   pool deadlock: a transaction took a second pool connection to check existence,
   which wedges once concurrent credits exhaust the pool. Every in-transaction
   query now uses the transaction's own connection.
-- Battery stage `stake` (real Go control plane + real `pqanond` keys):
+- Battery stage `stake` (real Go control plane + real `shaipd` keys):
   - self-declared stake is refused;
   - an unbonded node is absent from the **Rust-verified** directory;
   - a non-operator cannot bond;

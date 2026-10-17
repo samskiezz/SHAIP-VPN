@@ -1,9 +1,9 @@
-// Package enrollment implements the PQANON one-click device-enrollment crypto:
+// Package enrollment implements the SHAIP one-click device-enrollment crypto:
 // a compact, signed enrollment token and a signed device certificate.
 //
 // An operator issues an enrollment token (authorizing one device to join an
 // account) and hands it to the device out of band — a QR code or a
-// `pqanon://enroll?t=...` deep link. The device verifies that token against a
+// `shaip://enroll?t=...` deep link. The device verifies that token against a
 // pinned enrollment-authority key, generates its own identity keypair, and
 // presents the public half; the control plane then issues a device certificate
 // binding that public key to the account, signed by a device-CA key the servers
@@ -37,16 +37,16 @@ import (
 // Wire labels (the first dot-separated field). They route parsing; the
 // security-relevant domain separation is the magic inside the signed body.
 const (
-	LabelEnroll = "PQE1" // PQANON enrollment token, v1
-	LabelCert   = "PQC1" // PQANON device certificate, v1
+	LabelEnroll = "PQE1" // SHAIP enrollment token, v1
+	LabelCert   = "PQC1" // SHAIP device certificate, v1
 )
 
 // Domain-separation magics, carried inside the signed body so a signature over
 // one artifact type can never be reinterpreted as the other even if the outer
 // label is swapped.
 const (
-	magicEnroll = "PQANON-ENROLL-V1"
-	magicCert   = "PQANON-DEVCERT-V1"
+	magicEnroll = "SHAIP-ENROLL-V1"
+	magicCert   = "SHAIP-DEVCERT-V1"
 )
 
 // Version is the body format version.
@@ -382,5 +382,5 @@ func VerifyDeviceCert(ca ed25519.PublicKey, cert string, now time.Time) (CertCla
 
 // EnrollURL wraps a token in the deep-link form handed to a device.
 func EnrollURL(token string) string {
-	return "pqanon://enroll?t=" + token + "&v=1"
+	return "shaip://enroll?t=" + token + "&v=1"
 }

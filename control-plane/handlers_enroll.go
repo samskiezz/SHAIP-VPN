@@ -2,7 +2,7 @@ package main
 
 // One-click device enrollment (docs/enrollment.md).
 //
-//	POST   /api/enroll/issue  (auth)   a one-time token and its pqanon:// deep link
+//	POST   /api/enroll/issue  (auth)   a one-time token and its shaip:// deep link
 //	POST   /api/enroll/claim  (public) a device certificate, for a valid token plus
 //	                                   proof of possession of the device's key
 //	GET    /api/enroll/keys   (public) the enrollment-authority and device-CA public
@@ -27,7 +27,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"pqanon/control-plane/enrollment"
+	"shaip/control-plane/enrollment"
 )
 
 const (
@@ -59,7 +59,7 @@ func deviceLabel(name string) string {
 // in any other protocol that key signs. Matched byte-for-byte by the Rust
 // client (Identity::sign_enrollment_claim).
 func ClaimPoPMessage(token string) []byte {
-	return []byte("PQANON-ENROLL-CLAIM-V1:" + token)
+	return []byte("SHAIP-ENROLL-CLAIM-V1:" + token)
 }
 
 func (s *Server) enrollmentReady(w http.ResponseWriter) bool {

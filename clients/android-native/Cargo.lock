@@ -1362,56 +1362,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pqanon-android-jni"
-version = "0.1.0"
-dependencies = [
- "hex",
- "jni",
- "pqanon-client",
-]
-
-[[package]]
-name = "pqanon-client"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "argon2",
- "base64 0.23.1",
- "blind-rsa-signatures",
- "chacha20 0.9.1",
- "chacha20poly1305",
- "clap",
- "ed25519-dalek",
- "hex",
- "hkdf",
- "hmac",
- "ipnet",
- "libc",
- "ml-dsa",
- "ml-kem",
- "p256",
- "rand 0.8.8",
- "rand_core 0.6.4",
- "rcgen",
- "rsa 0.9.10",
- "rustls",
- "rustls-pemfile",
- "rustls-pki-types",
- "serde",
- "serde_json",
- "sha2",
- "thiserror",
- "tokio",
- "tokio-rustls",
- "toml",
- "tracing",
- "tracing-subscriber",
- "ureq",
- "x25519-dalek",
- "zeroize",
-]
-
-[[package]]
 name = "primeorder"
 version = "0.13.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1764,6 +1714,56 @@ checksum = "77fd7028345d415a4034cf8777cd4f8ab1851274233b45f84e3d955502d93874"
 dependencies = [
  "digest 0.10.7",
  "keccak",
+]
+
+[[package]]
+name = "shaip-android-jni"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "jni",
+ "shaip-client",
+]
+
+[[package]]
+name = "shaip-client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "argon2",
+ "base64 0.23.1",
+ "blind-rsa-signatures",
+ "chacha20 0.9.1",
+ "chacha20poly1305",
+ "clap",
+ "ed25519-dalek",
+ "hex",
+ "hkdf",
+ "hmac",
+ "ipnet",
+ "libc",
+ "ml-dsa",
+ "ml-kem",
+ "p256",
+ "rand 0.8.8",
+ "rand_core 0.6.4",
+ "rcgen",
+ "rsa 0.9.10",
+ "rustls",
+ "rustls-pemfile",
+ "rustls-pki-types",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
+ "tokio",
+ "tokio-rustls",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "ureq",
+ "x25519-dalek",
+ "zeroize",
 ]
 
 [[package]]

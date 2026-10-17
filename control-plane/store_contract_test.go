@@ -3,7 +3,7 @@
 package main
 
 // One behavioural contract for every Store implementation. It always runs
-// against MemStore; against Postgres it runs when PQANON_TEST_DATABASE_URL
+// against MemStore; against Postgres it runs when SHAIP_TEST_DATABASE_URL
 // points at a database (the master battery provisions a throwaway PostgreSQL
 // cluster and fails its stage if the Postgres run was skipped). Until this
 // suite existed, no test exercised PgStore at all.
@@ -25,9 +25,9 @@ func TestStoreContractMemory(t *testing.T) {
 }
 
 func TestStoreContractPostgres(t *testing.T) {
-	url := os.Getenv("PQANON_TEST_DATABASE_URL")
+	url := os.Getenv("SHAIP_TEST_DATABASE_URL")
 	if url == "" {
-		t.Skip("set PQANON_TEST_DATABASE_URL to run the contract against Postgres")
+		t.Skip("set SHAIP_TEST_DATABASE_URL to run the contract against Postgres")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()

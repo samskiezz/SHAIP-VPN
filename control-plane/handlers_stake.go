@@ -28,8 +28,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"pqanon/control-plane/directory"
-	"pqanon/control-plane/staking"
+	"shaip/control-plane/directory"
+	"shaip/control-plane/staking"
 )
 
 const maxBondSats = 21_000_000 * 100_000_000 // all the bitcoin there is

@@ -24,7 +24,7 @@ A malformed spec fails startup; it never falls back to an ephemeral key.
 ### Key specs (`control-plane/keystore`)
 
 ```
-file:/var/lib/pqanon/keys/crl.key     Ed25519 seed file (base64 or 32 raw bytes);
+file:/var/lib/shaip/keys/crl.key     Ed25519 seed file (base64 or 32 raw bytes);
                                       created 0600; refused if group/world-accessible
 env:TOKEN_SIGNING_KEY                 base64 32-byte seed in an environment variable
 pkcs11:token=<label>;object=<label>?module-path=<.so>&pin-env=<VAR>[&create=1]
@@ -49,10 +49,10 @@ can read the key out. On open it signs a self-test message and verifies it.
 
 ```bash
 # Example with SoftHSM2 (a software token that speaks real PKCS#11):
-softhsm2-util --init-token --free --label pqanon --pin "$PIN" --so-pin "$SO_PIN"
-export PQANON_HSM_PIN="$PIN"
-export CRL_SIGNER='pkcs11:token=pqanon;object=crl?module-path=/usr/lib/softhsm/libsofthsm2.so&pin-env=PQANON_HSM_PIN&create=1'
-./control-plane      # logs: signing keys: token=... crl=pkcs11:token=pqanon;object=crl?...
+softhsm2-util --init-token --free --label shaip --pin "$PIN" --so-pin "$SO_PIN"
+export SHAIP_HSM_PIN="$PIN"
+export CRL_SIGNER='pkcs11:token=shaip;object=crl?module-path=/usr/lib/softhsm/libsofthsm2.so&pin-env=SHAIP_HSM_PIN&create=1'
+./control-plane      # logs: signing keys: token=... crl=pkcs11:token=shaip;object=crl?...
 ```
 
 For a hardware HSM, use the vendor's module path. The PKCS#11 backend needs a
@@ -78,10 +78,10 @@ the CRL key is unchanged.
 
 | Binary | Flag | Key |
 |---|---|---|
-| `pqanond` | `--identity <file>` | hybrid ML-DSA-65 + Ed25519 server identity |
-| `pqanond` | `--print-public` | prints `identity_id`, `server_ml_dsa_pub`, `server_ed_pub` — the client's `[server]` pins — and exits |
-| `pqanon-mixd` | `--key <file>` | X25519 onion key (published in the directory) |
-| `pqanon` | `keygen --out <file>` / `[client].identity` | client identity (what a server allow-lists) |
+| `shaipd` | `--identity <file>` | hybrid ML-DSA-65 + Ed25519 server identity |
+| `shaipd` | `--print-public` | prints `identity_id`, `server_ml_dsa_pub`, `server_ed_pub` — the client's `[server]` pins — and exits |
+| `shaip-mixd` | `--key <file>` | X25519 onion key (published in the directory) |
+| `shaip` | `keygen --out <file>` / `[client].identity` | client identity (what a server allow-lists) |
 
 The files are created 0600 on first run. They are refused if group- or
 world-accessible, and every load is validated: an identity load re-signs and

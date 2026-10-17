@@ -1,13 +1,13 @@
 import Foundation
-import PQAnonFFI
+import ShaipFFI
 import SHAIPCore
 
 extension TunnelSnapshot {
-    /// A snapshot of the Rust core's status (`pqanon_session_status`), plus
+    /// A snapshot of the Rust core's status (`shaip_session_status`), plus
     /// what the extension itself counts.
-    init(status st: PqanonStatus, lastError: String?, serverAddress: String?, ipv6Dropped: UInt64, at now: Date = Date()) {
-        let state: State = st.state == PQANON_STATE_CONNECTED ? .connected
-            : st.state == PQANON_STATE_RECONNECTING ? .reconnecting : .stopped
+    init(status st: ShaipStatus, lastError: String?, serverAddress: String?, ipv6Dropped: UInt64, at now: Date = Date()) {
+        let state: State = st.state == SHAIP_STATE_CONNECTED ? .connected
+            : st.state == SHAIP_STATE_RECONNECTING ? .reconnecting : .stopped
         let identity = withUnsafeBytes(of: st.server_identity) { raw in raw.map { String(format: "%02x", $0) }.joined() }
         self.init(
             state: state,

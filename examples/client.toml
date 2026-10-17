@@ -1,5 +1,5 @@
-# SHAIP VPN client config. Copy to ~/.pqanon/client.toml and run:
-#   sudo pqanon run --config ~/.pqanon/client.toml        (add --kill-switch to fail closed)
+# SHAIP VPN client config. Copy to ~/.shaip/client.toml and run:
+#   sudo shaip run --config ~/.shaip/client.toml        (add --kill-switch to fail closed)
 # The iOS app imports this same file (Setup → Import config file).
 #
 # Only the keys below are read. Routing, DNS, MTU and keepalive come from the
@@ -7,24 +7,24 @@
 
 [client]
 # Persistent identity (ML-DSA-65 + Ed25519), created 0600 on first use (or by
-# `pqanon keygen --out …`). Omit for a throwaway per-run identity, which only
+# `shaip keygen --out …`). Omit for a throwaway per-run identity, which only
 # open demo servers accept.
-identity    = "/home/user/.pqanon/client.id"
-# Device certificate from `pqanon enroll`, needed by servers that admit
+identity    = "/home/user/.shaip/client.id"
+# Device certificate from `shaip enroll`, needed by servers that admit
 # enrolled devices only.
-device_cert = "/home/user/.pqanon/client.id.cert"
-tun_device  = "pqanon-c0"
+device_cert = "/home/user/.shaip/client.id.cert"
+tun_device  = "shaip-c0"
 # Used only if the server assigns no address (an echo-mode test server).
 tun_address = "10.77.0.2/24"
 
 [server]
 address           = "vpn.example.com:443"
-# Pins: paste the output of `pqanond --identity <file> --print-public` on the
+# Pins: paste the output of `shaipd --identity <file> --print-public` on the
 # server. The client refuses any server that can't prove it holds these keys.
 server_ml_dsa_pub = "hex..."
 server_ed_pub     = "hex..."
 
-# Optional, for the iOS app's device enrollment (the CLI uses `pqanon enroll`).
+# Optional, for the iOS app's device enrollment (the CLI uses `shaip enroll`).
 # [enroll]
 # control_plane = "https://cp.example.com"
 # authority_key = "hex..."   # the control plane's enroll_authority_pub

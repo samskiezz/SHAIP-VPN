@@ -1,4 +1,4 @@
-//! Egress NAT for TUN mode (`pqanond --nat IFACE`): what turns "packets reach
+//! Egress NAT for TUN mode (`shaipd --nat IFACE`): what turns "packets reach
 //! the server" into "packets reach the internet".
 //!
 //! Enables IPv4 forwarding and installs one nftables table that
@@ -75,7 +75,7 @@ pub fn forget_flows(ips: &[Ipv4Addr]) {
 /// nftables table name for a TUN device (identifier-safe).
 pub fn table_name(tun: &str) -> String {
     let safe: String = tun.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
-    format!("pqanon_nat_{safe}")
+    format!("shaip_nat_{safe}")
 }
 
 /// The ruleset for `subnet` on `tun`, leaving through `egress`.
@@ -139,12 +139,12 @@ mod tests {
 
     #[test]
     fn ruleset_masquerades_only_the_tunnel_subnet() {
-        let r = ruleset("pqanon-e2e0", Ipv4Addr::new(10, 77, 0, 0), 24, "eth0");
-        assert!(r.contains("table ip pqanon_nat_pqanon_e2e0 {"));
+        let r = ruleset("shaip-e2e0", Ipv4Addr::new(10, 77, 0, 0), 24, "eth0");
+        assert!(r.contains("table ip shaip_nat_shaip_e2e0 {"));
         assert!(r.contains("ip saddr 10.77.0.0/24 oifname \"eth0\" masquerade"));
         assert!(r.contains("ct state established,related accept"));
         // Nothing unsolicited is forwarded into the tunnel.
         let fwd = r.split("chain forward").nth(1).unwrap();
-        assert!(fwd.find("established,related").unwrap() < fwd.find("oifname \"pqanon-e2e0\" drop").unwrap());
+        assert!(fwd.find("established,related").unwrap() < fwd.find("oifname \"shaip-e2e0\" drop").unwrap());
     }
 }

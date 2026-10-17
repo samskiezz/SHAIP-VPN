@@ -23,13 +23,13 @@ receivers:
   - name: 'default'
     slack_configs:
       - api_url: '${SLACK_WEBHOOK_URL}'
-        channel: '#pqanon-alerts'
+        channel: '#shaip-alerts'
         send_resolved: true
 
   - name: 'slack-incidents'
     slack_configs:
       - api_url: '${SLACK_WEBHOOK_URL}'
-        channel: '#pqanon-incidents'
+        channel: '#shaip-incidents'
         title: '🚨 {{ .GroupLabels.alertname }}'
         text: "{{ range .Alerts }}{{ .Annotations.summary }}\n{{ end }}"
         send_resolved: true
@@ -37,7 +37,7 @@ receivers:
   - name: 'slack-warnings'
     slack_configs:
       - api_url: '${SLACK_WEBHOOK_URL}'
-        channel: '#pqanon-warnings'
+        channel: '#shaip-warnings'
         send_resolved: true
 
   - name: 'pager'

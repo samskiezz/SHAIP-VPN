@@ -1,5 +1,5 @@
 //! Node descriptors (§ staking): the statement a node signs about itself each
-//! epoch — its address and keys — and the signer `pqanond --sign-descriptor`
+//! epoch — its address and keys — and the signer `shaipd --sign-descriptor`
 //! uses.
 //!
 //! A node publishes **one** descriptor per epoch. Two different descriptors for
@@ -15,7 +15,7 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64URL, Engine as _};
 
 /// Wire label of a descriptor.
 pub const LABEL: &str = "PQD1";
-const MAGIC: &[u8] = b"PQANON-NODEDESC-V1";
+const MAGIC: &[u8] = b"SHAIP-NODEDESC-V1";
 const VERSION: u8 = 1;
 
 /// What a node asserts about itself for one epoch.
@@ -123,7 +123,7 @@ mod tests {
         // domain prefix, so it cannot be turned into a general-purpose oracle.
         let id = Identity::generate();
         assert!(id.sign_node_descriptor(b"\x00\x00\x04\xa0 a transcript").is_err());
-        assert!(id.sign_node_descriptor(b"PQANON-ENROLL-CLAIM-V1:x").is_err());
+        assert!(id.sign_node_descriptor(b"SHAIP-ENROLL-CLAIM-V1:x").is_err());
         assert!(id.sign_node_descriptor(&body_prefix()).is_ok());
     }
 }

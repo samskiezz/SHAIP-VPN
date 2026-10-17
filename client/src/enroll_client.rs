@@ -1,6 +1,6 @@
 //! The device side of one-click enrollment (docs/enrollment.md).
 //!
-//! `pqanon enroll <pqanon://enroll?t=…>`:
+//! `shaip enroll <shaip://enroll?t=…>`:
 //! 1. verifies the token against the **pinned** enrollment-authority key before
 //!    contacting anyone — a forged or tampered link is refused locally;
 //! 2. loads (or creates) this device's persistent identity;
@@ -81,7 +81,7 @@ pub fn enroll(
     name: &str,
     cert_out: Option<&Path>,
 ) -> Result<Enrolled> {
-    let token = if link.starts_with("pqanon://") {
+    let token = if link.starts_with("shaip://") {
         enrollment::parse_enroll_url(link).map_err(|e| anyhow!("not an enrollment link: {e}"))?
     } else {
         link.trim().to_string()

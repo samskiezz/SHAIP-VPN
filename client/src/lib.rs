@@ -1,11 +1,11 @@
-//! SHAIP VPN client core library (`pqanon`).
+//! SHAIP VPN client core library (`shaip`).
 //!
-//! Implements the PQANON/1 protocol family:
-//! - [`wire`]      — PQANON/1 common envelope (AEAD framing).
-//! - [`handshake`] — PQANON-HS/1 hybrid post-quantum handshake.
-//! - [`obf`]       — PQANON-OBF/1 header morphing + length shaping.
-//! - [`transport`] — PQANON-UDP/1 reliability + custom congestion control.
-//! - [`mix`]       — PQANON-MIX/1 fixed-size onion cells.
+//! Implements the SHAIP/1 protocol family:
+//! - [`wire`]      — SHAIP/1 common envelope (AEAD framing).
+//! - [`handshake`] — SHAIP-HS/1 hybrid post-quantum handshake.
+//! - [`obf`]       — SHAIP-OBF/1 header morphing + length shaping.
+//! - [`transport`] — SHAIP-UDP/1 reliability + custom congestion control.
+//! - [`mix`]       — SHAIP-MIX/1 fixed-size onion cells.
 //! - [`routing`]   — fast/anon per-domain routing policy.
 //!
 //! All cryptography is built on standard-library / RustCrypto primitives

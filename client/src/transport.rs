@@ -1,4 +1,4 @@
-//! PQANON-UDP/1 — reliability, RTT estimation, and custom BBR-inspired
+//! SHAIP-UDP/1 — reliability, RTT estimation, and custom BBR-inspired
 //! congestion control (§8).
 //!
 //! The pieces here are deterministic and unit-tested: the anti-replay receive

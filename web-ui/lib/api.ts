@@ -4,7 +4,7 @@ export const API_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
 // The hosted preview (web-ui/preview) runs the control plane itself in the
-// page, compiled to WebAssembly, and installs window.pqanonAPI; requests then
+// page, compiled to WebAssembly, and installs window.shaipAPI; requests then
 // go to it instead of the network.
 type InPageAPI = (
   method: string,
@@ -15,7 +15,7 @@ type InPageAPI = (
 
 function inPageAPI(): InPageAPI | null {
   if (typeof window === "undefined") return null;
-  const f = (window as unknown as { pqanonAPI?: InPageAPI }).pqanonAPI;
+  const f = (window as unknown as { shaipAPI?: InPageAPI }).shaipAPI;
   return typeof f === "function" ? f : null;
 }
 

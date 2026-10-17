@@ -7,21 +7,21 @@ COPY Cargo.toml Cargo.lock ./
 COPY client ./client
 COPY server ./server
 COPY ffi ./ffi
-RUN cargo build --release --locked -p pqanon-server -p pqanon-client
+RUN cargo build --release --locked -p shaip-server -p shaip-client
 
 FROM debian:bookworm-slim
-# nftables: `pqanond --nat` installs its masquerade + MSS-clamp rules with nft.
+# nftables: `shaipd --nat` installs its masquerade + MSS-clamp rules with nft.
 # conntrack: it deletes a freed tunnel address's NAT state with conntrack, so
 # --nat refuses to start without it.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends nftables conntrack ca-certificates \
  && rm -rf /var/lib/apt/lists/* \
- && useradd -r -s /usr/sbin/nologin pqanon \
- && mkdir -p /var/lib/pqanon && chown pqanon /var/lib/pqanon
-COPY --from=build /src/target/release/pqanond      /usr/local/bin/pqanond
-COPY --from=build /src/target/release/pqanon-mixd  /usr/local/bin/pqanon-mixd
-COPY --from=build /src/target/release/pqanon       /usr/local/bin/pqanon
-# Unprivileged by default (echo mode, pqanon-mixd). The VPN server (--tun --nat)
+ && useradd -r -s /usr/sbin/nologin shaip \
+ && mkdir -p /var/lib/shaip && chown shaip /var/lib/shaip
+COPY --from=build /src/target/release/shaipd      /usr/local/bin/shaipd
+COPY --from=build /src/target/release/shaip-mixd  /usr/local/bin/shaip-mixd
+COPY --from=build /src/target/release/shaip       /usr/local/bin/shaip
+# Unprivileged by default (echo mode, shaip-mixd). The VPN server (--tun --nat)
 # needs CAP_NET_ADMIN and /dev/net/tun; docker-compose.yml runs it that way.
-USER pqanon
-ENTRYPOINT ["/usr/local/bin/pqanond"]
+USER shaip
+ENTRYPOINT ["/usr/local/bin/shaipd"]

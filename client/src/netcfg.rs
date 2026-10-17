@@ -1,6 +1,6 @@
 //! Linux network configuration for a full-tunnel client: routes, DNS, and
 //! leak blocking. Everything changed here is recorded and undone on drop (and
-//! by `pqanon down` after a crash).
+//! by `shaip down` after a crash).
 //!
 //! - **Routes.** A host route keeps the tunnel's own UDP flow on the physical
 //!   network (via the gateway that served it before), then `0.0.0.0/1` and
@@ -17,7 +17,7 @@
 //! - **Leaks.** The tunnel carries IPv4 only, so IPv6 is rejected while it is
 //!   up (nftables). With the kill switch, *all* traffic outside the tunnel is
 //!   rejected except the tunnel's own flow and DHCP, and the rules stay if the
-//!   client dies — fail closed — until it reconnects or `pqanon down` runs.
+//!   client dies — fail closed — until it reconnects or `shaip down` runs.
 
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -31,7 +31,7 @@ const RTF_GATEWAY: libc::c_ushort = 0x0002;
 const RTF_HOST: libc::c_ushort = 0x0004;
 
 /// nftables table holding the client's leak-blocking rules.
-pub const NFT_TABLE: &str = "pqanon_client";
+pub const NFT_TABLE: &str = "shaip_client";
 
 /// `struct rtentry` from `<linux/route.h>` (the kernel layout; 120 bytes on
 /// 64-bit targets).
@@ -224,12 +224,12 @@ fn run(bin: &str, args: &[&str], stdin: Option<&str>) -> io::Result<()> {
     Ok(())
 }
 
-/// Where crash-recovery state lives (`PQANON_STATE_DIR`, default
-/// `/var/lib/pqanon`): the original resolv.conf and the routes to undo.
+/// Where crash-recovery state lives (`SHAIP_STATE_DIR`, default
+/// `/var/lib/shaip`): the original resolv.conf and the routes to undo.
 pub fn state_dir() -> PathBuf {
-    std::env::var_os("PQANON_STATE_DIR")
+    std::env::var_os("SHAIP_STATE_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/var/lib/pqanon"))
+        .unwrap_or_else(|| PathBuf::from("/var/lib/shaip"))
 }
 
 fn resolv_backup() -> PathBuf {
@@ -279,7 +279,7 @@ pub fn set_dns(dev: &str, server: Ipv4Addr) -> io::Result<DnsGuard> {
     crate::secure_write::write_private(&resolv_backup(), &original)
         .map_err(|e| io::Error::other(format!("saving {}: {e:#}", resolv_backup().display())))?;
     let ours = format!(
-        "# Written by pqanon while the tunnel is up; the original is restored on disconnect.\n\
+        "# Written by shaip while the tunnel is up; the original is restored on disconnect.\n\
          nameserver {server}\noptions edns0\n"
     );
     // In place (not rename): /etc/resolv.conf may be a bind mount.
@@ -311,7 +311,7 @@ impl Drop for DnsGuard {
             }
             DnsBackend::File => {
                 if let Err(e) = restore_resolv_conf() {
-                    tracing::error!(error = %e, "could not restore /etc/resolv.conf (run `pqanon down`)");
+                    tracing::error!(error = %e, "could not restore /etc/resolv.conf (run `shaip down`)");
                 }
             }
         }
@@ -384,7 +384,7 @@ impl Drop for FirewallGuard {
     fn drop(&mut self) {
         if self.removed_on_drop {
             if let Err(e) = remove_firewall() {
-                tracing::error!(error = %e, "could not remove the leak-blocking rules (run `pqanon down`)");
+                tracing::error!(error = %e, "could not remove the leak-blocking rules (run `shaip down`)");
             }
         }
     }

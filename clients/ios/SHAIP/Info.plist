@@ -9,7 +9,7 @@
   <!-- Let animations (the 3-D scenes) run above 60 Hz on ProMotion iPhones. -->
   <key>CADisableMinimumFrameDurationOnPhone</key>
   <true/>
-  <!-- pqanon://enroll?t=… links from the control plane open the enrollment sheet. -->
+  <!-- shaip://enroll?t=… links from the control plane open the enrollment sheet. -->
   <key>CFBundleURLTypes</key>
   <array>
     <dict>
@@ -17,7 +17,7 @@
       <string>com.shaip.vpn.enroll</string>
       <key>CFBundleURLSchemes</key>
       <array>
-        <string>pqanon</string>
+        <string>shaip</string>
       </array>
     </dict>
   </array>

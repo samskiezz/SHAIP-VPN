@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Cross-compile the JNI bridge (libpqanon_jni.so) for the Android ABIs and drop
+# Cross-compile the JNI bridge (libshaip_jni.so) for the Android ABIs and drop
 # the result into the app's jniLibs. Requires: the Android NDK, the Rust Android
 # targets, and cargo-ndk.
 #

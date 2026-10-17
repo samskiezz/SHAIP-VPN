@@ -120,7 +120,7 @@ function parseConfig(text) {
   return c;
 }
 // identity_id = SHA-256(pq_pub || ed_pub)[0..16] (client/src/handshake.rs): the same value
-// pqanond --print-public prints, so the fingerprint shown matches the operator's.
+// shaipd --print-public prints, so the fingerprint shown matches the operator's.
 async function identityOf(c) {
   try {
     const hex = c.mlDsaPub + c.edPub, bytes = new Uint8Array(hex.length / 2);
@@ -344,7 +344,7 @@ function build() {
     <div class="scroll"><div class="content">
       <div class="title-row"><h1 class="large-title">Server</h1></div>
       <div class="card glass-card">
-        <div class="row"><span id="s-pill"></span><span class="chip signal">PQANON/1</span></div>
+        <div class="row"><span id="s-pill"></span><span class="chip signal">SHAIP/1</span></div>
         <div class="server-name" id="s-name"></div>
         <div class="kv"><span>ADDRESS</span><span id="s-addr"></span></div>
         <div class="kv"><span>CONNECTED TO</span><span id="s-to"></span></div>
@@ -365,7 +365,7 @@ function build() {
     <div class="scroll"><div class="content">
       <div class="title-row"><h1 class="large-title">Settings</h1></div>
       <div class="proto glass-card">
-        <div class="h"><b>PQANON/1</b><span class="chip signal" style="font-size:8px;letter-spacing:.14em">THE ONLY PROTOCOL</span></div>
+        <div class="h"><b>SHAIP/1</b><span class="chip signal" style="font-size:8px;letter-spacing:.14em">THE ONLY PROTOCOL</span></div>
         <p>Hybrid post-quantum handshake: the session key comes from both ML-KEM-768 and X25519, so breaking one is not enough. Both sides sign with ML-DSA-65 and Ed25519. Traffic is sealed with ChaCha20-Poly1305 and padded to common packet sizes.</p>
         <div class="chips">${['UDP', 'ML-KEM-768 + X25519', 'ML-DSA-65 + Ed25519', 'ChaCha20-Poly1305'].map(c => `<span class="chip">${c}</span>`).join('')}</div>
       </div>
@@ -388,7 +388,7 @@ function build() {
     <canvas data-gfx="net" data-cy="0.5" data-r="0.4" data-art="1" aria-hidden="true"></canvas>
     <div class="fade"></div><div class="floor"></div>
     <div class="stack">
-      <div class="live"><span class="dot" style="box-shadow:0 0 10px currentColor"></span>PQANON/1 · POST-QUANTUM VPN</div>
+      <div class="live"><span class="dot" style="box-shadow:0 0 10px currentColor"></span>SHAIP/1 · POST-QUANTUM VPN</div>
       <h2>Your traffic, encrypted to a server you choose.</h2>
       <p>Import the config your server's operator gave you. Traffic and DNS lookups between this iPhone and that server are encrypted. The operator can still see where your traffic goes.</p>
       <div class="warn-text" id="setup-error" hidden></div>
@@ -476,7 +476,7 @@ function openLayer(kind) {
     L.innerHTML = sheet('Server config',
       `<button type="button" data-act="close">Cancel</button><button type="button" data-act="file" aria-label="Choose a file">${icon('folder', 21, 'currentColor', 1.8)}</button>`,
       `<button type="button" data-act="save" id="paste-save" disabled>Save</button>`,
-      `<p>Paste the client config from your server's operator. It needs the [server] address, server_ml_dsa_pub and server_ed_pub (from pqanond --print-public).</p>
+      `<p>Paste the client config from your server's operator. It needs the [server] address, server_ml_dsa_pub and server_ed_pub (from shaipd --print-public).</p>
        <textarea id="paste-text" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Client config" placeholder="[server]&#10;address = &quot;vpn.example.net:443&quot;&#10;server_ml_dsa_pub = &quot;…&quot;&#10;server_ed_pub = &quot;…&quot;"></textarea>
        <div class="warn-text" id="paste-error" hidden></div>`);
     const ta = $('#paste-text'), save = $('#paste-save');
@@ -494,7 +494,7 @@ function openLayer(kind) {
       `<button type="button" data-act="close" id="enroll-close">Not now</button>`,
       `<button type="button" data-act="enroll" id="enroll-go" disabled>Enroll</button>`,
       `<p>Servers that admit enrolled devices only need this once per device. Paste the enrollment link from your account page; this iPhone proves it holds its own key and receives a certificate.</p>
-       <input type="text" id="enroll-link" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="pqanon://enroll?t=…" aria-label="Enrollment link">
+       <input type="text" id="enroll-link" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="shaip://enroll?t=…" aria-label="Enrollment link">
        <div class="warn-text" id="enroll-msg" hidden></div>`);
     const input = $('#enroll-link');
     input.addEventListener('input', () => { $('#enroll-go').disabled = !input.value.trim(); });
@@ -570,7 +570,7 @@ function update() {
   setText($('#c-timer'), Format.clock(secs));
   setText($('#c-label'), cfg ? cfg.label : 'No server');
   setText($('#c-tip'), on && snap ? snap.tunnelAddress : '—');
-  setText($('#c-sub'), on && snap ? `DNS ${snap.dns ?? 'unchanged'} · MTU ${snap.mtu} · PQANON/1` : cfg ? `${cfg.address} · PQANON/1` : 'Set up a server to connect');
+  setText($('#c-sub'), on && snap ? `DNS ${snap.dns ?? 'unchanged'} · MTU ${snap.mtu} · SHAIP/1` : cfg ? `${cfg.address} · SHAIP/1` : 'Set up a server to connect');
   const total = snap ? snap.bytesSent + snap.bytesReceived : 0, data = Format.bytes(total), rtt = rttMs();
   setHTML($('#c-metrics'), [
     ['DOWN', on ? Format.mbps(S.down) : '—', 'Mbps'], ['UP', on ? Format.mbps(S.up) : '—', 'Mbps'],
@@ -674,7 +674,7 @@ function updateLock() {
   const rtt = rttMs();
   setHTML($('#lock-la'), `
     <div class="h"><span class="glyph">${icon('lock', 17, 'currentColor', 2.4)}</span>
-      <span class="who"><b>Protected</b><span>SHAIP · PQANON/1</span></span>
+      <span class="who"><b>Protected</b><span>SHAIP · SHAIP/1</span></span>
       <span class="clk" style="color:${T.ok}">${Format.clock(sessionSeconds())}</span></div>
     <div class="m">
       <div><span class="k">DOWN</span><span class="v"><b>${Format.mbps(S.down)}</b><i>Mbps</i></span></div>

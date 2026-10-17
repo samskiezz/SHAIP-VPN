@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Restore a PQANON control-plane database (and node keys) from a backup made
+# Restore a SHAIP control-plane database (and node keys) from a backup made
 # by scripts/backup.sh. Usage: restore.sh <timestamp>
 set -euo pipefail
 
-BACKUP_DIR="${BACKUP_DIR:-/var/backups/pqanon}"
+BACKUP_DIR="${BACKUP_DIR:-/var/backups/shaip}"
 TIMESTAMP="${1:?usage: restore.sh <timestamp>}"
 DB_URL="${DATABASE_URL:?DATABASE_URL is required}"
-KEYS_DIR="${KEYS_DIR:-/etc/pqanon}"
+KEYS_DIR="${KEYS_DIR:-/etc/shaip}"
 
-DB_FILE="$BACKUP_DIR/pqanon-db-$TIMESTAMP.dump"
-KEYS_FILE="$BACKUP_DIR/pqanon-keys-$TIMESTAMP.tar.gz"
+DB_FILE="$BACKUP_DIR/shaip-db-$TIMESTAMP.dump"
+KEYS_FILE="$BACKUP_DIR/shaip-keys-$TIMESTAMP.tar.gz"
 
 if [ ! -f "$DB_FILE" ]; then
     echo "missing $DB_FILE" >&2
@@ -21,7 +21,7 @@ read -r -p "Type 'yes' to confirm: " confirm
 [ "$confirm" = "yes" ] || exit 1
 
 echo "[*] Stopping services"
-systemctl stop pqanond 2>/dev/null || true
+systemctl stop shaipd 2>/dev/null || true
 systemctl stop control-plane 2>/dev/null || true
 
 echo "[*] Restoring database"
@@ -36,6 +36,6 @@ fi
 
 echo "[*] Starting services"
 systemctl start control-plane 2>/dev/null || true
-systemctl start pqanond 2>/dev/null || true
+systemctl start shaipd 2>/dev/null || true
 
 echo "[*] Restore complete: $TIMESTAMP"

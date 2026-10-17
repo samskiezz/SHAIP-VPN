@@ -10,7 +10,7 @@ design tokens (`clients/ios/design/HANDOFF.md`).
 
 - **Builds to a real APK on Linux** — no macOS needed. `./gradlew assembleDebug`
   produces `app/build/outputs/apk/debug/app-debug.apk`.
-- **Talks to the real control plane** (`PQANON-CP/1`, the Go service in
+- **Talks to the real control plane** (`SHAIP-CP/1`, the Go service in
   `control-plane/`) over the same HTTP API the web UI and CLI use:
   register / sign in, dashboard, the signed node directory (Servers), device
   enrollment, and the identity-free discount/comp-code redemption (Buy access).
@@ -20,14 +20,14 @@ design tokens (`clients/ios/design/HANDOFF.md`).
   cloud backup / device transfer are disabled for shared-prefs, files and
   databases (`res/xml/data_extraction_rules.xml`). Cleartext is allowed only to
   the dev control plane (emulator loopback), everything else is HTTPS.
-- **The tunnel** runs as an Android `VpnService` (`vpn/PqanonVpnService.kt`)
+- **The tunnel** runs as an Android `VpnService` (`vpn/ShaipVpnService.kt`)
   that owns the TUN interface and the connection lifecycle.
 
 ## What is not wired yet (honest status)
 
-- The **post-quantum data plane** — the PQANON/1 handshake (ML-KEM-768 +
+- The **post-quantum data plane** — the SHAIP/1 handshake (ML-KEM-768 +
   ML-DSA-65) and the encrypted tunnel — lives in the shared Rust core (crate
-  `pqanon`, proven by the CLI and the netns lab). On Android it is bridged over
+  `shaip`, proven by the CLI and the netns lab). On Android it is bridged over
   JNI/NDK in the next step; until then `Connect` establishes the interface and
   reports state but does **not** install a default route, so device traffic is
   never silently captured or black-holed.
@@ -50,12 +50,12 @@ loopback as seen from the Android emulator); change it in `Session` or the
 ## Layout
 
 ```
-app/src/main/java/net/shaip/pqanon/
+app/src/main/java/net/shaip/
   MainActivity.kt         entry point
   ui/theme/               design tokens + Compose theme (shared palette)
   ui/Glass.kt Controls.kt Layout.kt   the glass component kit
   ui/App.kt               signed-in shell + tab nav
   ui/screens/             Login, Dashboard, Servers, Devices, Pay
   net/                    control-plane API client (OkHttp + kotlinx.serialization)
-  vpn/PqanonVpnService.kt the VpnService that owns the tunnel
+  vpn/ShaipVpnService.kt the VpnService that owns the tunnel
 ```

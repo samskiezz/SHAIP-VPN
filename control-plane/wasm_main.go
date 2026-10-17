@@ -6,7 +6,7 @@ package main
 // same handlers, store, crypto and privacy rules as the server, running in the
 // visitor's browser tab with the in-memory store. Nothing is seeded (no demo
 // nodes or accounts) and nothing leaves the tab. The page calls
-// pqanonAPI(method, path, authorization, body) instead of the network.
+// shaipAPI(method, path, authorization, body) instead of the network.
 
 import (
 	"bytes"
@@ -23,11 +23,11 @@ func main() {
 	log.SetOutput(&redactingWriter{w: logDiscard{}})
 	srv, err := newPreviewServer()
 	if err != nil {
-		js.Global().Set("pqanonAPIError", err.Error())
+		js.Global().Set("shaipAPIError", err.Error())
 		return
 	}
 	h := routes(srv, "memory (this browser tab)")
-	js.Global().Set("pqanonAPI", js.FuncOf(func(_ js.Value, args []js.Value) any {
+	js.Global().Set("shaipAPI", js.FuncOf(func(_ js.Value, args []js.Value) any {
 		method, path, auth, body := args[0].String(), args[1].String(), args[2].String(), args[3].String()
 		return newPromise(func() (any, error) {
 			req := httptest.NewRequest(method, path, bytes.NewBufferString(body))
@@ -40,7 +40,7 @@ func main() {
 			return map[string]any{"status": rec.Code, "body": rec.Body.String()}, nil
 		})
 	}))
-	js.Global().Call("dispatchEvent", js.Global().Get("Event").New("pqanon-ready"))
+	js.Global().Call("dispatchEvent", js.Global().Get("Event").New("shaip-ready"))
 	select {}
 }
 

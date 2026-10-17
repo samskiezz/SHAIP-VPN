@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"pqanon/control-plane/keystore"
+	"shaip/control-plane/keystore"
 )
 
 func pubOf(t *testing.T, name, specVar, legacy string) ed25519.PublicKey {

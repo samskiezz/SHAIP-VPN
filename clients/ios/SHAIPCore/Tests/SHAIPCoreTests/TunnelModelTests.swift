@@ -11,12 +11,12 @@ struct TunnelModelTests {
     static let cliConfig = """
     # SHAIP VPN client config
     [client]
-    identity    = "/home/user/.pqanon/client.id"
-    tun_device  = "pqanon-c0"
+    identity    = "/home/user/.shaip/client.id"
+    tun_device  = "shaip-c0"
 
     [server]
     address           = "vpn.example.com:443"
-    # Pins: paste the output of `pqanond --identity <file> --print-public`.
+    # Pins: paste the output of `shaipd --identity <file> --print-public`.
     server_ml_dsa_pub = "\(pq)"
     server_ed_pub     = '\(ed)'
 

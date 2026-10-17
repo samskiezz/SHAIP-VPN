@@ -1,4 +1,4 @@
-module PQAnonFFI {
-    header "pqanon.h"
+module ShaipFFI {
+    header "shaip.h"
     export *
 }

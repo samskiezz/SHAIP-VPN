@@ -12,7 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"pqanon/control-plane/staking"
+	"shaip/control-plane/staking"
 )
 
 // ErrNotFound is returned when a record does not exist.

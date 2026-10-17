@@ -1,7 +1,7 @@
 import Foundation
 import NetworkExtension
 import Observation
-import PQAnonFFI
+import ShaipFFI
 import SHAIPCore
 import UIKit
 
@@ -182,7 +182,7 @@ final class TunnelStore {
 
     // MARK: Enrollment
 
-    /// Enroll this device with a `pqanon://enroll` link: the core proves
+    /// Enroll this device with a `shaip://enroll` link: the core proves
     /// possession of this device's identity key and stores the certificate
     /// the control plane issues next to it.
     func enroll(link: String) async throws {
@@ -200,7 +200,7 @@ final class TunnelStore {
         let id: String = try await withCheckedThrowingContinuation { cont in
             DispatchQueue.global(qos: .userInitiated).async {
                 var err: UnsafeMutablePointer<CChar>?
-                if let id = takeString(pqanon_enroll(link, cp, authority, ca, identity, name, &err)) {
+                if let id = takeString(shaip_enroll(link, cp, authority, ca, identity, name, &err)) {
                     cont.resume(returning: id)
                 } else {
                     cont.resume(throwing: CoreError(message: takeString(err) ?? "Enrollment failed."))

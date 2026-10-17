@@ -18,7 +18,7 @@ use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use sha2::{Digest, Sha256};
 
 /// Required first line of every consensus document.
-pub const FORMAT_VERSION: &str = "PQANON-CONSENSUS-V1";
+pub const FORMAT_VERSION: &str = "SHAIP-CONSENSUS-V1";
 
 /// Why a consensus document was rejected.
 #[derive(Debug, PartialEq, Eq)]
@@ -273,7 +273,7 @@ mod tests {
     // authority's TestCrossLanguageVector. If the canonical form ever changes,
     // the Go test's logged values and this block change together.
     const VECTOR_DOC: &str = concat!(
-        "PQANON-CONSENSUS-V1\n",
+        "SHAIP-CONSENSUS-V1\n",
         "published 2026-01-15T00:00:00Z\n",
         "valid-until 2026-01-15T01:00:00Z\n",
         "threshold 1/1\n",

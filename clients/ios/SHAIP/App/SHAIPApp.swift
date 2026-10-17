@@ -24,7 +24,7 @@ struct SHAIPApp: App {
                 // Dynamic Type scales all non-mono text; capped where the fixed-geometry rows still fit.
                 .dynamicTypeSize(...DynamicTypeSize.accessibility2)
                 .task { await store.load() }
-                // pqanon://enroll?t=… links (from the control plane's web page or a QR code).
+                // shaip://enroll?t=… links (from the control plane's web page or a QR code).
                 .onOpenURL { url in router.pendingEnrollLink = url.absoluteString }
         }
     }

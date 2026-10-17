@@ -6,11 +6,11 @@ plugins {
 }
 
 android {
-    namespace = "net.shaip.pqanon"
+    namespace = "net.shaip"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "net.shaip.pqanon"
+        applicationId = "net.shaip"
         minSdk = 26
         targetSdk = 34
         versionCode = 1

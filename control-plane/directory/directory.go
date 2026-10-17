@@ -1,4 +1,4 @@
-// Package directory implements the PQANON directory consensus: a signed,
+// Package directory implements the SHAIP directory consensus: a signed,
 // plain-text list of the active nodes, published by a set of independent
 // authorities. Clients accept the document only when at least `Threshold` of
 // the known authorities have signed the exact canonical bytes.
@@ -24,7 +24,7 @@ import (
 )
 
 // FormatVersion is the required first line of every consensus document.
-const FormatVersion = "PQANON-CONSENSUS-V1"
+const FormatVersion = "SHAIP-CONSENSUS-V1"
 
 // MaxClockSkew is how far before `Published` a verifier tolerates its own clock
 // being behind.

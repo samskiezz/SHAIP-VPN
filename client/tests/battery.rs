@@ -5,11 +5,11 @@
 //! mutation of an authenticated datagram is ever accepted. These tests brute
 //! the real parsing surfaces through the public API.
 
-use pqanon::dataplane::DataPlane;
-use pqanon::handshake::{ClientHandshake, Identity, ServerHandshake};
-use pqanon::obf::Obfuscator;
-use pqanon::transport::{RecvWindow, Session};
-use pqanon::wire::{Envelope, MsgType};
+use shaip::dataplane::DataPlane;
+use shaip::handshake::{ClientHandshake, Identity, ServerHandshake};
+use shaip::obf::Obfuscator;
+use shaip::transport::{RecvWindow, Session};
+use shaip::wire::{Envelope, MsgType};
 use std::collections::HashSet;
 
 // --- deterministic, reproducible PRNG (SplitMix64) ---
@@ -105,8 +105,8 @@ fn fuzz_ipparse_never_panics() {
     for _ in 0..FUZZ_ITERS {
         let input = rng.bytes(64);
         no_panic!("ipparse", &input, {
-            let _ = pqanon::ipparse::destination_ip(&input);
-            let _ = pqanon::ipparse::source_ip(&input);
+            let _ = shaip::ipparse::destination_ip(&input);
+            let _ = shaip::ipparse::source_ip(&input);
         });
     }
 }
@@ -307,7 +307,7 @@ fn session_keys() -> (([u8; 32], [u8; 32], [u8; 32]), ([u8; 32], [u8; 32], [u8; 
 #[test]
 fn obfuscation_roundtrips_for_realistic_datagram_sizes() {
     let obf = Obfuscator::new(&[0x5Au8; 32], 9);
-    let mut session = pqanon::transport::Session::new(7, [3u8; 32], [4u8; 32], "127.0.0.1:9".parse().unwrap(), true, 1400);
+    let mut session = shaip::transport::Session::new(7, [3u8; 32], [4u8; 32], "127.0.0.1:9".parse().unwrap(), true, 1400);
     let mut rng = Rng::new(0x2024_1015);
     for _ in 0..20_000 {
         // Real sealed datagrams (HEADER(22) + payload + TAG(16)) across the
@@ -325,8 +325,8 @@ fn obfuscation_roundtrips_for_realistic_datagram_sizes() {
 
 #[test]
 fn fuzz_boot_layer_never_panics() {
-    use pqanon::obf::{BootKey, Reassembly, BOOT_DATAGRAM};
-    let boot = BootKey::for_server(&pqanon::handshake::Identity::generate().public());
+    use shaip::obf::{BootKey, Reassembly, BOOT_DATAGRAM};
+    let boot = BootKey::for_server(&shaip::handshake::Identity::generate().public());
     let mut rng = Rng::new(0x0B0F_2026);
     let mut r = Reassembly::new();
     for i in 0..FUZZ_ITERS {

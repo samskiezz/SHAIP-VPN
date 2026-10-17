@@ -1,8 +1,8 @@
 import Foundation
-import PQAnonFFI
+import ShaipFFI
 import SHAIPCore
 
-// The tunnel extension's calls, in its order, against a live echo-mode pqanond:
+// The tunnel extension's calls, in its order, against a live echo-mode shaipd:
 // start → status → server address → send (Data.withUnsafeBytes, as readPackets) →
 // recv (into [UInt8], as the receive thread) → snapshot → JSON round trip →
 // reconnect (as on a network change) → stop → recv returns -1 → free.
@@ -20,23 +20,23 @@ let config = ServerConfig(address: args[1], mlDsaPub: args[2], edPub: args[3])
 do { try config.validate() } catch { fail("config: \(error)") }
 
 var err: UnsafeMutablePointer<CChar>?
-guard let s = pqanon_session_start(config.address, config.mlDsaPub, config.edPub, args[4], nil, 5000, &err) else {
+guard let s = shaip_session_start(config.address, config.mlDsaPub, config.edPub, args[4], nil, 5000, &err) else {
     fail("start: \(takeString(err) ?? "no message")")
 }
-var st = PqanonStatus()
-pqanon_session_status(s, &st)
-guard st.state == PQANON_STATE_CONNECTED else { fail("not connected (state \(st.state))") }
-let remote = takeString(pqanon_session_server_addr(s)).flatMap(IPv4.host(ofEndpoint:))
+var st = ShaipStatus()
+shaip_session_status(s, &st)
+guard st.state == SHAIP_STATE_CONNECTED else { fail("not connected (state \(st.state))") }
+let remote = takeString(shaip_session_server_addr(s)).flatMap(IPv4.host(ofEndpoint:))
 guard remote == ServerConfig.host(of: config.address) else { fail("remote \(remote ?? "nil")") }
 
-var buf = [UInt8](repeating: 0, count: Int(PQANON_MAX_PACKET))
+var buf = [UInt8](repeating: 0, count: Int(SHAIP_MAX_PACKET))
 func echo(_ tag: UInt8) -> Bool {
     let packet = Data((0..<300).map { UInt8(truncatingIfNeeded: $0) ^ tag })
     for _ in 0..<20 {
         packet.withUnsafeBytes { raw in
-            _ = pqanon_session_send(s, raw.bindMemory(to: UInt8.self).baseAddress, raw.count)
+            _ = shaip_session_send(s, raw.bindMemory(to: UInt8.self).baseAddress, raw.count)
         }
-        let n = buf.withUnsafeMutableBufferPointer { b in pqanon_session_recv(s, b.baseAddress, b.count, 300, nil) }
+        let n = buf.withUnsafeMutableBufferPointer { b in shaip_session_recv(s, b.baseAddress, b.count, 300, nil) }
         if n > 0, Data(buf[0..<n]) == packet { return true }
     }
     return false
@@ -44,15 +44,15 @@ func echo(_ tag: UInt8) -> Bool {
 guard echo(1) else { fail("echo") }
 
 for _ in 0..<40 {
-    pqanon_session_status(s, &st)
+    shaip_session_status(s, &st)
     if st.rtt_us > 0 { break }
     usleep(100_000)
 }
-let snap = TunnelSnapshot(status: st, lastError: takeString(pqanon_session_last_error(s)),
-                          serverAddress: takeString(pqanon_session_server_addr(s)), ipv6Dropped: 7)
+let snap = TunnelSnapshot(status: st, lastError: takeString(shaip_session_last_error(s)),
+                          serverAddress: takeString(shaip_session_server_addr(s)), ipv6Dropped: 7)
 guard snap.state == .connected, snap.rttMs != nil, snap.mtu == 1370, snap.ipv6Dropped == 7 else { fail("snapshot \(snap)") }
 guard snap.serverIdentity == args[5].lowercased() else {
-    fail("server identity \(snap.serverIdentity ?? "nil") ≠ pqanond's identity_id \(args[5])")
+    fail("server identity \(snap.serverIdentity ?? "nil") ≠ shaipd's identity_id \(args[5])")
 }
 guard snap.bytesSent >= 300, snap.bytesReceived >= 300 else { fail("counters \(snap)") }
 do {
@@ -67,20 +67,20 @@ guard report.first(where: { $0.id == "identity" })?.detail.contains(Format.finge
 }
 
 // A network change: renegotiate; packets flow on the new session.
-guard pqanon_session_reconnect(s) == 0 else { fail("reconnect call") }
+guard shaip_session_reconnect(s) == 0 else { fail("reconnect call") }
 for _ in 0..<100 {
-    pqanon_session_status(s, &st)
-    if st.reconnects == 1 && st.state == PQANON_STATE_CONNECTED { break }
+    shaip_session_status(s, &st)
+    if st.reconnects == 1 && st.state == SHAIP_STATE_CONNECTED { break }
     usleep(100_000)
 }
-guard st.reconnects == 1, st.state == PQANON_STATE_CONNECTED else { fail("no reconnect") }
+guard st.reconnects == 1, st.state == SHAIP_STATE_CONNECTED else { fail("no reconnect") }
 guard echo(2) else { fail("echo after reconnect") }
 
-pqanon_session_stop(s)
-let after = buf.withUnsafeMutableBufferPointer { b in pqanon_session_recv(s, b.baseAddress, b.count, 500, nil) }
+shaip_session_stop(s)
+let after = buf.withUnsafeMutableBufferPointer { b in shaip_session_recv(s, b.baseAddress, b.count, 500, nil) }
 guard after == -1 else { fail("recv after stop returned \(after)") }
-pqanon_session_status(s, &st)
+shaip_session_status(s, &st)
 guard TunnelSnapshot(status: st, lastError: nil, serverAddress: nil, ipv6Dropped: 0).state == .stopped else { fail("stopped state") }
-pqanon_session_free(s)
-print("core \(pqanonVersion): connected, echoed, measured RTT \(Format.fixed(snap.rttMs ?? 0, 2)) ms, identity \(Format.fingerprint(snap.serverIdentity)), reconnected, stopped")
+shaip_session_free(s)
+print("core \(shaipVersion): connected, echoed, measured RTT \(Format.fixed(snap.rttMs ?? 0, 2)) ms, identity \(Format.fingerprint(snap.serverIdentity)), reconnected, stopped")
 print("SWIFT FFI OK")

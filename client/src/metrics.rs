@@ -53,7 +53,7 @@ impl Default for Gauge {
     }
 }
 
-// --- pqanond (tunnel daemon) ---
+// --- shaipd (tunnel daemon) ---
 pub static HANDSHAKES_OK: Counter = Counter::new();
 pub static HANDSHAKES_FAILED: Counter = Counter::new();
 pub static HANDSHAKES_DROPPED: Counter = Counter::new();
@@ -71,7 +71,7 @@ pub static KEEPALIVES: Counter = Counter::new();
 pub static BYTES_FROM_CLIENTS: Counter = Counter::new();
 pub static BYTES_TO_CLIENTS: Counter = Counter::new();
 
-// --- pqanon-mixd (mix node) ---
+// --- shaip-mixd (mix node) ---
 pub static MIX_CELLS_FORWARDED: Counter = Counter::new();
 pub static MIX_COVER_CELLS: Counter = Counter::new();
 pub static MIX_CELLS_DROPPED: Counter = Counter::new();
@@ -95,27 +95,27 @@ const fn gauge(name: &'static str, help: &'static str, value: u64) -> Metric {
 
 fn snapshot() -> Vec<Metric> {
     vec![
-        counter("pqanon_server_handshakes_ok_total", "Completed server handshakes.", HANDSHAKES_OK.get()),
-        counter("pqanon_server_handshakes_failed_total", "Server handshakes that errored or were rejected.", HANDSHAKES_FAILED.get()),
-        counter("pqanon_server_handshakes_dropped_total", "CLIENT_HELLOs dropped at the half-open handshake limit.", HANDSHAKES_DROPPED.get()),
-        counter("pqanon_server_handshake_retries_total", "RETRY cookies issued to unvalidated senders while the half-open table was full.", HANDSHAKE_RETRIES.get()),
-        counter("pqanon_server_pool_exhausted_total", "Sessions refused because every tunnel address was in use.", POOL_EXHAUSTED.get()),
-        counter("pqanon_server_sessions_established_total", "Sessions established (keys derived).", SESSIONS_ESTABLISHED.get()),
-        counter("pqanon_server_data_packets_total", "DATA packets decrypted by the server.", DATA_PACKETS.get()),
-        counter("pqanon_server_decoy_probes_total", "TLS decoy handshakes completed by a prober.", DECOY_PROBES.get()),
-        gauge("pqanon_server_sessions_active", "Sessions currently established.", SESSIONS_ACTIVE.get()),
-        gauge("pqanon_server_handshakes_pending", "Handshakes awaiting CLIENT_FINISH.", HANDSHAKES_PENDING.get()),
-        counter("pqanon_server_sessions_ended_total", "Sessions ended (closed, timed out, or replaced by a new handshake).", SESSIONS_ENDED.get()),
-        counter("pqanon_server_spoofed_packets_total", "Client packets dropped for a source address other than the client's own.", PACKETS_SPOOFED.get()),
-        counter("pqanon_server_filtered_packets_total", "Client packets dropped by destination policy (other clients, private ranges).", PACKETS_FILTERED.get()),
-        counter("pqanon_server_keepalives_total", "Keepalive pings answered.", KEEPALIVES.get()),
-        counter("pqanon_server_client_bytes_in_total", "Bytes of IP traffic received from clients.", BYTES_FROM_CLIENTS.get()),
-        counter("pqanon_server_client_bytes_out_total", "Bytes of IP traffic sent to clients.", BYTES_TO_CLIENTS.get()),
-        counter("pqanon_mix_cells_forwarded_total", "Onion cells peeled and forwarded by the mix.", MIX_CELLS_FORWARDED.get()),
-        counter("pqanon_mix_cover_cells_total", "Cover-traffic cells emitted by the mix.", MIX_COVER_CELLS.get()),
-        counter("pqanon_mix_cells_dropped_total", "Datagrams dropped: not a cell, a replay, or not peelable by this hop.", MIX_CELLS_DROPPED.get()),
-        counter("pqanon_mix_forward_failed_total", "Peeled cells the mix could not send on.", MIX_FORWARD_FAILED.get()),
-        counter("pqanon_mix_payloads_delivered_total", "Cells that ended at this hop (exit delivery).", MIX_PAYLOADS_DELIVERED.get()),
+        counter("shaip_server_handshakes_ok_total", "Completed server handshakes.", HANDSHAKES_OK.get()),
+        counter("shaip_server_handshakes_failed_total", "Server handshakes that errored or were rejected.", HANDSHAKES_FAILED.get()),
+        counter("shaip_server_handshakes_dropped_total", "CLIENT_HELLOs dropped at the half-open handshake limit.", HANDSHAKES_DROPPED.get()),
+        counter("shaip_server_handshake_retries_total", "RETRY cookies issued to unvalidated senders while the half-open table was full.", HANDSHAKE_RETRIES.get()),
+        counter("shaip_server_pool_exhausted_total", "Sessions refused because every tunnel address was in use.", POOL_EXHAUSTED.get()),
+        counter("shaip_server_sessions_established_total", "Sessions established (keys derived).", SESSIONS_ESTABLISHED.get()),
+        counter("shaip_server_data_packets_total", "DATA packets decrypted by the server.", DATA_PACKETS.get()),
+        counter("shaip_server_decoy_probes_total", "TLS decoy handshakes completed by a prober.", DECOY_PROBES.get()),
+        gauge("shaip_server_sessions_active", "Sessions currently established.", SESSIONS_ACTIVE.get()),
+        gauge("shaip_server_handshakes_pending", "Handshakes awaiting CLIENT_FINISH.", HANDSHAKES_PENDING.get()),
+        counter("shaip_server_sessions_ended_total", "Sessions ended (closed, timed out, or replaced by a new handshake).", SESSIONS_ENDED.get()),
+        counter("shaip_server_spoofed_packets_total", "Client packets dropped for a source address other than the client's own.", PACKETS_SPOOFED.get()),
+        counter("shaip_server_filtered_packets_total", "Client packets dropped by destination policy (other clients, private ranges).", PACKETS_FILTERED.get()),
+        counter("shaip_server_keepalives_total", "Keepalive pings answered.", KEEPALIVES.get()),
+        counter("shaip_server_client_bytes_in_total", "Bytes of IP traffic received from clients.", BYTES_FROM_CLIENTS.get()),
+        counter("shaip_server_client_bytes_out_total", "Bytes of IP traffic sent to clients.", BYTES_TO_CLIENTS.get()),
+        counter("shaip_mix_cells_forwarded_total", "Onion cells peeled and forwarded by the mix.", MIX_CELLS_FORWARDED.get()),
+        counter("shaip_mix_cover_cells_total", "Cover-traffic cells emitted by the mix.", MIX_COVER_CELLS.get()),
+        counter("shaip_mix_cells_dropped_total", "Datagrams dropped: not a cell, a replay, or not peelable by this hop.", MIX_CELLS_DROPPED.get()),
+        counter("shaip_mix_forward_failed_total", "Peeled cells the mix could not send on.", MIX_FORWARD_FAILED.get()),
+        counter("shaip_mix_payloads_delivered_total", "Cells that ended at this hop (exit delivery).", MIX_PAYLOADS_DELIVERED.get()),
     ]
 }
 
@@ -173,15 +173,15 @@ mod tests {
         HANDSHAKES_OK.inc();
         HANDSHAKES_OK.add(4);
         let text = render();
-        assert!(text.contains("# TYPE pqanon_server_handshakes_ok_total counter"));
-        assert!(text.contains("pqanon_server_handshakes_ok_total "));
+        assert!(text.contains("# TYPE shaip_server_handshakes_ok_total counter"));
+        assert!(text.contains("shaip_server_handshakes_ok_total "));
         // Value reflects what we added (>= 5, other tests may add too).
         assert!(HANDSHAKES_OK.get() >= 5);
         // Every declared series is present with HELP + TYPE + sample.
         for name in [
-            "pqanon_server_handshakes_ok_total",
-            "pqanon_server_sessions_established_total",
-            "pqanon_mix_cover_cells_total",
+            "shaip_server_handshakes_ok_total",
+            "shaip_server_sessions_established_total",
+            "shaip_mix_cover_cells_total",
         ] {
             assert!(text.contains(&format!("# HELP {name}")), "missing {name}");
         }

@@ -1,4 +1,4 @@
-//! PQANON-MIX/1 — fixed-size onion cells, 5-hop default path (§10).
+//! SHAIP-MIX/1 — fixed-size onion cells, 5-hop default path (§10).
 //!
 //! The specification's cell sketch doesn't actually peel, so this module defines
 //! a concrete, reversible onion:
@@ -163,7 +163,7 @@ fn decrypt_layer(hop_sk: &StaticSecret, layer: &[u8]) -> anyhow::Result<Vec<u8>>
 fn hop_key(shared: &[u8]) -> [u8; 32] {
     let hk = Hkdf::<Sha256>::new(None, shared);
     let mut key = [0u8; 32];
-    hk.expand(b"PQANON-MIX/1", &mut key).unwrap();
+    hk.expand(b"SHAIP-MIX/1", &mut key).unwrap();
     key
 }
 

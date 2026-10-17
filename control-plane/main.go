@@ -1,6 +1,6 @@
 //go:build !js
 
-// Command control-plane implements PQANON-CP/1: the REST API for accounts,
+// Command control-plane implements SHAIP-CP/1: the REST API for accounts,
 // devices, nodes, payments, staking, and the signed CRL (§14).
 //
 // It keeps nothing that identifies a customer (docs/privacy-policy.md):
@@ -20,7 +20,7 @@ import (
 	"strconv"
 	"time"
 
-	"pqanon/control-plane/keystore"
+	"shaip/control-plane/keystore"
 )
 
 func main() {

@@ -175,7 +175,7 @@ func (s *Server) handlePublicStatus(w http.ResponseWriter, r *http.Request) {
 		"status":          status,
 		"nodes_online":    online,
 		"mean_latency_ms": meanDelay,
-		"protocol":        "PQANON/1",
+		"protocol":        "SHAIP/1",
 	})
 }
 

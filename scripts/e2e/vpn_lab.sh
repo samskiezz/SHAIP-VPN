@@ -4,7 +4,7 @@
 #
 #   pqlab-cli ──────── pqlab-rtr ──────── pqlab-srv
 #   192.168.77.2       (the ISP)          198.51.100.2
-#   (pqanon run)          │               (pqanond --tun --nat)
+#   (shaip run)          │               (shaipd --tun --nat)
 #                     pqlab-net 203.0.113.2
 #                     ("the internet": a web server and a resolver)
 #
@@ -14,23 +14,23 @@
 # It proves, rather than assumes:
 #  1. without the VPN the web host sees the client's own address and the
 #     client's lookups go to its ISP's resolver;
-#  2. with `pqanon run`, every IPv4 packet and every lookup goes through the
+#  2. with `shaip run`, every IPv4 packet and every lookup goes through the
 #     tunnel: the web host sees only the VPN server's address, the ISP resolver
 #     sees none of the lookups, and a 16 MiB download arrives byte-identical;
 #  3. the client rides out a graceful server restart and a hard server crash,
 #     keeping its tunnel address;
 #  4. a clean disconnect restores routes, resolver and firewall exactly;
-#  5. with --kill-switch, a crashed client leaks nothing until `pqanon down`;
+#  5. with --kill-switch, a crashed client leaks nothing until `shaip down`;
 #  6. on the ISP's link the VPN is random bytes: no IP fragments, handshakes
 #     in 1200-byte datagrams, no protocol magic, no byte position that holds
 #     a fixed value across a flow's packets.
 #
 # Needs root, /dev/net/tun, iproute2, nftables, curl and python3, and release
-# builds of pqanon and pqanond. Exit status is the number of failed checks.
+# builds of shaip and shaipd. Exit status is the number of failed checks.
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-CLI=$ROOT/target/release/pqanon
-SRV=$ROOT/target/release/pqanond
+CLI=$ROOT/target/release/shaip
+SRV=$ROOT/target/release/shaipd
 H=$ROOT/scripts/e2e
 W=$(mktemp -d /tmp/pqlab.XXXXXX)
 C=pqlab-cli R=pqlab-rtr S=pqlab-srv N=pqlab-net
@@ -93,7 +93,7 @@ start_server() { # <n>
   ip netns exec $S "$SRV" --identity "$W/srv.id" --listen 198.51.100.2:443 --tun pqs0 --tun-addr 10.77.0.1/24 \
     --nat s0 --dns-upstream 203.0.113.2:53 --metrics 127.0.0.1:9100 --lease-grace-secs 3 > "$W/server.$1.log" 2>&1 &
   SRV_PID=$!; PIDS+=($SRV_PID)
-  waitfor "$W/server.$1.log" "pqanond listening" 100
+  waitfor "$W/server.$1.log" "shaipd listening" 100
 }
 
 cat > "$W/client.toml" <<EOF
@@ -108,7 +108,7 @@ server_ed_pub     = "$ED"
 EOF
 start_client() { # <n> [run flags...]
   local n=$1; shift
-  PQANON_STATE_DIR="$W/state" PQANON_STATUS_FILE="$W/status" \
+  SHAIP_STATE_DIR="$W/state" SHAIP_STATUS_FILE="$W/status" \
     ip netns exec $C "$CLI" run --config "$W/client.toml" --keepalive-secs 1 --dead-secs 4 "$@" \
     > "$W/client.$n.log" 2>&1 &
   CLI_PID=$!; PIDS+=($CLI_PID)
@@ -124,8 +124,8 @@ ip netns exec $R python3 -I "$H/lab_wirecap.py" rc 192.168.77.2 198.51.100.2 443
 sleep 0.3
 wire() { python3 -I -c 'import json,sys; v=json.load(open(sys.argv[1])); [v:=v[k] for k in sys.argv[2:]]; print(v)' "$W/wire.json" "$@"; }
 
-check "pqanond starts (TUN + NAT + DNS forwarder)" start_server 1
-check "pqanon run connects" start_client 1
+check "shaipd starts (TUN + NAT + DNS forwarder)" start_server 1
+check "shaip run connects" start_client 1
 waitfor "$W/status" "^rtt_ms=[0-9]" 50
 TUNIP=$(status_field tunnel_address)
 
@@ -143,24 +143,24 @@ check "routes: 0/1 + 128/1 into the tunnel, the server pinned via the ISP" bash 
   "grep -q '^0.0.0.0/1 dev pqc0' <<<'$ROUTES' && grep -q '^128.0.0.0/1 dev pqc0' <<<'$ROUTES' && grep -q '^198.51.100.2 via 192.168.77.1 dev c0' <<<'$ROUTES'"
 check "the resolver is the server's forwarder" grep -q '^nameserver 10.77.0.1' "/etc/netns/$C/resolv.conf"
 check "IPv6 is blocked while connected (the tunnel is IPv4-only)" bash -c \
-  "ip netns exec $C nft list table inet pqanon_client | grep -q 'meta nfproto ipv6 reject'"
+  "ip netns exec $C nft list table inet shaip_client | grep -q 'meta nfproto ipv6 reject'"
 check "the tunnel interface MTU is 1370 (no outer fragmentation)" bash -c "ip -n $C link show pqc0 | grep -q 'mtu 1370'"
 check "status shows a measured RTT" grep -qE '^rtt_ms=[0-9.]+$' "$W/status"
 get http://172.16.5.5/ 2 >/dev/null
 check "private destinations behind the server are filtered" bash -c \
-  "ip netns exec $S curl -s http://127.0.0.1:9100/metrics | grep -qE '^pqanon_server_filtered_packets_total [1-9]'"
+  "ip netns exec $S curl -s http://127.0.0.1:9100/metrics | grep -qE '^shaip_server_filtered_packets_total [1-9]'"
 check "the server reports 1 active session" bash -c \
-  "ip netns exec $S curl -s http://127.0.0.1:9100/metrics | grep -q '^pqanon_server_sessions_active 1$'"
+  "ip netns exec $S curl -s http://127.0.0.1:9100/metrics | grep -q '^shaip_server_sessions_active 1$'"
 
 echo "  -- resilience"
 kill -TERM $SRV_PID; wait $SRV_PID 2>/dev/null
 check "the client heard the server's Close" waitfor "$W/client.1.log" "tunnel down" 50
-check "pqanond restarts" start_server 2
+check "shaipd restarts" start_server 2
 check "the client reconnected after a graceful restart" waitfor "$W/client.1.log" "tunnel up again \(reconnect #1\)" 200
 check "traffic flows again" [ "$(get http://vpn-3.test:8080/)" = "caller=198.51.100.2" ]
 check "the client kept its tunnel address ($TUNIP)" [ "$(status_field tunnel_address)" = "$TUNIP" ]
 kill -9 $SRV_PID; wait $SRV_PID 2>/dev/null
-check "pqanond restarts after a crash" start_server 3
+check "shaipd restarts after a crash" start_server 3
 check "the client reconnected after a server crash" waitfor "$W/client.1.log" "tunnel up again \(reconnect #2\)" 300
 check "traffic flows again" [ "$(get http://vpn-4.test:8080/)" = "caller=198.51.100.2" ]
 
@@ -185,8 +185,8 @@ kill -TERM $CLI_PID; wait $CLI_PID 2>/dev/null
 check "the client disconnected cleanly" grep -q "^disconnected:" "$W/client.1.log"
 check "routes restored" bash -c "! ip -n $C route | grep -qE '0.0.0.0/1|128.0.0.0/1|^198.51.100.2'"
 check "resolver restored" [ "$(cat "/etc/netns/$C/resolv.conf")" = "$ORIG_RESOLV" ]
-check "firewall rules removed" bash -c "! ip netns exec $C nft list table inet pqanon_client >/dev/null 2>&1"
-sessions_zero() { local i; for i in $(seq 30); do [ "$(metric pqanon_server_sessions_active)" = 0 ] && return 0; sleep 0.1; done; return 1; }
+check "firewall rules removed" bash -c "! ip netns exec $C nft list table inet shaip_client >/dev/null 2>&1"
+sessions_zero() { local i; for i in $(seq 30); do [ "$(metric shaip_server_sessions_active)" = 0 ] && return 0; sleep 0.1; done; return 1; }
 check "the server ended the session on the client's Close" sessions_zero
 # After the lease grace (3 s here), the address's NAT state is deleted, so a
 # client given the address next can never receive this client's late replies.
@@ -195,16 +195,16 @@ check "the freed tunnel address's NAT state was deleted" [ "$(flows_from "$TUNIP
 check "direct traffic works again" [ "$(get http://after-1.test:8080/)" = "caller=192.168.77.2" ]
 
 echo "  -- kill switch"
-check "pqanon run --kill-switch connects" start_client 2 --kill-switch
+check "shaip run --kill-switch connects" start_client 2 --kill-switch
 check "traffic goes through the tunnel" [ "$(get http://vpn-5.test:8080/)" = "caller=198.51.100.2" ]
 kill -9 $CLI_PID; wait $CLI_PID 2>/dev/null
 MARK=$(http_lines)
 check "after the client crashes, nothing leaks out directly" [ -z "$(get http://203.0.113.2:8080/ 3)" ]
 check "the web host saw no request from the client's address" bash -c "! tail -n +$((MARK+1)) '$W/http.log' | grep -q '^192.168.77.2 '"
-DOWN=$(PQANON_STATE_DIR="$W/state" ip netns exec $C "$CLI" down 2>&1)
-check "pqanon down lifts the kill switch and restores the resolver" bash -c \
+DOWN=$(SHAIP_STATE_DIR="$W/state" ip netns exec $C "$CLI" down 2>&1)
+check "shaip down lifts the kill switch and restores the resolver" bash -c \
   "grep -q 'removed the kill-switch' <<<'$DOWN' && grep -q 'restored /etc/resolv.conf' <<<'$DOWN'"
-check "direct traffic works after pqanon down" [ "$(get http://after-2.test:8080/)" = "caller=192.168.77.2" ]
+check "direct traffic works after shaip down" [ "$(get http://after-2.test:8080/)" = "caller=192.168.77.2" ]
 
 echo "  -- the server keeps nothing about its client"
 CLI_ID=$("$CLI" keygen --out "$W/cli.id" 2>/dev/null | sed -n 's/^identity_id : //p')

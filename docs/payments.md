@@ -88,14 +88,14 @@ is proven by the live `pay: unlinkable-token buy→redeem (cross-language)` stag
 **Client**
 
 ```sh
-pqanon plans   --server https://cp.example
-pqanon buy     --plan month --server https://cp.example      # prints a Monero address
+shaip plans   --server https://cp.example
+shaip buy     --plan month --server https://cp.example      # prints a Monero address
 # …pay the address…
-pqanon collect --order <id> --server https://cp.example      # unblinds the tokens
-pqanon redeem  --plan month --server https://cp.example      # → VPN access grant
+shaip collect --order <id> --server https://cp.example      # unblinds the tokens
+shaip redeem  --plan month --server https://cp.example      # → VPN access grant
 ```
 
-Tokens and in-flight orders live in `~/.pqanon/wallet.json` (override with
+Tokens and in-flight orders live in `~/.shaip/wallet.json` (override with
 `--store`).
 
 **Operator — payment rails**
@@ -134,15 +134,15 @@ address and Lightning invoice, and confirms the order when BTCPay marks it
 Shared:
 
 ```sh
-export PAY_KEY_DIR=/var/lib/pqanon/denoms   # persist denomination keys across restarts
+export PAY_KEY_DIR=/var/lib/shaip/denoms   # persist denomination keys across restarts
 ```
 
 Without any rail configured the control plane uses an in-process **dev rail** (no
 chain) so the whole flow runs in tests and local dev; its manual settle endpoint
 is gated behind `PAY_DEV_SETTLE` and must never be enabled in production.
 
-The client picks a rail with `pqanon buy --rail monero|btcpay` (or omit it for the
-server default); `pqanon plans` lists the rails and per-coin prices.
+The client picks a rail with `shaip buy --rail monero|btcpay` (or omit it for the
+server default); `shaip plans` lists the rails and per-coin prices.
 
 ## Threat model (what this does and does not defend)
 

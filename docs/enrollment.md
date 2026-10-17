@@ -4,7 +4,7 @@ One-click enrollment adds a device to an account and binds its identity key,
 using two signed artifacts:
 
 1. An **enrollment token** — issued by an operator, delivered to the device out
-   of band (a QR code or a `pqanon://enroll?t=…&v=1` deep link). It authorizes
+   of band (a QR code or a `shaip://enroll?t=…&v=1` deep link). It authorizes
    one device to join one account, and is verified against a **pinned
    enrollment-authority key** the client ships.
 2. A **device certificate** — issued by the control plane after the device
@@ -97,7 +97,7 @@ format ever changes, both sides change together.
 
 | Endpoint | Auth | Does |
 |---|---|---|
-| `POST /api/enroll/issue` | session | Issue a one-time token for the caller's account (default 15 min, max 24 h). Returns `token`, the `pqanon://enroll?t=…&v=1` link, and the expiry. |
+| `POST /api/enroll/issue` | session | Issue a one-time token for the caller's account (default 15 min, max 24 h). Returns `token`, the `shaip://enroll?t=…&v=1` link, and the expiry. |
 | `POST /api/enroll/claim` | none (the token is the authorization) | `{token, device_pub, pop, name}` returns a device certificate (1 year from the UTC day). `name` is reduced to a platform label: iPhone, iPad, Android, Windows, Linux, Mac, or "device". |
 | `GET /api/enroll/keys` | none | `enroll_authority_pub`, `device_ca_pub`, `crl_pub` — the pins. |
 | `GET /api/devices` | session | The caller's devices. |
@@ -132,11 +132,11 @@ format ever changes, both sides change together.
 ## Device side
 
 ```bash
-pqanon enroll 'pqanon://enroll?t=PQE1.…&v=1' --server https://cp.example \
+shaip enroll 'shaip://enroll?t=PQE1.…&v=1' --server https://cp.example \
   --authority-key <pinned enroll_authority_pub> --ca-key <pinned device_ca_pub> \
-  --identity ~/.pqanon/client.id
+  --identity ~/.shaip/client.id
 #  Enrolled device 4b40…0a08
-#  certificate: ~/.pqanon/client.id.cert
+#  certificate: ~/.shaip/client.id.cert
 ```
 
 The client verifies the link against the pinned authority key **before**
@@ -146,13 +146,13 @@ checks that the returned certificate verifies under the pinned CA and binds
 exactly that key before storing it (0600). The device's only description sent
 is its platform label (`--name` defaults to this machine's platform; anything
 else given is reduced to one). Point
-`[client].device_cert` at the file and `pqanon run` presents it.
-`pqanon crl --url … --pubkey <crl_pub>` fetches and verifies the revocation
+`[client].device_cert` at the file and `shaip run` presents it.
+`shaip crl --url … --pubkey <crl_pub>` fetches and verifies the revocation
 list.
 
 ## Tunnel admission (device binding)
 
-`pqanond --device-ca <device_ca_pub>` admits **only** clients that present a
+`shaipd --device-ca <device_ca_pub>` admits **only** clients that present a
 valid certificate from that CA:
 - the certificate must bind the same Ed25519 key that signs the handshake
   transcript, so a replayed certificate is useless without the device's key;
@@ -198,15 +198,15 @@ session ends.
   CRL refused under the wrong pin.
 
 - Battery stage `tunnel` runs admission over the real network: a device enrolled
-  through the Go control plane is admitted by a live device-bound `pqanond`, via
-  both `pqanon probe` and the C ABI. An unenrolled identity is refused. After
+  through the Go control plane is admitted by a live device-bound `shaipd`, via
+  both `shaip probe` and the C ABI. An unenrolled identity is refused. After
   revocation the same device is refused once the daemon refreshes its CRL. See
   [client-api.md](client-api.md).
 
 ## Not done here
 
 - **Native deep-link handlers** (iOS/macOS/Windows/Android/Linux registration of
-  the `pqanon://` scheme) and **QR scanning** are per-OS and cannot be compiled,
+  the `shaip://` scheme) and **QR scanning** are per-OS and cannot be compiled,
   signed, or tested in this Linux container. Link parsing and verification are
-  done (`parse_enroll_url`, `pqanon enroll`); only OS registration is missing.
+  done (`parse_enroll_url`, `shaip enroll`); only OS registration is missing.
 - **Web device-management UI**: a view over `/api/devices`.

@@ -1518,17 +1518,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pqanon-desktop"
-version = "0.1.0"
-dependencies = [
- "eframe",
- "egui",
- "ehttp",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "proc-macro-crate"
 version = "3.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1779,6 +1768,17 @@ dependencies = [
  "serde",
  "serde_core",
  "zmij",
+]
+
+[[package]]
+name = "shaip-desktop"
+version = "0.1.0"
+dependencies = [
+ "eframe",
+ "egui",
+ "ehttp",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -40,7 +40,7 @@ pub struct TunDevice {
 
 impl TunDevice {
     /// Open (creating if needed) a TUN device. `requested` is a desired name
-    /// such as `"pqanon0"`; the kernel may hand back the next free name, which
+    /// such as `"shaip0"`; the kernel may hand back the next free name, which
     /// [`name`](TunDevice::name) reports. Requires `CAP_NET_ADMIN`.
     pub fn open(requested: &str) -> io::Result<Self> {
         let path = CString::new("/dev/net/tun").expect("static path has no NUL");

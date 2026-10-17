@@ -1,11 +1,11 @@
 import Foundation
 import NetworkExtension
 import os
-import PQAnonFFI
+import ShaipFFI
 import SHAIPCore
 
-/// The VPN itself. The Rust core (`pqanon_session_*`, the same code `pqanon
-/// run` uses on Linux) keeps a PQANON session to the server up — keepalive,
+/// The VPN itself. The Rust core (`shaip_session_*`, the same code `shaip
+/// run` uses on Linux) keeps a SHAIP session to the server up — keepalive,
 /// reconnection, rekeying — and this provider moves IP packets between iOS and
 /// it:
 ///
@@ -52,9 +52,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             var err: UnsafeMutablePointer<CChar>?
             let started: OpaquePointer?
             if let certificate {
-                started = pqanon_session_start(config.address, config.mlDsaPub, config.edPub, identity, certificate, 15_000, &err)
+                started = shaip_session_start(config.address, config.mlDsaPub, config.edPub, identity, certificate, 15_000, &err)
             } else {
-                started = pqanon_session_start(config.address, config.mlDsaPub, config.edPub, identity, nil, 15_000, &err)
+                started = shaip_session_start(config.address, config.mlDsaPub, config.edPub, identity, nil, 15_000, &err)
             }
             guard let s = started else {
                 let message = takeString(err) ?? "Could not connect to \(config.address)."
@@ -64,27 +64,27 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 completionHandler(CoreError(message: message))
                 return
             }
-            var st = PqanonStatus()
-            pqanon_session_status(s, &st)
+            var st = ShaipStatus()
+            shaip_session_status(s, &st)
             guard st.assigned_ipv4 != 0 else {
                 // An echo-mode (test) server: nothing could be routed.
-                pqanon_session_free(s)
+                shaip_session_free(s)
                 completionHandler(CoreError(message: "The server did not assign a tunnel address, so it cannot carry traffic (it is not running with --tun)."))
                 return
             }
-            let remote = takeString(pqanon_session_server_addr(s)).flatMap(IPv4.host(ofEndpoint:))
+            let remote = takeString(shaip_session_server_addr(s)).flatMap(IPv4.host(ofEndpoint:))
                 ?? ServerConfig.host(of: config.address) ?? config.address
             setTunnelNetworkSettings(Self.settings(for: st, remote: remote)) { [self] error in
                 if let error {
                     log.error("applying network settings failed: \(error.localizedDescription, privacy: .private)")
-                    pqanon_session_free(s)
+                    shaip_session_free(s)
                     completionHandler(error)
                     return
                 }
                 lock.lock()
                 if stopRequested {
                     lock.unlock()
-                    pqanon_session_free(s) // stopped while connecting
+                    shaip_session_free(s) // stopped while connecting
                     completionHandler(CoreError(message: "Stopped while connecting."))
                     return
                 }
@@ -120,23 +120,23 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             return
         }
         work.async { [receiverDone] in
-            pqanon_session_stop(s) // tells the server Close; the receiver's next call returns -1
+            shaip_session_stop(s) // tells the server Close; the receiver's next call returns -1
             if wasRunning {
                 receiverDone.wait() // it has let go of `s`
             }
-            pqanon_session_free(s)
+            shaip_session_free(s)
             completionHandler()
         }
     }
 
     /// After sleep the NAT binding is likely gone: renegotiate straight away.
     override func wake() {
-        withSession { _ = pqanon_session_reconnect($0) }
+        withSession { _ = shaip_session_reconnect($0) }
     }
 
     // MARK: Settings
 
-    private static func settings(for st: PqanonStatus, remote: String) -> NEPacketTunnelNetworkSettings {
+    private static func settings(for st: ShaipStatus, remote: String) -> NEPacketTunnelNetworkSettings {
         let s = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: remote)
         let prefix = st.prefix_len == 0 ? 24 : Int(st.prefix_len)
         let v4 = NEIPv4Settings(addresses: [IPv4.string(st.assigned_ipv4) ?? "0.0.0.0"],
@@ -172,7 +172,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             for (i, packet) in packets.enumerated() {
                 if protocols[i].int32Value == AF_INET {
                     packet.withUnsafeBytes { raw in
-                        _ = pqanon_session_send(s, raw.bindMemory(to: UInt8.self).baseAddress, raw.count)
+                        _ = shaip_session_send(s, raw.bindMemory(to: UInt8.self).baseAddress, raw.count)
                     }
                 } else {
                     self.ipv6Dropped += 1
@@ -190,7 +190,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         let done = receiverDone
         let inet = NSNumber(value: AF_INET)
         let thread = Thread {
-            var buf = [UInt8](repeating: 0, count: Int(PQANON_MAX_PACKET))
+            var buf = [UInt8](repeating: 0, count: Int(SHAIP_MAX_PACKET))
             receive: while true {
                 var batch: [Data] = []
                 // Wait for one packet, then take whatever else is ready (up
@@ -198,7 +198,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 var timeout: UInt32 = 250
                 while batch.count < 64 {
                     let n = buf.withUnsafeMutableBufferPointer { b in
-                        pqanon_session_recv(s, b.baseAddress, b.count, timeout, nil)
+                        shaip_session_recv(s, b.baseAddress, b.count, timeout, nil)
                     }
                     if n > 0 {
                         batch.append(Data(buf[0..<n]))
@@ -218,7 +218,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             }
             done.signal()
         }
-        thread.name = "pqanon-receive"
+        thread.name = "shaip-receive"
         thread.qualityOfService = .userInitiated
         thread.start()
     }
@@ -244,22 +244,22 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     private func checkStatus() {
-        var st = PqanonStatus()
+        var st = ShaipStatus()
         var applied: UInt32 = 0
         var remote = ""
         var live = false
         withSession { s in
-            pqanon_session_status(s, &st)
+            shaip_session_status(s, &st)
             applied = appliedAddress
             remote = remoteAddress
             live = true
         }
         guard live else { return }
-        let reconnecting = st.state == PQANON_STATE_RECONNECTING
+        let reconnecting = st.state == SHAIP_STATE_RECONNECTING
         if reasserting != reconnecting {
             reasserting = reconnecting
         }
-        if st.state == PQANON_STATE_CONNECTED, st.assigned_ipv4 != 0, st.assigned_ipv4 != applied {
+        if st.state == SHAIP_STATE_CONNECTED, st.assigned_ipv4 != 0, st.assigned_ipv4 != applied {
             log.info("the server assigned a new tunnel address; re-applying settings")
             let assigned = st.assigned_ipv4
             setTunnelNetworkSettings(Self.settings(for: st, remote: remote)) { [weak self] error in
@@ -287,22 +287,22 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         lock.unlock()
         if let previous, !path.isEqual(to: previous) {
             log.info("network changed; renegotiating the session")
-            withSession { _ = pqanon_session_reconnect($0) }
+            withSession { _ = shaip_session_reconnect($0) }
         }
     }
 
     // MARK: App messages
 
     override func handleAppMessage(_ messageData: Data, completionHandler: ((Data?) -> Void)?) {
-        var st = PqanonStatus()
+        var st = ShaipStatus()
         var lastError: String?
         var server: String?
         var v6: UInt64 = 0
         var live = false
         withSession { s in
-            pqanon_session_status(s, &st)
-            lastError = takeString(pqanon_session_last_error(s))
-            server = takeString(pqanon_session_server_addr(s))
+            shaip_session_status(s, &st)
+            lastError = takeString(shaip_session_last_error(s))
+            server = takeString(shaip_session_server_addr(s))
             v6 = ipv6Dropped
             live = true
         }

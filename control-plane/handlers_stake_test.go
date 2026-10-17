@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"pqanon/control-plane/directory"
-	"pqanon/control-plane/staking"
+	"shaip/control-plane/directory"
+	"shaip/control-plane/staking"
 )
 
 type stakeStatus struct {

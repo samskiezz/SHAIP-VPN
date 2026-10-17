@@ -154,7 +154,7 @@ and rewrites the affected tables so the data is gone from their files.
   `SELECT email, account_number FROM users;`
 - Backups, database dumps, WAL archives and log files made before the upgrade
   still contain the old data. Destroy them, and delete old control-plane and
-  pqanond logs.
+  shaipd logs.
 
 ## Contact
 

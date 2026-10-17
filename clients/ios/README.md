@@ -13,14 +13,14 @@ from the Rust core carrying the traffic. If a value isn't known, the app shows a
 
 ```
 SHAIP app ──NETunnelProviderManager──▶ SHAIPTunnel (NEPacketTunnelProvider)
-   ▲  status JSON once a second               │  pqanon_session_* (ffi/include/pqanon.h)
+   ▲  status JSON once a second               │  shaip_session_* (ffi/include/shaip.h)
    └──────────sendProviderMessage─────────────┤
                                               ▼
-                                Rust core (pqanon-ffi → pqanon::supervisor)
-                                PQANON/1 over UDP ──▶ pqanond (--tun --nat)
+                                Rust core (shaip-ffi → shaip::supervisor)
+                                SHAIP/1 over UDP ──▶ shaipd (--tun --nat)
 ```
 
-- **The tunnel** is `pqanon::supervisor::ManagedTunnel`, the same code `pqanon run` uses on Linux:
+- **The tunnel** is `shaip::supervisor::ManagedTunnel`, the same code `shaip run` uses on Linux:
   a hybrid ML-KEM-768 + X25519 handshake authenticated with ML-DSA-65 + Ed25519, then
   ChaCha20-Poly1305 traffic. It sends keepalives (the source of the RTT), detects a dead server,
   reconnects with backoff, and rekeys with a fresh handshake every 20 minutes.
@@ -28,11 +28,11 @@ SHAIP app ──NETunnelProviderManager──▶ SHAIPTunnel (NEPacketTunnelProv
   domain. The tunnel carries IPv4 only, so the extension also claims IPv6 and drops it rather than
   letting it go around the tunnel. MTU 1370, so sealed packets never fragment.
 - **Network changes.** When the phone changes networks, the extension renegotiates at once
-  (`pqanon_session_reconnect`) instead of waiting for the dead-peer timer.
+  (`shaip_session_reconnect`) instead of waiting for the dead-peer timer.
 - **Kill switch** is iOS's `includeAllNetworks`. **Connect automatically** is an on-demand rule.
   Both are real VPN settings, saved to the system configuration.
 - **Enrollment.** For servers that admit enrolled devices only, the app enrolls with a
-  `pqanon://enroll` link: `pqanon_enroll` proves possession of this device's identity key and
+  `shaip://enroll` link: `shaip_enroll` proves possession of this device's identity key and
   stores the certificate in the App Group container, where the extension finds it.
 
 ## What the app keeps to itself
@@ -63,10 +63,10 @@ third-party SDKs: it talks to the VPN server, and to the control plane only to e
 | Traffic | Throughput chart (48 s of measured samples), bytes and packets, and the tunnel's health counters: reconnects, rekeys, rejected packets, packets held while reconnecting, IPv6 blocked. |
 | Protection | What is protecting this iPhone right now, from real state only, and next to it what this VPN does **not** do. |
 | Server | The configured server, the identity the handshake proved, this device's enrollment, and replace/remove. |
-| Settings | PQANON/1 and what it uses, kill switch, auto-connect, the tunnel's real parameters, and versions. |
+| Settings | SHAIP/1 and what it uses, kill switch, auto-connect, the tunnel's real parameters, and versions. |
 
 The first run shows **Setup**: import the client config the server's operator hands out. It's the
-same `client.toml` the `pqanon` CLI reads (`[server]` address and pins, plus an optional `[enroll]`
+same `client.toml` the `shaip` CLI reads (`[server]` address and pins, plus an optional `[enroll]`
 table). The app has nothing else to show until a real server is configured.
 
 ### What was removed from the v2 design, and why
@@ -100,7 +100,7 @@ On a **Mac with Xcode 26** and [rustup](https://rustup.rs):
 ```bash
 cd clients/ios
 brew install xcodegen          # once
-./scripts/build-ffi.sh         # Rust core → Frameworks/PQAnonFFI.xcframework (device + simulator)
+./scripts/build-ffi.sh         # Rust core → Frameworks/ShaipFFI.xcframework (device + simulator)
 xcodegen generate              # writes SHAIP.xcodeproj from project.yml
 open SHAIP.xcodeproj
 ```
@@ -111,30 +111,30 @@ Capabilities), with the **Network Extensions** (packet tunnel) and **App Groups*
 (`group.com.shaip.vpn`) capabilities on your App ID. Packet tunnels don't run in the iOS
 Simulator, so the tunnel needs a device. The app's screens do run in the Simulator.
 
-You need a server: `pqanond --identity … --tun pqanon0 --nat <egress-if>` on a Linux host. Then
-give the iPhone the `[server]` block from `pqanond --identity … --print-public`.
+You need a server: `shaipd --identity … --tun shaip0 --nat <egress-if>` on a Linux host. Then
+give the iPhone the `[server]` block from `shaipd --identity … --print-public`.
 
 ## Verification
 
 What has been checked, and how:
 
 - **The VPN itself, end to end** (`scripts/e2e/vpn_lab.sh`, a battery stage). Four network
-  namespaces: a client, an ISP router, `pqanond` with NAT, and an "internet" host. The client runs
+  namespaces: a client, an ISP router, `shaipd` with NAT, and an "internet" host. The client runs
   the same Rust core the extension runs. 36 checks, including:
   - the web host sees only the server's address, and lookups never reach the ISP's resolver;
   - 16 MiB arrives byte-identical;
   - the session comes back after a server restart and after a crash;
   - the kill switch blocks traffic after a client crash.
 - **Swift ↔ Rust boundary** (`FFIInterop/`, in the battery's iOS stage). The app's own `FFI/*.swift`
-  files are compiled with Swift against `pqanon.h` and its module map, linked with the Rust static
-  library, and run against a live `pqanond` in the extension's call order:
+  files are compiled with Swift against `shaip.h` and its module map, linked with the Rust static
+  library, and run against a live `shaipd` in the extension's call order:
   - start, status, server address;
   - send (from `Data`) and receive (into a buffer);
-  - snapshot and JSON round trip, including that the server identity matches `pqanond`'s
+  - snapshot and JSON round trip, including that the server identity matches `shaipd`'s
     `identity_id` byte for byte;
   - reconnect, stop (receive returns -1), and free.
 - **The C ABI** (`ffi/tests/smoke.c`, battery): the session API, a forced reconnect and RTT, from C.
-- **The Rust core for iOS.** `cargo clippy -p pqanon-ffi --target aarch64-apple-ios -D warnings` is
+- **The Rust core for iOS.** `cargo clippy -p shaip-ffi --target aarch64-apple-ios -D warnings` is
   clean. The final link needs Apple's SDK, so `build-ffi.sh` runs on a Mac.
 - **SHAIPCore** (`swift test`, 13 tests):
   - config parsing and validation, including the CLI's own file format;

@@ -1,4 +1,4 @@
-//! In-order stream reassembly for PQANON-UDP/1 stream mode (§8.5). Chunks may
+//! In-order stream reassembly for SHAIP-UDP/1 stream mode (§8.5). Chunks may
 //! arrive out of order; `insert` returns any newly contiguous bytes.
 
 use std::collections::BTreeMap;

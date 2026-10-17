@@ -13,7 +13,7 @@ import (
 
 	"github.com/miekg/pkcs11"
 
-	"pqanon/control-plane/enrollment"
+	"shaip/control-plane/enrollment"
 )
 
 // TestPKCS11SoftHSM runs against a real PKCS#11 token. It needs a module path,
@@ -21,22 +21,22 @@ import (
 // provisions a throwaway SoftHSM2 token and fails its HSM stage if this test is
 // skipped rather than run.
 func TestPKCS11SoftHSM(t *testing.T) {
-	module := os.Getenv("PQANON_TEST_PKCS11_MODULE")
-	token := os.Getenv("PQANON_TEST_PKCS11_TOKEN")
-	if module == "" || token == "" || os.Getenv("PQANON_TEST_PKCS11_PIN") == "" {
-		t.Skip("set PQANON_TEST_PKCS11_MODULE/_TOKEN/_PIN to run against a real token")
+	module := os.Getenv("SHAIP_TEST_PKCS11_MODULE")
+	token := os.Getenv("SHAIP_TEST_PKCS11_TOKEN")
+	if module == "" || token == "" || os.Getenv("SHAIP_TEST_PKCS11_PIN") == "" {
+		t.Skip("set SHAIP_TEST_PKCS11_MODULE/_TOKEN/_PIN to run against a real token")
 	}
 	rnd := make([]byte, 4)
 	_, _ = rand.Read(rnd)
-	label := "pqanon-test-" + hex.EncodeToString(rnd)
+	label := "shaip-test-" + hex.EncodeToString(rnd)
 	base := "pkcs11:token=" + token + ";object=" + label +
-		"?module-path=" + module + "&pin-env=PQANON_TEST_PKCS11_PIN"
+		"?module-path=" + module + "&pin-env=SHAIP_TEST_PKCS11_PIN"
 
 	// A wrong PIN is refused by the token. This must run before any successful
 	// login: PKCS#11 login state is shared by every session in the application,
 	// so after one good login a second C_Login reports "already logged in".
-	t.Setenv("PQANON_WRONG_PIN", "0000")
-	wrong := strings.Replace(base, "pin-env=PQANON_TEST_PKCS11_PIN", "pin-env=PQANON_WRONG_PIN", 1)
+	t.Setenv("SHAIP_WRONG_PIN", "0000")
+	wrong := strings.Replace(base, "pin-env=SHAIP_TEST_PKCS11_PIN", "pin-env=SHAIP_WRONG_PIN", 1)
 	if _, err := Open(wrong + "&create=1"); err == nil || !strings.Contains(err.Error(), "login") {
 		t.Fatalf("wrong PIN: want a login failure, got %v", err)
 	}
@@ -82,7 +82,7 @@ func TestPKCS11SoftHSM(t *testing.T) {
 	}
 
 	// An unknown token label is rejected.
-	if _, err := Open("pkcs11:token=no-such-token;object=x?module-path=" + module + "&pin-env=PQANON_TEST_PKCS11_PIN"); err == nil {
+	if _, err := Open("pkcs11:token=no-such-token;object=x?module-path=" + module + "&pin-env=SHAIP_TEST_PKCS11_PIN"); err == nil {
 		t.Fatal("an unknown token label must be rejected")
 	}
 

@@ -18,7 +18,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"pqanon/control-plane/keystore"
+	"shaip/control-plane/keystore"
 )
 
 // resolveSigner returns the signer for the key `name`, plus a log-safe

@@ -26,5 +26,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "pqanon-android"
+rootProject.name = "shaip-android"
 include(":app")

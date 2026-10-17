@@ -5,12 +5,12 @@
 //
 // A key is named by a spec string:
 //
-//	file:/var/lib/pqanon/keys/device-ca.key
+//	file:/var/lib/shaip/keys/device-ca.key
 //	    Ed25519 seed on disk (base64 or 32 raw bytes). Created 0600 on first
 //	    use; refused if group- or world-accessible.
 //	env:TOKEN_SIGNING_KEY
 //	    base64 32-byte Ed25519 seed in an environment variable.
-//	pkcs11:token=pqanon;object=device-ca?module-path=/usr/lib/softhsm/libsofthsm2.so&pin-env=PQANON_HSM_PIN
+//	pkcs11:token=shaip;object=device-ca?module-path=/usr/lib/softhsm/libsofthsm2.so&pin-env=SHAIP_HSM_PIN
 //	    Key held inside a PKCS#11 token (an HSM); the private key never leaves
 //	    the device. RFC 7512 style. Add &create=1 to generate a non-extractable
 //	    keypair on the token if no key with that label exists. Requires a cgo

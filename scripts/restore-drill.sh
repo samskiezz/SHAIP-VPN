@@ -3,10 +3,10 @@
 # and verify it is readable. Does not touch production. Run on a schedule.
 set -euo pipefail
 
-BACKUP_DIR="${BACKUP_DIR:-/var/backups/pqanon}"
-SCRATCH_DB="${SCRATCH_DB:-pqanon_restore_drill}"
+BACKUP_DIR="${BACKUP_DIR:-/var/backups/shaip}"
+SCRATCH_DB="${SCRATCH_DB:-shaip_restore_drill}"
 
-LATEST=$(ls -1t "$BACKUP_DIR"/pqanon-db-*.dump 2>/dev/null | head -1)
+LATEST=$(ls -1t "$BACKUP_DIR"/shaip-db-*.dump 2>/dev/null | head -1)
 if [ -z "$LATEST" ]; then
     echo "no backups found in $BACKUP_DIR" >&2
     exit 1
