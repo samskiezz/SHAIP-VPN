@@ -22,7 +22,10 @@
 //! QUIC semantics are ever wanted.
 
 use std::collections::BTreeMap;
+use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio::net::UdpSocket;
 
 /// Identifies one network path (e.g. Wi-Fi vs cellular, or two server addresses).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -262,6 +265,110 @@ impl Reorderer {
     pub fn buffered(&self) -> usize {
         self.buffer.len()
     }
+}
+
+fn unspecified_for(addr: SocketAddr) -> SocketAddr {
+    if addr.is_ipv4() {
+        (std::net::Ipv4Addr::UNSPECIFIED, 0).into()
+    } else {
+        (std::net::Ipv6Addr::UNSPECIFIED, 0).into()
+    }
+}
+
+/// Client-side multipath proxy. The SHAIP client is pointed at `local` as if it
+/// were the server; this relays its datagrams to the server over several paths
+/// (`upstreams`) at once, in **redundant** mode: each uplink datagram is sent on
+/// the best `redundancy` healthy paths. The server's replay window silently drops
+/// the duplicate, so a path that is slow, lossy, or dead costs no failover delay —
+/// the copy on a good path arrives on time. Replies arriving on any path are
+/// forwarded to the client. One SHAIP client per proxy instance.
+///
+/// `redundancy` of 1 is plain best-path with failover; equal to `upstreams.len()`
+/// duplicates on every path (maximum resilience, highest overhead).
+pub async fn mp_client(
+    local: Arc<UdpSocket>,
+    upstreams: Vec<SocketAddr>,
+    redundancy: usize,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(!upstreams.is_empty(), "multipath needs at least one upstream path");
+    let redundancy = redundancy.clamp(1, upstreams.len());
+
+    // One bound+connected UDP socket per path.
+    let mut socks = Vec::with_capacity(upstreams.len());
+    let mut sched = PathScheduler::new();
+    for (i, up) in upstreams.iter().enumerate() {
+        let s = UdpSocket::bind(unspecified_for(*up)).await?;
+        s.connect(*up).await?;
+        socks.push(Arc::new(s));
+        sched.add_path(PathId(i as u32));
+    }
+    let socks = Arc::new(socks);
+    let sched = Arc::new(std::sync::Mutex::new(sched));
+    let peer: Arc<tokio::sync::Mutex<Option<SocketAddr>>> = Arc::new(tokio::sync::Mutex::new(None));
+
+    // Uplink: client (UDP) -> the best `redundancy` paths.
+    let mut up_task = {
+        let local = local.clone();
+        let socks = socks.clone();
+        let sched = sched.clone();
+        let peer = peer.clone();
+        tokio::spawn(async move {
+            let mut buf = vec![0u8; 65535];
+            loop {
+                match local.recv_from(&mut buf).await {
+                    Ok((n, from)) => {
+                        *peer.lock().await = Some(from);
+                        let chosen = {
+                            let s = sched.lock().expect("sched");
+                            s.select_redundant(redundancy)
+                        };
+                        for pid in chosen {
+                            let idx = pid.0 as usize;
+                            if socks[idx].send(&buf[..n]).await.is_err() {
+                                sched.lock().expect("sched").on_loss(pid);
+                            }
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        })
+    };
+
+    // Downlink: one reader per path -> client. A path that errors (e.g. ICMP
+    // unreachable) is marked down and its reader exits; the others keep serving.
+    let mut readers = Vec::new();
+    for (i, sock) in socks.iter().enumerate() {
+        let sock = sock.clone();
+        let local = local.clone();
+        let peer = peer.clone();
+        let sched = sched.clone();
+        readers.push(tokio::spawn(async move {
+            let mut buf = vec![0u8; 65535];
+            loop {
+                match sock.recv(&mut buf).await {
+                    Ok(n) => {
+                        let to = *peer.lock().await;
+                        if let Some(to) = to {
+                            let _ = local.send_to(&buf[..n], to).await;
+                        }
+                        sched.lock().expect("sched").on_rtt(PathId(i as u32), Duration::from_millis(1));
+                    }
+                    Err(_) => {
+                        sched.lock().expect("sched").set_up(PathId(i as u32), false);
+                        break;
+                    }
+                }
+            }
+        }));
+    }
+
+    // Run until the uplink ends (client gone). Then stop the readers.
+    let _ = (&mut up_task).await;
+    for r in readers {
+        r.abort();
+    }
+    Ok(())
 }
 
 #[cfg(test)]

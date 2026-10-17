@@ -231,6 +231,23 @@ enum Cmd {
         #[arg(long, default_value = "bridge.local")]
         server_name: String,
     },
+    /// SHAIP-MP/1 multipath proxy: open a local UDP endpoint and relay the tunnel
+    /// over several server paths at once (redundant), so a dead or lossy path
+    /// costs no interruption. Point your client.toml [server].address at the local
+    /// endpoint this prints.
+    MpClient {
+        /// Local UDP endpoint to expose to the SHAIP client.
+        #[arg(long, default_value = "127.0.0.1:0")]
+        listen: String,
+        /// A server path (host:port). Repeat for each path (e.g. Wi-Fi + cellular
+        /// routes to the same server, or two server addresses).
+        #[arg(long = "upstream", required = true)]
+        upstreams: Vec<String>,
+        /// How many of the best paths to duplicate each datagram on (1 = best-path
+        /// with failover; default = all paths = maximum resilience).
+        #[arg(long, default_value_t = 0)]
+        redundancy: usize,
+    },
     /// SHAIP-PT/1 client proxy: open a local UDP endpoint and relay the tunnel
     /// over TLS to a bridge. Point your client.toml [server].address at the local
     /// endpoint this prints.
@@ -268,6 +285,38 @@ fn load_certs_pem(path: &str) -> Result<Vec<rustls::pki_types::CertificateDer<'s
         anyhow::bail!("no certificates found in {path}");
     }
     Ok(certs)
+}
+
+/// `shaip mp-client`: expose a local UDP endpoint that relays the tunnel over
+/// several server paths at once (redundant multipath).
+fn mp_client_cmd(listen: &str, upstreams: &[String], redundancy: usize) -> Result<()> {
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(async move {
+        let mut paths = Vec::new();
+        for up in upstreams {
+            let addr = tokio::net::lookup_host(up)
+                .await
+                .map_err(|e| anyhow::anyhow!("resolve {up}: {e}"))?
+                .next()
+                .ok_or_else(|| anyhow::anyhow!("{up} did not resolve"))?;
+            paths.push(addr);
+        }
+        let local = std::sync::Arc::new(
+            tokio::net::UdpSocket::bind(listen)
+                .await
+                .map_err(|e| anyhow::anyhow!("bind {listen}: {e}"))?,
+        );
+        // redundancy 0 means "all paths".
+        let redundancy = if redundancy == 0 { paths.len() } else { redundancy };
+        println!(
+            "shaip mp-client on {} over {} path(s), redundancy {redundancy}; set \
+             [server].address = \"{}\" in your client.toml",
+            local.local_addr()?,
+            paths.len(),
+            local.local_addr()?
+        );
+        shaip::multipath::mp_client(local, paths, redundancy).await
+    })
 }
 
 /// `shaip pt-bridge`: accept the TLS pluggable transport and relay to a local
@@ -458,6 +507,9 @@ fn cli_main() -> Result<()> {
         }
         Cmd::Crl { url, pubkey, max_age } => crl_cmd(&url, &pubkey, max_age),
         Cmd::Directory { url, authorities } => directory_cmd(&url, &authorities),
+        Cmd::MpClient { listen, upstreams, redundancy } => {
+            mp_client_cmd(&listen, &upstreams, redundancy)
+        }
         Cmd::PtBridge { listen, upstream, cert, key, server_name } => {
             pt_bridge_cmd(&listen, &upstream, cert.as_deref(), key.as_deref(), &server_name)
         }
