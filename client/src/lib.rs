@@ -93,5 +93,6 @@ pub mod quota;
 pub mod retx_queue;
 pub mod send_window;
 pub mod stream_sched;
+pub mod threshold;
 pub mod timeout;
 pub mod wifi;
