@@ -87,7 +87,7 @@ mod tests {
     // The exact descriptor the Go signer emits in control-plane/staking's
     // TestCrossLanguageVector (node key seed 0x44). If the format changes, both
     // sides change together.
-    const GO_VECTOR: &str = "PQD1.ABJQUUFOT04tTk9ERURFU0MtVjEBAAZub2RlLTEAAAAAAAAAKgAPMjAzLjAuMTEzLjU6NDQzOgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADXWXk7vBOigZqCfHattvuopJruAH9J8tCZLZm4Ja0sSAAAAfQAAkNI.yNrgY1dGhx-779bAnCe6Q4Ne5n6Hi8JKBOJyEemndSjDg9qbxCny_VfGhBEJOdWzG65bF7HmYHIHiVvkvkH_Cg";
+    const GO_VECTOR: &str = "PQD1.ABFTSEFJUC1OT0RFREVTQy1WMQEABm5vZGUtMQAAAAAAAAAqAA8yMDMuMC4xMTMuNTo0NDM6AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAANdZeTu8E6KBmoJ8dq22-6ikmu4Af0ny0JktmbglrSxIAAAB9AACQ0g.wRcAWMFAqNEUV-54r_VBHjJ5g1qzuKoLrgjeVnDttI7GfvC2Hl0XlxP-uJzHNY-ig0luh0eor4QZSa7-vcyHCQ";
 
     fn vector_descriptor(id: &Identity) -> NodeDescriptor {
         let mut x = [0u8; 32];

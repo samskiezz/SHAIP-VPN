@@ -286,12 +286,12 @@ mod tests {
         "    capacity-mbps 500\n",
         "    region CH\n",
         "\n",
-        "signature Zurich-01 c50910d73db344abdf679812c0c7d7771ccea4c8a580a13a0925d73f732ad05c9ecfea174ace076d106f458d83211f293cdb968b9cc044691b11f54835de0a06\n",
+        "signature Zurich-01 dfea6f103ce2568fcf0aff2215b0b9309463972884d9adbc689d3a20f40364eda885988d9a59f79d9032f3f084772667d2a4f45e4c99fdb088975cd86e473704\n",
     );
     const VECTOR_PUBKEY: &str =
         "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c";
     const VECTOR_DIGEST: &str =
-        "eacb48086e03b30875e838b475ff4984aeb86e25fb68d2f1a0311f6eda4d3896";
+        "6b7795b230888e360ac63309b4d963da3f46b61f16904646f1b9779f0beaa39f";
 
     fn vector_registry() -> BTreeMap<String, VerifyingKey> {
         let pk: [u8; 32] = hex::decode(VECTOR_PUBKEY).unwrap().try_into().unwrap();
