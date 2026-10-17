@@ -71,6 +71,7 @@ pub mod identity_check;
 pub mod mix_cover;
 pub mod mix_delay;
 pub mod mix_reputation;
+pub mod multipath;
 pub mod perm_check;
 pub mod reconnect;
 pub mod secure_write;
