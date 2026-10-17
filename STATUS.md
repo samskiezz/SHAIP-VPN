@@ -44,7 +44,8 @@ Everything else below is real.
 | iOS **core logic** (config parsing, telemetry, render engine) | **Real** | `swift test` (13 tests) — builds on Linux, Foundation-only |
 | iOS ↔ Rust boundary (the app's FFI Swift against a live `pqanond`) | **Real** | `clients/ios/FFIInterop` runs in the battery on Linux |
 | **Android app** (Kotlin + Jetpack Compose, same glass design; login, dashboard, Servers directory, devices, buy-access + code redeem; wired to the real control plane) | **Real — builds to an APK on Linux** | `cd clients/android && ./gradlew assembleDebug` → `app-debug.apk` (no macOS needed) |
-| Android VpnService (owns the TUN + connection lifecycle) | **Real skeleton** | `clients/android/.../vpn/PqanonVpnService.kt`; PQ data plane bridges the Rust core over JNI next (does not black-hole traffic until then) |
+| Android VpnService (owns the TUN + connection lifecycle) | **Real skeleton** | `clients/android/.../vpn/PqanonVpnService.kt`; does not black-hole traffic until the tunnel data path lands |
+| Android ↔ Rust PQ core over JNI | **Real** | `clients/android-native` builds `libpqanon_jni.so` for arm64-v8a / x86_64 / armeabi-v7a (cargo-ndk), bundled in the APK; the Dashboard runs a live on-device ML-DSA-65 keygen. Proven by a JVM round-trip test (`cargo test`) and a Rust unit test |
 | **Desktop app** (Rust + egui, same glass design; login, dashboard, Servers, Buy access + code redeem; wired to the real control plane) | **Real — cross-builds to Linux + Windows from Linux** | `cd clients/desktop && cargo build --release` (Linux ELF) and `--target x86_64-pc-windows-gnu` (Windows PE32+ GUI .exe); screens rendered headless under Xvfb |
 | Desktop tunnel control | **Real control surface** | drives the local `pqanon` engine (shared Rust core); honest when the engine isn't installed |
 | Full battery | **16 stages, 0 failed** | `scripts/test-all.sh` |

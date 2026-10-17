@@ -15,11 +15,14 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import net.shaip.pqanon.net.Api
 import net.shaip.pqanon.net.DashboardResp
 import net.shaip.pqanon.ui.*
 import net.shaip.pqanon.ui.theme.Tokens
+import net.shaip.pqanon.vpn.PqNative
 import net.shaip.pqanon.vpn.PqanonVpnService
 
 @Composable
@@ -28,7 +31,16 @@ fun DashboardScreen(api: Api, onDeleted: () -> Unit) {
     var dash by remember { mutableStateOf<DashboardResp?>(null) }
     var account by remember { mutableStateOf<String?>(null) }
     var err by remember { mutableStateOf<String?>(null) }
+    var coreStatus by remember { mutableStateOf<String?>(null) }
     val vpnState by PqanonVpnService.state.collectAsState()
+
+    // Load the native PQ core and run a real on-device self-test (ML-DSA-65
+    // keygen) off the UI thread, proving the Rust core runs on the phone.
+    LaunchedEffect(Unit) {
+        coreStatus = withContext(Dispatchers.Default) {
+            PqNative.selfTestOrNull() ?: "PQ core library not loaded on this ABI"
+        }
+    }
 
     val consent = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         if (it.resultCode == android.app.Activity.RESULT_OK) {
@@ -73,10 +85,14 @@ fun DashboardScreen(api: Api, onDeleted: () -> Unit) {
                     ctx.startService(Intent(ctx, PqanonVpnService::class.java).setAction(PqanonVpnService.ACTION_DISCONNECT))
                 }
             }
+            coreStatus?.let {
+                Text(it, color = Tokens.Ok, fontSize = 12.sp)
+            }
             Text(
-                "The tunnel owns the VPN interface on this device. The post-quantum data " +
-                    "plane (ML-KEM-768 + ML-DSA-65, shared with the CLI) bridges the Rust core " +
-                    "over JNI in the next build, so traffic is not yet carried end-to-end here.",
+                "The tunnel owns the VPN interface on this device. The post-quantum core " +
+                    "(ML-KEM-768 + ML-DSA-65, the same Rust crate as the CLI) runs on the device " +
+                    "over JNI — the status above is a live keygen. Carrying traffic end to end " +
+                    "needs a deployed server.",
                 color = Tokens.Ink3, fontSize = 12.sp,
             )
         }

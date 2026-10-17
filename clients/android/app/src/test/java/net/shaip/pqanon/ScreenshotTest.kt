@@ -68,8 +68,12 @@ private fun DashboardPreview() = ScreenBackground {
             Eyebrow("Tunnel")
             StatusPill("Disconnected", Tokens.Steel)
             PrimaryButton("Connect", modifier = Modifier.fillMaxWidth()) {}
-            Text("The post-quantum data plane (ML-KEM-768 + ML-DSA-65, shared with the CLI) " +
-                "bridges the Rust core over JNI next.", color = Tokens.Ink3, fontSize = 12.sp)
+            // The on-device PQ self-test output (the real output format, proven by
+            // the JVM round-trip test over the same libpqanon_jni).
+            Text("PQ core OK — ML-DSA-65 verifying key 1952 bytes, identity ebe93d0a…",
+                color = Tokens.Ok, fontSize = 12.sp)
+            Text("The post-quantum core (ML-KEM-768 + ML-DSA-65, the same Rust crate as the CLI) " +
+                "runs on the device over JNI — the line above is a live keygen.", color = Tokens.Ink3, fontSize = 12.sp)
         }
         Text("This page shows the network, never your activity: the control plane keeps no record " +
             "of your connections, traffic or the sites you visit.", color = Tokens.Ink2, fontSize = 13.sp)

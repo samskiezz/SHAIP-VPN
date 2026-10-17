@@ -1,0 +1,21 @@
+[package]
+name = "pqanon-android-jni"
+version = "0.1.0"
+edition = "2021"
+description = "JNI bridge from the Android app to the pqanon post-quantum core"
+
+[lib]
+name = "pqanon_jni"
+crate-type = ["cdylib"]
+
+[dependencies]
+pqanon = { path = "../../client", package = "pqanon-client" }
+jni = "0.21"
+hex = "0.4"
+
+[profile.release]
+strip = true
+opt-level = "z"
+
+# Isolate from the parent workspace.
+[workspace]
