@@ -104,7 +104,9 @@ export default function AppPage() {
       reduceMotion: typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches,
       c1: CY, c2: VI, bad: BA, warn: WA,
       labels, active: 0, hubLabels: { 0: [srv.id, on ? "ACTIVE" : "STANDBY"] },
-      radar: [["C2 BEACON BLOCKED", "185.220.101.4"], ["SCAN DROPPED", "198.51.100.7"]],
+      // No fabricated threat callouts: the radar sweep is decorative; real threat
+      // labels would come from a live client threat engine, which isn't running.
+      radar: [],
     };
   }, [on, srv.id, srv.ms]);
 
@@ -141,6 +143,7 @@ export default function AppPage() {
   const html = useMemo(() => {
     if (tab === 0) return connectOverlayHTML(v);
     if (tab === 1) return networkOverlayHTML(v);
+    if (tab === 3) return securityOverlayHTML(v);
     return buildingOverlayHTML(tab);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, on, srv, account, kill, multihop, dns, secs, nodes]);
@@ -151,6 +154,7 @@ export default function AppPage() {
   const canvas =
     tab === 0 ? <canvas key="net" data-gfx="net" data-cy="0.5" data-r="0.36" data-hud-clear="124" style={{ position: "absolute", left: 0, top: 92, width: 390, height: 380, display: "block", zIndex: 0 }} />
     : tab === 1 ? <canvas key="globe" data-gfx="globe" data-r="0.4" style={{ position: "absolute", left: 0, top: 118, width: 390, height: 420, display: "block", zIndex: 0 }} />
+    : tab === 3 ? <canvas key="radar" data-gfx="radar" data-r="0.4" style={{ position: "absolute", left: 35, top: 104, width: 320, height: 280, display: "block", zIndex: 0 }} />
     : null;
 
   return (
@@ -310,6 +314,44 @@ function networkOverlayHTML(v: { on: boolean; srv: Srv; multihop: boolean; secs:
     <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-top:0.5px solid rgba(255,255,255,0.1);padding-top:12px">${netStatsHTML}</div>
   </div>
   ${SCRIM_HTML}${tabBarHTML(1)}${HOME_HTML}`;
+}
+
+// Security screen: the exact threat-radar visual, with honest data. There is no
+// live threat engine running, so the counters are 0 and the alert list is empty
+// until a tunnel carries traffic — no fabricated threats or blocks.
+function securityOverlayHTML(v: { kill: boolean }): string {
+  const { kill } = v;
+  const counters = [
+    { label: "DNS BLOCKED", color: VI, value: "0" },
+    { label: "IP DROPPED", color: CY, value: "0" },
+    { label: "TLS FLAGGED", color: WA, value: "0" },
+  ];
+  const countersHTML = counters.map((k) => `
+    <div style="padding:11px 13px;border-radius:20px;display:flex;flex-direction:column;gap:3px;background:linear-gradient(180deg,rgba(255,255,255,0.07),rgba(255,255,255,0.02));backdrop-filter:blur(40px);-webkit-backdrop-filter:blur(40px);border:0.5px solid rgba(255,255,255,0.13);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.25)">
+      <span style="display:flex;align-items:center;gap:5px;font:500 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:rgba(220,228,255,0.45)"><span style="width:4px;height:4px;border-radius:2px;background:${k.color}"></span>${k.label}</span>
+      <span style="font-size:20px;font-weight:600;letter-spacing:-.03em;font-variant-numeric:tabular-nums">${k.value}</span>
+    </div>`).join("");
+
+  const killOn = kill;
+  return `${STATUSBAR_HTML}
+  <div style="position:absolute;top:62px;left:24px;right:24px;display:flex;align-items:baseline;justify-content:space-between;z-index:8;color:#F5F7FC"><span style="font-size:34px;font-weight:700;letter-spacing:-.03em;line-height:1">Security</span><span style="font:500 10px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:${OK}">● SECURE</span></div>
+  <div style="position:absolute;top:110px;left:16px;display:flex;flex-direction:column;gap:2px;font:500 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.12em;color:rgba(220,228,255,0.4);z-index:8"><span>SWEEP 1.1 rad/s</span><span>RANGE 24H</span></div>
+  <div style="position:absolute;top:110px;right:16px;display:flex;flex-direction:column;align-items:flex-end;gap:2px;font:500 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.12em;color:rgba(220,228,255,0.4);z-index:8"><span>DNS · IP · TLS</span><span>0 SIGNALS</span></div>
+  <div style="position:absolute;top:388px;left:0;right:0;bottom:0;padding:0 16px 118px;box-sizing:border-box;overflow-y:auto;scrollbar-width:none;display:flex;flex-direction:column;gap:10px;z-index:8;color:#F5F7FC">
+    <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px">${countersHTML}</div>
+    <div style="padding:14px 16px;border-radius:26px;display:flex;flex-direction:column;gap:8px;background:linear-gradient(180deg,rgba(255,255,255,0.085),rgba(255,255,255,0.025));backdrop-filter:blur(40px) saturate(180%);-webkit-backdrop-filter:blur(40px) saturate(180%);border:0.5px solid rgba(255,255,255,0.15);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.32),0 24px 48px -18px rgba(0,0,0,0.9)">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+        <div style="display:flex;flex-direction:column;gap:3px"><span style="font:600 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.16em;color:${killOn ? OK : BA}">${killOn ? "ARMED" : "DISARMED"}</span><span style="font-size:19px;font-weight:600;letter-spacing:-.02em">Kill switch</span></div>
+        <div data-act="kill" style="pointer-events:auto;flex:none;width:58px;height:32px;border-radius:16px;padding:2px;box-sizing:border-box;display:flex;justify-content:${killOn ? "flex-end" : "flex-start"};background:${killOn ? OK : "rgba(255,255,255,0.14)"};cursor:pointer;box-shadow:inset 0 1px 2px rgba(0,0,0,0.3)"><div style="width:36px;height:28px;border-radius:14px;background:linear-gradient(180deg,#FFFFFF,#E4E8F0);box-shadow:0 2px 6px rgba(0,0,0,0.35),inset 0 -1px 0 rgba(0,0,0,0.08)"></div></div>
+      </div>
+      <span style="font-size:13px;line-height:1.4;color:rgba(220,228,255,0.55)">If the tunnel drops, all traffic is blocked until it reconnects — nothing leaks outside SHAIP.</span>
+    </div>
+    <div style="padding:20px 16px;border-radius:26px;display:flex;flex-direction:column;align-items:center;gap:4px;background:linear-gradient(180deg,rgba(255,255,255,0.07),rgba(255,255,255,0.02));border:0.5px solid rgba(255,255,255,0.13);text-align:center">
+      <span style="font:500 10px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:rgba(220,228,255,0.45)">NO THREATS LOGGED</span>
+      <span style="font-size:13px;color:rgba(220,228,255,0.5)">The on-device threat engine logs blocks here while the tunnel carries traffic.</span>
+    </div>
+  </div>
+  ${SCRIM_HTML}${tabBarHTML(3)}${HOME_HTML}`;
 }
 
 // Temporary honest placeholder for tabs still being built to the v2 design.
