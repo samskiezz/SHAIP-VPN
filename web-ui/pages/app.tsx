@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, formatAccount, getToken } from "@/lib/api";
+import { browserProtection } from "@/lib/protection";
 
 // The SHAIP v2 instrument UI on the web, rebuilt to the real design reference
 // (clients/ios/design/SHAIP iOS v2.dc.html) and driven by the same render engine
@@ -59,10 +60,10 @@ export default function AppPage() {
   const [account, setAccount] = useState<string | null>(null);
   const [nodes, setNodes] = useState<Srv[]>([]);
   const [srvIdx, setSrvIdx] = useState(0);
-  const [kill, setKill] = useState(true);
-  const [multihop, setMultihop] = useState(true);
-  const [dns, setDns] = useState(true);
-  const [pq, setPq] = useState(true);
+  const [kill, setKill] = useState(false);
+  const [multihop, setMultihop] = useState(false);
+  const [dns, setDns] = useState(false);
+  const [pq, setPq] = useState(false);
   const [proto, setProto] = useState<"mesh" | "wg" | "ike">("mesh");
   const [tab, setTab] = useState(0);
   const [secs, setSecs] = useState(0);
@@ -75,6 +76,7 @@ export default function AppPage() {
   useEffect(() => {
     if (preview) {
       setConnected(true);
+      setKill(true); setMultihop(true); setDns(true); setPq(true);
       setNodes([SAMPLE]);
       setAccount("1234567890123456");
       return;
@@ -95,7 +97,8 @@ export default function AppPage() {
   }, [connected]);
 
   const srv: Srv = nodes[srvIdx] ?? (preview ? SAMPLE : { city: "No servers", id: "—", dc: "—", ip: "—", ms: null, tag: "" });
-  const on = connected && nodes.length > 0;
+  const protection = browserProtection(preview, connected, nodes.length);
+  const on = protection.simulatedConnected;
 
   // Options for the render engine (same shape as the design's engOpts).
   const engOptsRef = useRef<any>({});
@@ -134,6 +137,7 @@ export default function AppPage() {
     const el = (e.target as HTMLElement).closest<HTMLElement>("[data-act]");
     if (!el) return;
     const act = el.dataset.act!;
+    if (!protection.canSimulate && !act.startsWith("tab:") && !act.startsWith("srv:")) return;
     if (act === "toggle") setConnected((c) => !c);
     else if (act === "kill") setKill((v) => !v);
     else if (act === "multihop") setMultihop((v) => !v);
@@ -144,7 +148,7 @@ export default function AppPage() {
     else if (act.startsWith("tab:")) setTab(Number(act.slice(4)));
   };
 
-  const v = { on, srv, account, kill, multihop, dns, tab, secs, nodes };
+  const v = { on, srv, account, kill, multihop, dns, tab, secs, nodes, preview };
   const html = useMemo(() => {
     if (tab === 0) return connectOverlayHTML(v);
     if (tab === 1) return networkOverlayHTML(v);
@@ -165,7 +169,8 @@ export default function AppPage() {
     : null;
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, background: "#020306", fontFamily: "-apple-system,'SF Pro Text',system-ui,sans-serif" }}>
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 24, padding: 24, background: "#020306", fontFamily: "-apple-system,'SF Pro Text',system-ui,sans-serif" }}>
+      <p role="status" style={{ maxWidth: 430, margin: 0, padding: 16, color: WA, background: "#151822", borderRadius: 12, lineHeight: 1.5 }}>{protection.message}</p>
       <div ref={frameRef} style={{ width: 390, height: 844, borderRadius: 58, position: "relative", overflow: "hidden", background: "radial-gradient(120% 70% at 50% 0%,#0B1020 0%,#04050A 55%,#020306 100%)", boxShadow: "0 0 0 1px #3A3D45,0 0 0 11px #0B0C0F,0 0 0 12px #2A2C33,0 80px 120px -30px rgba(0,0,0,0.9),0 0 120px -20px rgba(92,242,255,0.12)" }}>
         {canvas}
         <div ref={overlayRef} onClick={onOverlayClick} style={{ position: "absolute", inset: 0, zIndex: 1, pointerEvents: "none" }} dangerouslySetInnerHTML={{ __html: html }} />
@@ -177,9 +182,9 @@ export default function AppPage() {
 // Builds the exact Connect-screen overlay markup (everything except the mesh
 // canvas) with real values substituted. Interactive elements carry data-act.
 function connectOverlayHTML(v: {
-  on: boolean; srv: Srv; account: string | null; kill: boolean; multihop: boolean; dns: boolean; tab: number; secs: number;
+  on: boolean; srv: Srv; account: string | null; kill: boolean; multihop: boolean; dns: boolean; tab: number; secs: number; preview: boolean;
 }): string {
-  const { on, srv, account, kill, multihop, dns, tab, secs } = v;
+  const { on, srv, account, kill, multihop, dns, tab, secs, preview } = v;
   const statusColor = on ? OK : BA;
   const pillBg = on ? "rgba(98,245,168,0.12)" : "rgba(255,92,122,0.12)";
   const orbColor = on ? CY : "rgba(220,228,255,0.55)";
@@ -198,9 +203,9 @@ function connectOverlayHTML(v: {
   ].map((m, i) => ({ ...m, pl: i ? "12px" : "0px", bl: i ? "0.5px solid rgba(255,255,255,0.08)" : "0.5px solid transparent" }));
 
   const quick = [
-    { act: "kill", label: "Kill switch", state: kill ? "ARMED" : "DISARMED", color: kill ? OK : BA, d: ICON.lock },
-    { act: "multihop", label: "Multi-hop", state: multihop ? "3 HOPS" : "DIRECT", color: multihop ? CY : SUB, d: ICON.hop },
-    { act: "dns", label: "Private DNS", state: dns ? "FILTERING" : "OFF", color: dns ? VI : SUB, d: ICON.dns },
+    { act: "kill", label: "Kill switch", state: !preview ? "UNAVAILABLE" : kill ? "DEMO ARMED" : "DEMO OFF", color: kill ? OK : BA, d: ICON.lock },
+    { act: "multihop", label: "Multi-hop", state: !preview ? "UNAVAILABLE" : multihop ? "DEMO HOPS" : "DEMO DIRECT", color: multihop ? CY : SUB, d: ICON.hop },
+    { act: "dns", label: "Private DNS", state: !preview ? "UNAVAILABLE" : dns ? "DEMO FILTER" : "DEMO OFF", color: dns ? VI : SUB, d: ICON.dns },
   ].map((q) => ({ ...q, border: q.color === SUB ? "rgba(255,255,255,0.14)" : hexA(q.color, 0.35) }));
 
   const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
@@ -236,15 +241,15 @@ function connectOverlayHTML(v: {
   </div>
   <div style="position:absolute;top:92px;left:0;width:390px;height:380px;z-index:6;display:flex;align-items:center;justify-content:center;pointer-events:none">
     <svg width="244" height="244" viewBox="0 0 244 244" style="position:absolute"><circle cx="122" cy="122" r="118" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="6" stroke-dasharray="0.7 5.48"></circle><circle cx="122" cy="122" r="100" fill="none" stroke="${orbRing}" stroke-width="1"></circle><circle cx="122" cy="122" r="100" fill="none" stroke="${orbColor}" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="${arc}" transform="rotate(-90 122 122)"></circle></svg>
-    <div data-act="toggle" role="button" style="pointer-events:auto;width:156px;height:156px;border-radius:78px;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;background:radial-gradient(80% 80% at 30% 18%,rgba(255,255,255,0.24),rgba(255,255,255,0.04) 60%),rgba(10,14,26,0.4);backdrop-filter:blur(14px) saturate(180%);-webkit-backdrop-filter:blur(14px) saturate(180%);border:0.5px solid rgba(255,255,255,0.32);box-shadow:inset 0 1px 0 rgba(255,255,255,0.5),inset 0 -14px 28px rgba(0,0,0,0.4),0 30px 60px -10px rgba(0,0,0,0.85),0 0 70px ${orbGlow}">
+    <div data-act="toggle" role="button" aria-disabled="${!preview}" style="pointer-events:auto;width:156px;height:156px;border-radius:78px;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;background:radial-gradient(80% 80% at 30% 18%,rgba(255,255,255,0.24),rgba(255,255,255,0.04) 60%),rgba(10,14,26,0.4);backdrop-filter:blur(14px) saturate(180%);-webkit-backdrop-filter:blur(14px) saturate(180%);border:0.5px solid rgba(255,255,255,0.32);box-shadow:inset 0 1px 0 rgba(255,255,255,0.5),inset 0 -14px 28px rgba(0,0,0,0.4),0 30px 60px -10px rgba(0,0,0,0.85),0 0 70px ${orbGlow}">
       <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="${orbColor}" stroke-width="2" stroke-linecap="round"><path d="M12 3v8M6.3 6.8a8 8 0 1011.4 0"></path></svg>
-      <span style="font:600 11px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.18em;color:${orbColor}">${on ? "SECURED" : "OFFLINE"}</span>
-      <span style="font-size:11px;color:rgba(220,228,255,0.5)">${on ? "Tap to disconnect" : "Tap to connect"}</span>
+      <span style="font:600 11px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.18em;color:${orbColor}">${preview ? "SIMULATION" : "UNAVAILABLE"}</span>
+      <span style="font-size:11px;color:rgba(220,228,255,0.5)">${preview ? "Toggle preview" : "Native VPN required"}</span>
     </div>
   </div>
   <div style="position:absolute;top:478px;left:16px;right:16px;padding:16px 18px;border-radius:30px;z-index:8;display:flex;flex-direction:column;gap:14px;background:linear-gradient(180deg,rgba(255,255,255,0.085),rgba(255,255,255,0.025));backdrop-filter:blur(40px) saturate(180%);-webkit-backdrop-filter:blur(40px) saturate(180%);border:0.5px solid rgba(255,255,255,0.15);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.32),0 1px 1px rgba(0,0,0,0.6),0 24px 48px -18px rgba(0,0,0,0.9);color:#F5F7FC">
     <div style="display:flex;align-items:center;justify-content:space-between">
-      <div style="display:flex;align-items:center;gap:7px;height:24px;padding:0 10px;border-radius:12px;background:${pillBg}"><span style="width:6px;height:6px;border-radius:3px;background:${statusColor};box-shadow:0 0 8px ${statusColor}"></span><span style="font:600 10px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:${statusColor}">${on ? "PROTECTED" : "EXPOSED"}</span></div>
+      <div style="display:flex;align-items:center;gap:7px;height:24px;padding:0 10px;border-radius:12px;background:${pillBg}"><span style="width:6px;height:6px;border-radius:3px;background:${statusColor};box-shadow:0 0 8px ${statusColor}"></span><span style="font:600 10px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:${statusColor}">${preview ? "SIMULATED" : "UNVERIFIED"}</span></div>
       <span style="font:500 15px ui-monospace,'SF Mono',Menlo,monospace;font-variant-numeric:tabular-nums;letter-spacing:.02em">${timer}</span>
     </div>
     <div style="display:flex;flex-direction:column;gap:5px">
@@ -324,14 +329,13 @@ function networkOverlayHTML(v: { on: boolean; srv: Srv; multihop: boolean; secs:
 }
 
 // Security screen: the exact threat-radar visual, with honest data. There is no
-// live threat engine running, so the counters are 0 and the alert list is empty
-// until a tunnel carries traffic — no fabricated threats or blocks.
-function securityOverlayHTML(v: { kill: boolean }): string {
-  const { kill } = v;
+// live threat engine running. Missing observations must not imply zero threats.
+function securityOverlayHTML(v: { kill: boolean; preview: boolean }): string {
+  const { kill, preview } = v;
   const counters = [
-    { label: "DNS BLOCKED", color: VI, value: "0" },
-    { label: "IP DROPPED", color: CY, value: "0" },
-    { label: "TLS FLAGGED", color: WA, value: "0" },
+    { label: "DNS BLOCKED", color: VI, value: "—" },
+    { label: "IP DROPPED", color: CY, value: "—" },
+    { label: "TLS FLAGGED", color: WA, value: "—" },
   ];
   const countersHTML = counters.map((k) => `
     <div style="padding:11px 13px;border-radius:20px;display:flex;flex-direction:column;gap:3px;background:linear-gradient(180deg,rgba(255,255,255,0.07),rgba(255,255,255,0.02));backdrop-filter:blur(40px);-webkit-backdrop-filter:blur(40px);border:0.5px solid rgba(255,255,255,0.13);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.25)">
@@ -341,21 +345,21 @@ function securityOverlayHTML(v: { kill: boolean }): string {
 
   const killOn = kill;
   return `${STATUSBAR_HTML}
-  <div style="position:absolute;top:62px;left:24px;right:24px;display:flex;align-items:baseline;justify-content:space-between;z-index:8;color:#F5F7FC"><span style="font-size:34px;font-weight:700;letter-spacing:-.03em;line-height:1">Security</span><span style="font:500 10px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:${OK}">● SECURE</span></div>
+  <div style="position:absolute;top:62px;left:24px;right:24px;display:flex;align-items:baseline;justify-content:space-between;z-index:8;color:#F5F7FC"><span style="font-size:34px;font-weight:700;letter-spacing:-.03em;line-height:1">Security</span><span style="font:500 10px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:${WA}">● UNVERIFIED</span></div>
   <div style="position:absolute;top:110px;left:16px;display:flex;flex-direction:column;gap:2px;font:500 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.12em;color:rgba(220,228,255,0.4);z-index:8"><span>SWEEP 1.1 rad/s</span><span>RANGE 24H</span></div>
-  <div style="position:absolute;top:110px;right:16px;display:flex;flex-direction:column;align-items:flex-end;gap:2px;font:500 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.12em;color:rgba(220,228,255,0.4);z-index:8"><span>DNS · IP · TLS</span><span>0 SIGNALS</span></div>
+  <div style="position:absolute;top:110px;right:16px;display:flex;flex-direction:column;align-items:flex-end;gap:2px;font:500 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.12em;color:rgba(220,228,255,0.4);z-index:8"><span>DNS · IP · TLS</span><span>NO TELEMETRY</span></div>
   <div style="position:absolute;top:388px;left:0;right:0;bottom:0;padding:0 16px 118px;box-sizing:border-box;overflow-y:auto;scrollbar-width:none;display:flex;flex-direction:column;gap:10px;z-index:8;color:#F5F7FC">
     <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px">${countersHTML}</div>
     <div style="padding:14px 16px;border-radius:26px;display:flex;flex-direction:column;gap:8px;background:linear-gradient(180deg,rgba(255,255,255,0.085),rgba(255,255,255,0.025));backdrop-filter:blur(40px) saturate(180%);-webkit-backdrop-filter:blur(40px) saturate(180%);border:0.5px solid rgba(255,255,255,0.15);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.32),0 24px 48px -18px rgba(0,0,0,0.9)">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
-        <div style="display:flex;flex-direction:column;gap:3px"><span style="font:600 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.16em;color:${killOn ? OK : BA}">${killOn ? "ARMED" : "DISARMED"}</span><span style="font-size:19px;font-weight:600;letter-spacing:-.02em">Kill switch</span></div>
+        <div style="display:flex;flex-direction:column;gap:3px"><span style="font:600 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.16em;color:${killOn ? OK : BA}">${preview ? "SIMULATED" : "UNAVAILABLE"}</span><span style="font-size:19px;font-weight:600;letter-spacing:-.02em">Kill switch</span></div>
         <div data-act="kill" style="pointer-events:auto;flex:none;width:58px;height:32px;border-radius:16px;padding:2px;box-sizing:border-box;display:flex;justify-content:${killOn ? "flex-end" : "flex-start"};background:${killOn ? OK : "rgba(255,255,255,0.14)"};cursor:pointer;box-shadow:inset 0 1px 2px rgba(0,0,0,0.3)"><div style="width:36px;height:28px;border-radius:14px;background:linear-gradient(180deg,#FFFFFF,#E4E8F0);box-shadow:0 2px 6px rgba(0,0,0,0.35),inset 0 -1px 0 rgba(0,0,0,0.08)"></div></div>
       </div>
-      <span style="font-size:13px;line-height:1.4;color:rgba(220,228,255,0.55)">If the tunnel drops, all traffic is blocked until it reconnects — nothing leaks outside SHAIP.</span>
+      <span style="font-size:13px;line-height:1.4;color:rgba(220,228,255,0.55)">This browser page cannot install a kill switch. Use the native tunnel to configure traffic blocking.</span>
     </div>
     <div style="padding:20px 16px;border-radius:26px;display:flex;flex-direction:column;align-items:center;gap:4px;background:linear-gradient(180deg,rgba(255,255,255,0.07),rgba(255,255,255,0.02));border:0.5px solid rgba(255,255,255,0.13);text-align:center">
-      <span style="font:500 10px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:rgba(220,228,255,0.45)">NO THREATS LOGGED</span>
-      <span style="font-size:13px;color:rgba(220,228,255,0.5)">The on-device threat engine logs blocks here while the tunnel carries traffic.</span>
+      <span style="font:500 10px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:rgba(220,228,255,0.45)">THREAT TELEMETRY UNAVAILABLE</span>
+      <span style="font-size:13px;color:rgba(220,228,255,0.5)">This page has no live threat engine. Missing telemetry is not evidence of safety.</span>
     </div>
   </div>
   ${SCRIM_HTML}${tabBarHTML(3)}${HOME_HTML}`;
@@ -392,22 +396,21 @@ function nodesOverlayHTML(v: { nodes: Srv[]; srvIdx: number }): string {
     <div style="display:flex;align-items:baseline;justify-content:space-between;padding:0 8px"><span style="font-size:34px;font-weight:700;letter-spacing:-.03em;line-height:1">Servers</span><span style="font:500 10px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.14em;color:rgba(220,228,255,0.45)">${nodes.length} LISTED</span></div>
     <div style="height:44px;border-radius:22px;padding:0 16px;display:flex;align-items:center;gap:10px;color:rgba(220,228,255,0.45);font-size:15px;background:linear-gradient(180deg,rgba(255,255,255,0.07),rgba(255,255,255,0.025));backdrop-filter:blur(40px);-webkit-backdrop-filter:blur(40px);border:0.5px solid rgba(255,255,255,0.14)"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 4a7 7 0 100 14 7 7 0 000-14zM20 20l-4-4"></path></svg><span style="flex:1">Region, city or node ID</span></div>
     <div style="border-radius:30px;overflow:hidden;background:linear-gradient(180deg,rgba(255,255,255,0.075),rgba(255,255,255,0.02));backdrop-filter:blur(40px) saturate(180%);-webkit-backdrop-filter:blur(40px) saturate(180%);border:0.5px solid rgba(255,255,255,0.15);box-shadow:inset 0 0.5px 0 rgba(255,255,255,0.3),0 24px 48px -18px rgba(0,0,0,0.9)">${rows}</div>
-    <span style="font:400 11px ui-monospace,'SF Mono',Menlo,monospace;color:rgba(220,228,255,0.4);padding:2px 8px">Latency is measured after you connect; the directory is signed and verified before any server is trusted.</span>
+    <span style="font:400 11px ui-monospace,'SF Mono',Menlo,monospace;color:rgba(220,228,255,0.4);padding:2px 8px">Directory listing only. The browser does not measure tunnel latency or verify a native connection.</span>
   </div>
   ${SCRIM_HTML}${tabBarHTML(2)}${HOME_HTML}`;
 }
 
-// Settings tab → Protocol: real product config (SHAIP Mesh / WireGuard / IKEv2)
-// and the tunnel toggles. All real settings; the crypto facts are the product's.
+// Protocol availability; browser switches never change native tunnel policy.
 function protocolOverlayHTML(v: { proto: "mesh" | "wg" | "ike"; kill: boolean; multihop: boolean; dns: boolean; pq: boolean }): string {
   const { proto, kill, multihop, dns, pq } = v;
   const PROTOS = [
-    { k: "mesh", name: "SHAIP Mesh", tag: "RECOMMENDED", sub: "WireGuard core · multi-hop · ML-KEM-768 hybrid", specs: ["UDP 443", "ChaCha20-Poly1305", "PQ"] },
-    { k: "wg", name: "WireGuard", tag: "", sub: "Single hop · lowest latency", specs: ["UDP 51820", "Curve25519"] },
-    { k: "ike", name: "IKEv2 / IPsec", tag: "", sub: "Native fallback for restricted networks", specs: ["UDP 500/4500", "AES-256-GCM"] },
+    { k: "mesh", name: "SHAIP Mesh", tag: "NATIVE ONLY", sub: "SHAIP/1 · single hop · ML-KEM-768 hybrid", specs: ["UDP 443", "ChaCha20-Poly1305", "PQ"] },
+    { k: "wg", name: "WireGuard", tag: "UNAVAILABLE", sub: "Not implemented in SHAIP", specs: ["UDP 51820", "Curve25519"] },
+    { k: "ike", name: "IKEv2 / IPsec", tag: "UNAVAILABLE", sub: "Not implemented in SHAIP", specs: ["UDP 500/4500", "AES-256-GCM"] },
   ];
   const protoHTML = PROTOS.map((p) => {
-    const sel = p.k === proto;
+    const sel = p.k === "mesh";
     const border = sel ? "rgba(92,242,255,0.5)" : "rgba(255,255,255,0.13)";
     const shadow = sel ? "inset 0 0.5px 0 rgba(255,255,255,0.3),0 10px 24px -12px rgba(92,242,255,0.4)" : "inset 0 0.5px 0 rgba(255,255,255,0.25)";
     const ring = sel ? CY : "rgba(255,255,255,0.3)";
@@ -425,10 +428,10 @@ function protocolOverlayHTML(v: { proto: "mesh" | "wg" | "ike"; kill: boolean; m
   }).join("");
 
   const toggles = [
-    { act: "kill", label: "Kill switch", sub: "Block all traffic if the tunnel drops", on: kill },
-    { act: "multihop", label: "Multi-hop", sub: "Route through a relay before the exit", on: multihop },
-    { act: "dns", label: "Private DNS", sub: "Resolve inside the tunnel, filter trackers", on: dns },
-    { act: "pq", label: "Post-quantum", sub: "ML-KEM-768 + ML-DSA-65 hybrid handshake", on: pq },
+    { act: "kill", label: "Kill switch", sub: "Native Linux only; unavailable in this browser", on: kill },
+    { act: "multihop", label: "Multi-hop", sub: "Not implemented in the tunnel data path", on: multihop },
+    { act: "dns", label: "Private DNS", sub: "Native tunnel DNS; browser filtering unavailable", on: dns },
+    { act: "pq", label: "Post-quantum", sub: "Native protocol; browser control is a simulation", on: pq },
   ];
   const togglesHTML = toggles.map((t, i) => {
     const bt = i ? "0.5px solid rgba(255,255,255,0.08)" : "0.5px solid transparent";

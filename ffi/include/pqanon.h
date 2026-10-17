@@ -146,6 +146,11 @@ long pqanon_session_recv(const PqanonSession *s, uint8_t *buf, size_t cap,
 /* Copy a status snapshot. 0, or -1 if an argument is NULL. */
 int pqanon_session_status(const PqanonSession *s, PqanonStatus *out);
 
+/* Before installing full-tunnel routes: require an active session, assigned
+ * IPv4 address and an in-subnet DNS resolver. 0 = valid, -1 = refuse. This does
+ * not verify OS routes/firewall. Free *err with pqanon_string_free. */
+int pqanon_session_check_full_tunnel(const PqanonSession *s, char **err);
+
 /* The server's UDP address as resolved and used, e.g. "203.0.113.7:443" (free it). */
 char *pqanon_session_server_addr(const PqanonSession *s);
 

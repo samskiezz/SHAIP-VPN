@@ -151,7 +151,7 @@ make build           # release binaries + control plane + web build
 ./target/release/pqanond --identity /var/lib/pqanon/pqanond.id --listen 0.0.0.0:443 \
     --tun pqanon0 --nat eth0
 #    On the client: put the server's address and --print-public pins in a client.toml
-sudo ./target/release/pqanon run --config client.toml            # add --kill-switch to fail closed
+sudo ./target/release/pqanon run --config client.toml            # kill switch enabled by default
 ./target/release/pqanon status                                   # state, RTT, counters
 ./target/release/pqanon disconnect                               # routes and DNS restored
 

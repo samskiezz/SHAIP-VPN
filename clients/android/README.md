@@ -20,17 +20,20 @@ design tokens (`clients/ios/design/HANDOFF.md`).
   cloud backup / device transfer are disabled for shared-prefs, files and
   databases (`res/xml/data_extraction_rules.xml`). Cleartext is allowed only to
   the dev control plane (emulator loopback), everything else is HTTPS.
-- **The tunnel** runs as an Android `VpnService` (`vpn/PqanonVpnService.kt`)
-  that owns the TUN interface and the connection lifecycle.
+- Account requests require HTTPS for remote hosts and refuse redirects. The
+  emulator/loopback HTTP exception is restricted to debug builds.
 
-## What is not wired yet (honest status)
+## VPN availability
 
-- The **post-quantum data plane** — the PQANON/1 handshake (ML-KEM-768 +
-  ML-DSA-65) and the encrypted tunnel — lives in the shared Rust core (crate
-  `pqanon`, proven by the CLI and the netns lab). On Android it is bridged over
-  JNI/NDK in the next step; until then `Connect` establishes the interface and
-  reports state but does **not** install a default route, so device traffic is
-  never silently captured or black-holed.
+**Android packet forwarding is not implemented. This app does not protect device
+traffic.** The connection button is disabled and the VpnService refuses to
+manufacture a connected state. The native crypto self-test only generates keys;
+it does not establish a routed tunnel.
+
+JNI session plumbing, a real packet pump, protected sockets, routes, DNS,
+foreground lifecycle and device/network tests are still required. See
+[exposure safeguards](../../docs/exposure-safeguards.md).
+
 - Payments (buying blind-signed tokens) happen in the app/CLI flow; the web/pay
   screen here shows plans and redeems codes, as on web.
 
@@ -57,5 +60,5 @@ app/src/main/java/net/shaip/pqanon/
   ui/App.kt               signed-in shell + tab nav
   ui/screens/             Login, Dashboard, Servers, Devices, Pay
   net/                    control-plane API client (OkHttp + kotlinx.serialization)
-  vpn/PqanonVpnService.kt the VpnService that owns the tunnel
+  vpn/PqanonVpnService.kt the unavailable-tunnel service gate
 ```

@@ -1,5 +1,5 @@
 # SHAIP VPN client config. Copy to ~/.pqanon/client.toml and run:
-#   sudo pqanon run --config ~/.pqanon/client.toml        (add --kill-switch to fail closed)
+#   sudo pqanon run --config ~/.pqanon/client.toml        (kill switch enabled by default)
 # The iOS app imports this same file (Setup → Import config file).
 #
 # Only the keys below are read. Routing, DNS, MTU and keepalive come from the

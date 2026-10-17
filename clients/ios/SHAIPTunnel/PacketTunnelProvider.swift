@@ -26,6 +26,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     /// iOS stopped the tunnel before the first handshake finished.
     private var stopRequested = false
     private var appliedAddress: UInt32 = 0
+    private var appliedDNS: UInt32 = 0
+    private var appliedPrefix: UInt32 = 0
     private var remoteAddress = ""
     private var ipv6Dropped: UInt64 = 0
     private var lastSatisfiedPath: NWPath?
@@ -66,10 +68,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             }
             var st = PqanonStatus()
             pqanon_session_status(s, &st)
-            guard st.assigned_ipv4 != 0 else {
-                // An echo-mode (test) server: nothing could be routed.
+            var protectionError: UnsafeMutablePointer<CChar>?
+            guard pqanon_session_check_full_tunnel(s, &protectionError) == 0 else {
+                let reason = takeString(protectionError) ?? "The server did not provide safe tunnel routing and DNS."
                 pqanon_session_free(s)
-                completionHandler(CoreError(message: "The server did not assign a tunnel address, so it cannot carry traffic (it is not running with --tun)."))
+                completionHandler(CoreError(message: reason))
                 return
             }
             let remote = takeString(pqanon_session_server_addr(s)).flatMap(IPv4.host(ofEndpoint:))
@@ -91,6 +94,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 session = s
                 running = true
                 appliedAddress = st.assigned_ipv4
+                appliedDNS = st.dns_ipv4
+                appliedPrefix = UInt32(st.prefix_len)
                 remoteAddress = remote
                 lock.unlock()
                 startReceiving(s)
@@ -248,13 +253,30 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         var applied: UInt32 = 0
         var remote = ""
         var live = false
+        var invalid = false
         withSession { s in
             pqanon_session_status(s, &st)
+            if st.state == PQANON_STATE_CONNECTED {
+                var error: UnsafeMutablePointer<CChar>?
+                invalid = pqanon_session_check_full_tunnel(s, &error) != 0
+                    || st.dns_ipv4 != appliedDNS || UInt32(st.prefix_len) != appliedPrefix
+                _ = takeString(error)
+                if invalid {
+                    reasserting = true
+                    pqanon_session_stop(s)
+                }
+            }
             applied = appliedAddress
             remote = remoteAddress
             live = true
         }
         guard live else { return }
+        if invalid {
+            // Stop both packet pumps immediately. Do not keep showing a
+            // connected VPN with stale or missing resolver settings.
+            cancelTunnelWithError(CoreError(message: "The server changed or removed protected DNS/routing parameters. Reconnect explicitly to apply a new configuration."))
+            return
+        }
         let reconnecting = st.state == PQANON_STATE_RECONNECTING
         if reasserting != reconnecting {
             reasserting = reconnecting

@@ -15,12 +15,6 @@ enum Screen {
     Buy,
 }
 
-#[derive(PartialEq, Clone, Copy)]
-enum Tunnel {
-    Off,
-    Connecting,
-    On,
-}
 
 pub struct DesktopApp {
     ctx: egui::Context,
@@ -49,8 +43,8 @@ pub struct DesktopApp {
     code_err: Option<String>,
     show_delete: bool,
     delete_pw: String,
-    tunnel: Tunnel,
-    tunnel_note: Option<String>,
+    tunnel: crate::tunnel::Controller,
+    tunnel_config: String,
 }
 
 impl DesktopApp {
@@ -111,8 +105,8 @@ impl DesktopApp {
             code_err: None,
             show_delete: false,
             delete_pw: String::new(),
-            tunnel: Tunnel::Off,
-            tunnel_note: None,
+            tunnel: crate::tunnel::Controller::default(),
+            tunnel_config: std::env::var("PQANON_CONFIG").unwrap_or_default(),
         }
     }
 
@@ -169,7 +163,7 @@ impl DesktopApp {
         self.account.clear();
         self.password.clear();
         self.loaded = false;
-        self.tunnel = Tunnel::Off;
+        self.tunnel.stop();
     }
 }
 
@@ -234,6 +228,8 @@ fn status_pill(ui: &mut egui::Ui, label: &str, tint: Color32) {
 impl eframe::App for DesktopApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.pump();
+        self.tunnel.poll();
+        if self.tunnel.active() { ctx.request_repaint_after(std::time::Duration::from_millis(500)); }
 
         egui::CentralPanel::default()
             .frame(egui::Frame::none())
@@ -379,27 +375,29 @@ impl DesktopApp {
         ui.add_space(8.0);
         theme::glass().show(ui, |ui| {
             eyebrow(ui, "Tunnel");
-            let (label, tint) = match self.tunnel {
-                Tunnel::On => ("Connected", OK),
-                Tunnel::Connecting => ("Connecting", theme::INK2),
-                Tunnel::Off => ("Disconnected", STEEL),
+            use crate::tunnel::State;
+            let (label, tint) = match self.tunnel.state {
+                State::Connected => ("Connected", OK),
+                State::Starting => ("Connecting", INK2),
+                State::Reconnecting => ("Reconnecting", INK2),
+                State::Stopping => ("Disconnecting", INK2),
+                State::Unverified => ("Protection unverified", THREAT),
+                State::Failed => ("Not protected", THREAT),
+                State::Off => ("Disconnected", STEEL),
             };
             status_pill(ui, label, tint);
             ui.add_space(6.0);
-            let clicked = match self.tunnel {
-                Tunnel::Off => primary_button(ui, "Connect", true),
-                _ => glass_button(ui, "Disconnect", true),
+            ui.label(RichText::new("Operator-issued client.toml path").color(INK2).size(12.0));
+            ui.add_enabled(!self.tunnel.active(), egui::TextEdit::singleline(&mut self.tunnel_config).hint_text("/path/to/client.toml"));
+            let clicked = if self.tunnel.active() {
+                glass_button(ui, "Disconnect", self.tunnel.state != State::Stopping)
+            } else {
+                primary_button(ui, "Connect", !self.tunnel_config.trim().is_empty())
             };
-            if clicked {
-                self.toggle_tunnel();
-            }
-            if let Some(n) = &self.tunnel_note {
-                ui.label(RichText::new(n).color(INK3).size(12.0));
-            }
+            if clicked { self.toggle_tunnel(); }
+            ui.label(RichText::new(&self.tunnel.note).color(INK3).size(12.0));
             ui.label(RichText::new(
-                "The desktop app drives the local tunnel engine (the pqanon client, shared with \
-                 the CLI). The post-quantum handshake (ML-KEM-768 + ML-DSA-65) and the encrypted \
-                 tunnel run in that engine; it needs admin/root to open the TUN device.",
+                "The Linux engine needs network administration privileges. Windows and macOS tunnel backends are unavailable. A connected indicator requires fresh status from the actual engine after routing, DNS and firewall setup.",
             ).color(INK3).size(12.0));
         });
         ui.add_space(8.0);
@@ -550,33 +548,10 @@ impl DesktopApp {
     }
 
     fn toggle_tunnel(&mut self) {
-        match self.tunnel {
-            Tunnel::Off => {
-                // Drive the local engine. The privileged tunnel helper (the pqanon
-                // client, shared with the CLI) opens the TUN device; if it isn't on
-                // PATH we say so honestly rather than pretending to connect.
-                self.tunnel = Tunnel::Connecting;
-                match std::process::Command::new("pqanon").arg("--version").output() {
-                    Ok(_) => {
-                        self.tunnel = Tunnel::On;
-                        self.tunnel_note = Some("Engine found; the tunnel is managed by the pqanon helper.".into());
-                    }
-                    Err(_) => {
-                        self.tunnel = Tunnel::Off;
-                        self.tunnel_note = Some(
-                            "Tunnel engine (pqanon) not found on PATH. Install the pqanon client \
-                             alongside the app to connect.".into(),
-                        );
-                    }
-                }
-            }
-            _ => {
-                let _ = std::process::Command::new("pqanon").arg("disconnect").output();
-                self.tunnel = Tunnel::Off;
-                self.tunnel_note = None;
-            }
-        }
+        if self.tunnel.active() { self.tunnel.stop(); }
+        else { self.tunnel.start(self.tunnel_config.trim()); }
     }
+
 }
 
 fn role_label(role: &str) -> String {

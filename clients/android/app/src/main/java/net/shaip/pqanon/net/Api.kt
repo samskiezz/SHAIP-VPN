@@ -3,6 +3,7 @@ package net.shaip.pqanon.net
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -20,6 +21,8 @@ class Api(private val session: Session) {
     private val http = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
+        .followRedirects(false)
+        .followSslRedirects(false)
         .build()
 
     @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
@@ -34,7 +37,15 @@ class Api(private val session: Session) {
         body: Any? = null,
         auth: Boolean = true,
     ): String = withContext(Dispatchers.IO) {
-        val url = session.apiBase.trimEnd('/') + path
+        val base = session.apiBase.toHttpUrl()
+        val localDevelopment = net.shaip.pqanon.BuildConfig.DEBUG && base.host in setOf("10.0.2.2", "127.0.0.1", "localhost", "::1")
+        require(base.isHttps || (base.scheme == "http" && localDevelopment)) {
+            "Remote account requests require HTTPS."
+        }
+        require(base.username.isEmpty() && base.password.isEmpty() && base.query == null && base.fragment == null) {
+            "Control-plane URLs cannot contain credentials, queries or fragments."
+        }
+        val url = base.toString().trimEnd('/') + path
         val rb = body?.let { encodeBody(it).toRequestBody(jsonType) }
         val b = Request.Builder().url(url).method(method, rb)
         if (body != null) b.header("Content-Type", "application/json")

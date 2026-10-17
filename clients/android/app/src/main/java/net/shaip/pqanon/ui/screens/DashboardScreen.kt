@@ -1,16 +1,11 @@
 package net.shaip.pqanon.ui.screens
 
-import android.content.Intent
-import android.net.VpnService
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -27,7 +22,6 @@ import net.shaip.pqanon.vpn.PqanonVpnService
 
 @Composable
 fun DashboardScreen(api: Api, onDeleted: () -> Unit) {
-    val ctx = LocalContext.current
     var dash by remember { mutableStateOf<DashboardResp?>(null) }
     var account by remember { mutableStateOf<String?>(null) }
     var err by remember { mutableStateOf<String?>(null) }
@@ -39,12 +33,6 @@ fun DashboardScreen(api: Api, onDeleted: () -> Unit) {
     LaunchedEffect(Unit) {
         coreStatus = withContext(Dispatchers.Default) {
             PqNative.selfTestOrNull() ?: "PQ core library not loaded on this ABI"
-        }
-    }
-
-    val consent = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-        if (it.resultCode == android.app.Activity.RESULT_OK) {
-            ctx.startService(Intent(ctx, PqanonVpnService::class.java).setAction(PqanonVpnService.ACTION_CONNECT))
         }
     }
 
@@ -62,37 +50,26 @@ fun DashboardScreen(api: Api, onDeleted: () -> Unit) {
             dash?.let { StatCard("Servers online", "${it.nodesOnline} of ${it.nodesTotal}") }
         }
 
-        // Connect control, wired to the real VpnService. Flipping it on runs the
-        // system VPN-consent dialog, then starts the service.
+        // Availability is explicit: native keygen must never imply VPN protection.
         Column(Modifier.fillMaxWidth().glass().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Eyebrow("Tunnel")
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 val (label, tint) = when (vpnState) {
                     PqanonVpnService.Companion.State.CONNECTED -> "Connected" to Tokens.Ok
                     PqanonVpnService.Companion.State.CONNECTING -> "Connecting" to Tokens.Warn
+                    PqanonVpnService.Companion.State.UNAVAILABLE -> "Not protected" to Tokens.Threat
                     else -> "Disconnected" to Tokens.Steel
                 }
                 StatusPill(label, tint)
             }
-            if (vpnState == PqanonVpnService.Companion.State.DISCONNECTED) {
-                PrimaryButton("Connect", modifier = Modifier.fillMaxWidth()) {
-                    val prep = VpnService.prepare(ctx)
-                    if (prep != null) consent.launch(prep)
-                    else ctx.startService(Intent(ctx, PqanonVpnService::class.java).setAction(PqanonVpnService.ACTION_CONNECT))
-                }
-            } else {
-                GlassButton("Disconnect", modifier = Modifier.fillMaxWidth()) {
-                    ctx.startService(Intent(ctx, PqanonVpnService::class.java).setAction(PqanonVpnService.ACTION_DISCONNECT))
-                }
-            }
+            PrimaryButton("Tunnel unavailable", enabled = false, modifier = Modifier.fillMaxWidth()) {}
+            Text(PqanonVpnService.UNAVAILABLE_REASON, color = Tokens.Threat, fontSize = 12.sp)
             coreStatus?.let {
-                Text(it, color = Tokens.Ok, fontSize = 12.sp)
+                Text("Cryptographic self-test only: $it", color = Tokens.Ink3, fontSize = 12.sp)
             }
             Text(
-                "The tunnel owns the VPN interface on this device. The post-quantum core " +
-                    "(ML-KEM-768 + ML-DSA-65, the same Rust crate as the CLI) runs on the device " +
-                    "over JNI — the status above is a live keygen. Carrying traffic end to end " +
-                    "needs a deployed server.",
+                "The native library can generate keys, but it cannot yet forward Android traffic. " +
+                    "A deployed server alone does not complete this integration.",
                 color = Tokens.Ink3, fontSize = 12.sp,
             )
         }

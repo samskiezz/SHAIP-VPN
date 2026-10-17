@@ -54,7 +54,7 @@ enum Cmd {
         split_tunnel: bool,
         /// Reject all traffic outside the tunnel, and keep doing so if this
         /// process dies, until it reconnects or `pqanon down` runs.
-        #[arg(long)]
+        #[arg(long, default_value_t = true, num_args = 0..=1, default_missing_value = "true", action = clap::ArgAction::Set)]
         kill_switch: bool,
         /// Keep the system resolver instead of the server's (lookups to a
         /// LAN resolver then go around the tunnel).
@@ -718,6 +718,15 @@ fn run(o: RunOpts) -> Result<()> {
             .next()
             .ok_or_else(|| anyhow::anyhow!("{} did not resolve", cfg.tunnel.server))?;
 
+        // Close ordinary egress before negotiating. A failed first handshake
+        // keeps this guard installed until `pqanon down` explicitly releases it.
+        let _bootstrap_firewall = if o.kill_switch {
+            let mut guard = pqanon::netcfg::block_leaks(&cfg.tun_device, server_addr, true)?;
+            guard.persist();
+            Some(guard)
+        } else {
+            None
+        };
         let net: Arc<OnceLock<FullTunnel>> = Arc::new(OnceLock::new());
         let mut sup = SupervisorConfig::new(pqanon::client::ClientConfig {
             server: server_addr.to_string(),
@@ -740,6 +749,14 @@ fn run(o: RunOpts) -> Result<()> {
             }
         })?);
         let info = link.status().info;
+        if !o.split_tunnel {
+            if let Err(reason) = pqanon::protection::require_full_tunnel(
+                info.assigned_v4, info.prefix_len, info.dns_v4, !o.keep_dns,
+            ) {
+                link.stop().await;
+                anyhow::bail!("{reason}");
+            }
+        }
 
         // The server routes return traffic by the address it assigned, so use
         // that one; fall back to the configured address for servers that
@@ -762,9 +779,6 @@ fn run(o: RunOpts) -> Result<()> {
 
         let full = !o.split_tunnel;
         let dns = if full && !o.keep_dns { info.dns_v4 } else { None };
-        if full && !o.keep_dns && dns.is_none() {
-            tracing::warn!("the server pushed no resolver: lookups use the system resolver, which may sit outside the tunnel");
-        }
         let ft = FullTunnel::up(FullTunnelOpts {
             tun: tun.name().to_string(),
             server: server_addr,
@@ -787,21 +801,31 @@ fn run(o: RunOpts) -> Result<()> {
             if o.kill_switch { "on" } else { "off" },
         );
 
-        let up = tokio::spawn(pump_up(tun.clone(), link.clone()));
-        let down = tokio::spawn(pump_down(tun.clone(), link.clone()));
-        let watch = tokio::spawn(watch_link(link.clone(), tun.clone(), net.clone(), tun_prefix));
-        let status = tokio::spawn(write_status(link.clone(), server_addr, tun.name().to_string()));
+        let mut up = tokio::spawn(pump_up(tun.clone(), link.clone()));
+        let mut down = tokio::spawn(pump_down(tun.clone(), link.clone()));
+        let mut watch = tokio::spawn(watch_link(link.clone(), tun.clone(), net.clone(), tun_prefix, full, !o.keep_dns, dns));
+        let status = tokio::spawn(write_status(link.clone(), server_addr, tun.name().to_string(), full, dns.is_some(), full && !o.allow_ipv6_leak, o.kill_switch));
+        let mut watch_done = false;
+        let mut up_done = false;
+        let mut down_done = false;
+        let mut explicit_stop = false;
         let outcome = tokio::select! {
-            r = up => r.map_err(anyhow::Error::from).and_then(|r| r),
-            r = down => r.map_err(anyhow::Error::from).and_then(|r| r),
-            _ = shutdown_signal() => Ok(()),
+            r = &mut up => { up_done = true; r.map_err(anyhow::Error::from).and_then(|r| r) },
+            r = &mut down => { down_done = true; r.map_err(anyhow::Error::from).and_then(|r| r) },
+            r = &mut watch => { watch_done = true; r.map_err(anyhow::Error::from).and_then(|r| r) },
+            _ = shutdown_signal() => { explicit_stop = true; Ok(()) },
         };
-        watch.abort();
+        if !up_done { up.abort(); let _ = up.await; }
+        if !down_done { down.abort(); let _ = down.await; }
+        if !watch_done { watch.abort(); let _ = watch.await; }
         status.abort();
+        let _ = status.await;
         link.stop().await; // tells the server: Close
         let _ = std::fs::remove_file(status_path());
         if let Some(ft) = Arc::try_unwrap(net).ok().and_then(|n| n.into_inner()) {
-            ft.down(); // routes, DNS and firewall (kill switch included) restored
+            if explicit_stop {
+                ft.down(); // explicit stop restores normal networking
+            } // on failure, Drop restores routes/DNS but keeps a persistent kill switch
         }
         let st = link.status();
         println!(
@@ -821,13 +845,24 @@ async fn watch_link(
     tun: std::sync::Arc<pqanon::tun::AsyncTun>,
     net: std::sync::Arc<std::sync::OnceLock<pqanon::netcfg::FullTunnel>>,
     prefix: u8,
-) {
+    full: bool,
+    require_dns: bool,
+    configured_dns: Option<std::net::Ipv4Addr>,
+) -> Result<()> {
     use pqanon::supervisor::LinkState;
     let mut changes = link.changes();
     let mut state = LinkState::Connected;
     let mut addr = link.status().info.assigned_v4;
     while changes.changed().await.is_ok() {
         let st = link.status();
+        if st.state == LinkState::Connected && full {
+            pqanon::protection::require_full_tunnel(
+                st.info.assigned_v4, st.info.prefix_len, st.info.dns_v4, require_dns,
+            ).map_err(anyhow::Error::msg)?;
+            if st.info.prefix_len != prefix || (require_dns && st.info.dns_v4 != configured_dns) {
+                anyhow::bail!("the server changed DNS or prefix during reconnect; reconnect explicitly to apply new routing safely");
+            }
+        }
         if st.state != state {
             match st.state {
                 LinkState::Connected => println!("tunnel up again (reconnect #{})", st.reconnects),
@@ -835,7 +870,7 @@ async fn watch_link(
                     "tunnel down: {}; reconnecting. Traffic stays inside the tunnel interface meanwhile (dropped, not sent around it)",
                     st.last_error.as_deref().unwrap_or("unknown")
                 ),
-                LinkState::Stopped => return,
+                LinkState::Stopped => anyhow::bail!("the tunnel supervisor stopped"),
             }
             state = st.state;
         }
@@ -845,14 +880,15 @@ async fn watch_link(
                 Ok(()) => {
                     println!("the server assigned a new tunnel address: {new}");
                     if let Some(ft) = net.get() {
-                        ft.reassert_routes();
+                        ft.reassert_routes()?;
                     }
                     addr = Some(new);
                 }
-                Err(e) => tracing::error!(error = %e, "could not apply the new tunnel address"),
+                Err(e) => return Err(e.into()),
             }
         }
     }
+    anyhow::bail!("the tunnel status monitor stopped")
 }
 
 fn status_path() -> std::path::PathBuf {
@@ -867,6 +903,10 @@ async fn write_status(
     link: std::sync::Arc<pqanon::supervisor::ManagedTunnel>,
     server: std::net::SocketAddr,
     device: String,
+    full: bool,
+    dns_tunnel: bool,
+    ipv6_blocked: bool,
+    kill_switch: bool,
 ) {
     let mut tick = tokio::time::interval(std::time::Duration::from_secs(2));
     loop {
@@ -878,8 +918,10 @@ async fn write_status(
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_secs().to_string())
             .unwrap_or_else(|| "-".into());
+        let updated = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis()).unwrap_or(0);
         let text = format!(
-            "pid={}\nstate={:?}\nserver={server}\nserver_identity={}\ndevice={device}\ntunnel_address={}\ndns={}\nmtu={}\n\
+            "updated_unix_ms={updated}\nfull_tunnel={full}\ndns_tunnel={dns_tunnel}\nipv6_blocked={ipv6_blocked}\nkill_switch={kill_switch}\npid={}\nstate={:?}\nserver={server}\nserver_identity={}\ndevice={device}\ntunnel_address={}\ndns={}\nmtu={}\n\
              rtt_ms={}\nup_since_unix={since}\npackets_sent={}\nbytes_sent={}\npackets_received={}\nbytes_received={}\n\
              dropped_offline={}\nreconnects={}\nrekeys={}\nlast_error={}\n",
             std::process::id(),
@@ -1067,4 +1109,23 @@ fn run(_o: RunOpts) -> Result<()> {
 fn parse_cidr(s: &str) -> Result<(std::net::Ipv4Addr, u8)> {
     let (ip, prefix) = s.split_once('/').unwrap_or((s, "24"));
     Ok((ip.trim().parse()?, prefix.trim().parse()?))
+}
+
+#[cfg(test)]
+mod protection_cli_tests {
+    use super::*;
+
+    #[test]
+    fn kill_switch_is_default_and_disabling_it_requires_an_explicit_value() {
+        for (args, expected) in [
+            (vec!["pqanon", "run", "--config", "client.toml"], true),
+            (vec!["pqanon", "run", "--config", "client.toml", "--kill-switch"], true),
+            (vec!["pqanon", "run", "--config", "client.toml", "--kill-switch=false"], false),
+        ] {
+            match Cli::try_parse_from(args).unwrap().cmd {
+                Cmd::Run { kill_switch, .. } => assert_eq!(kill_switch, expected),
+                _ => unreachable!(),
+            }
+        }
+    }
 }

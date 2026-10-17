@@ -87,6 +87,7 @@ pub mod notify;
 pub mod pacing_budget;
 pub mod path_cache;
 pub mod progress;
+pub mod protection;
 pub mod qos;
 pub mod quota;
 pub mod retx_queue;

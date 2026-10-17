@@ -1,10 +1,11 @@
-//! Control-plane client for the desktop app. Uses ehttp so requests run off the
+//! Control-plane client for the desktop app. Uses the HTTPS-only native adapter so requests run off the
 //! UI thread; each call reports back through an mpsc channel as a [`Msg`], and
 //! the UI thread repaints when one arrives.
 
 use std::sync::mpsc::Sender;
 
 use serde::Deserialize;
+use crate::http;
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Me {
@@ -97,10 +98,10 @@ fn err_from(status: u16, body: &str) -> String {
 fn send<T: for<'de> Deserialize<'de>>(
     ctx: egui::Context,
     tx: Sender<Msg>,
-    req: ehttp::Request,
+    req: http::Request,
     ok: impl FnOnce(T) -> Msg + Send + 'static,
 ) {
-    ehttp::fetch(req, move |res| {
+    http::fetch(req, move |res| {
         let msg = match res {
             Ok(r) => {
                 let body = r.text().unwrap_or_default();
@@ -120,8 +121,8 @@ fn send<T: for<'de> Deserialize<'de>>(
     });
 }
 
-fn post_json(url: String, body: serde_json::Value, token: Option<&str>) -> ehttp::Request {
-    let mut req = ehttp::Request::post(url, body.to_string().into_bytes());
+fn post_json(url: String, body: serde_json::Value, token: Option<&str>) -> http::Request {
+    let mut req = http::Request::post(url, body.to_string().into_bytes());
     req.headers.insert("Content-Type", "application/json");
     if let Some(t) = token {
         req.headers.insert("Authorization", format!("Bearer {t}"));
@@ -129,8 +130,8 @@ fn post_json(url: String, body: serde_json::Value, token: Option<&str>) -> ehttp
     req
 }
 
-fn get(url: String, token: Option<&str>) -> ehttp::Request {
-    let mut req = ehttp::Request::get(url);
+fn get(url: String, token: Option<&str>) -> http::Request {
+    let mut req = http::Request::get(url);
     if let Some(t) = token {
         req.headers.insert("Authorization", format!("Bearer {t}"));
     }
@@ -190,7 +191,7 @@ impl Api {
         // DELETE returns an empty 2xx body, so check the status directly rather
         // than decoding JSON.
         let (ctx, tx) = (self.ctx.clone(), self.tx.clone());
-        ehttp::fetch(req, move |res| {
+        http::fetch(req, move |res| {
             let msg = match res {
                 Ok(r) if (200..300).contains(&r.status) => Msg::Deleted,
                 Ok(r) => Msg::Err(err_from(r.status, &r.text().unwrap_or_default())),
