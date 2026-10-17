@@ -66,33 +66,20 @@ fun DashboardScreen(api: Api, onDeleted: () -> Unit) {
         // system VPN-consent dialog, then starts the service.
         Column(Modifier.fillMaxWidth().glass().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Eyebrow("Tunnel")
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                val (label, tint) = when (vpnState) {
-                    ShaipVpnService.Companion.State.CONNECTED -> "Connected" to Tokens.Ok
-                    ShaipVpnService.Companion.State.CONNECTING -> "Connecting" to Tokens.Warn
-                    else -> "Disconnected" to Tokens.Steel
-                }
-                StatusPill(label, tint)
-            }
-            if (vpnState == ShaipVpnService.Companion.State.DISCONNECTED) {
-                PrimaryButton("Connect", modifier = Modifier.fillMaxWidth()) {
-                    val prep = VpnService.prepare(ctx)
-                    if (prep != null) consent.launch(prep)
-                    else ctx.startService(Intent(ctx, ShaipVpnService::class.java).setAction(ShaipVpnService.ACTION_CONNECT))
-                }
-            } else {
-                GlassButton("Disconnect", modifier = Modifier.fillMaxWidth()) {
-                    ctx.startService(Intent(ctx, ShaipVpnService::class.java).setAction(ShaipVpnService.ACTION_DISCONNECT))
-                }
-            }
+            // Honest: this build does NOT carry or protect traffic. The packet
+            // data path (forwarding through the PQ core over JNI) isn't wired yet,
+            // so the app must never show "Connected/Protected" — that would be
+            // false confidence while real traffic flows outside any tunnel.
+            StatusPill("Not protected", Tokens.Warn)
             coreStatus?.let {
                 Text(it, color = Tokens.Ok, fontSize = 12.sp)
             }
             Text(
-                "The tunnel owns the VPN interface on this device. The post-quantum core " +
-                    "(ML-KEM-768 + ML-DSA-65, the same Rust crate as the CLI) runs on the device " +
-                    "over JNI — the status above is a live keygen. Carrying traffic end to end " +
-                    "needs a deployed server.",
+                "This build does not route or protect your traffic yet. The post-quantum core " +
+                    "runs on-device (the self-test above is a live ML-DSA-65 keygen), but the " +
+                    "tunnel data path — forwarding packets through it over JNI — isn't wired, and " +
+                    "no server is deployed to carry traffic. Connect stays off until the data path " +
+                    "is real, so the app never claims protection it can't provide.",
                 color = Tokens.Ink3, fontSize = 12.sp,
             )
         }

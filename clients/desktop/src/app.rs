@@ -2,6 +2,7 @@
 //! Connect control that drives the local tunnel engine.
 
 use std::sync::mpsc::{channel, Receiver, Sender};
+use std::time::{Duration, Instant};
 
 use egui::{Align, Color32, Layout, Rounding, RichText, Vec2};
 
@@ -51,6 +52,7 @@ pub struct DesktopApp {
     delete_pw: String,
     tunnel: Tunnel,
     tunnel_note: Option<String>,
+    last_status: Option<Instant>,
 }
 
 impl DesktopApp {
@@ -113,6 +115,7 @@ impl DesktopApp {
             delete_pw: String::new(),
             tunnel: Tunnel::Off,
             tunnel_note: None,
+            last_status: None,
         }
     }
 
@@ -234,6 +237,10 @@ fn status_pill(ui: &mut egui::Ui, label: &str, tint: Color32) {
 impl eframe::App for DesktopApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.pump();
+        // Keep the tunnel indicator truthful: poll the engine's real status, and
+        // keep repainting so it updates even without user input.
+        self.refresh_status(false);
+        ctx.request_repaint_after(Duration::from_secs(2));
 
         egui::CentralPanel::default()
             .frame(egui::Frame::none())
@@ -552,30 +559,97 @@ impl DesktopApp {
     fn toggle_tunnel(&mut self) {
         match self.tunnel {
             Tunnel::Off => {
-                // Drive the local engine. The privileged tunnel helper (the shaip
-                // client, shared with the CLI) opens the TUN device; if it isn't on
-                // PATH we say so honestly rather than pretending to connect.
-                self.tunnel = Tunnel::Connecting;
-                match std::process::Command::new("shaip").arg("--version").output() {
-                    Ok(_) => {
-                        self.tunnel = Tunnel::On;
-                        self.tunnel_note = Some("Engine found; the tunnel is managed by the shaip helper.".into());
-                    }
-                    Err(_) => {
-                        self.tunnel = Tunnel::Off;
-                        self.tunnel_note = Some(
-                            "Tunnel engine (shaip) not found on PATH. Install the shaip client \
-                             alongside the app to connect.".into(),
-                        );
-                    }
+                // Starting the tunnel needs a saved server config and admin rights.
+                // We NEVER show "Connected" from anything less than the engine's own
+                // status — a running binary is not a live tunnel.
+                let cfg = config_path();
+                if !cfg.exists() {
+                    self.tunnel = Tunnel::Off;
+                    self.tunnel_note = Some(format!(
+                        "No server configured ({}). Add a client config, then connect — \
+                         the app stays DISCONNECTED until the engine confirms a live tunnel.",
+                        cfg.display()
+                    ));
+                    return;
                 }
+                // Launch the real engine (shaip run). It needs CAP_NET_ADMIN; if it
+                // can't establish, the status poll below keeps the state at
+                // Disconnected rather than claiming protection.
+                self.tunnel = Tunnel::Connecting;
+                self.tunnel_note = Some("Starting the tunnel…".into());
+                let spawned = std::process::Command::new("shaip")
+                    .arg("run").arg("--config").arg(&cfg).arg("--kill-switch")
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn();
+                if spawned.is_err() {
+                    self.tunnel = Tunnel::Off;
+                    self.tunnel_note = Some("Tunnel engine (shaip) is not installed on this machine.".into());
+                }
+                self.last_status = None; // force an immediate status refresh
             }
             _ => {
                 let _ = std::process::Command::new("shaip").arg("disconnect").output();
-                self.tunnel = Tunnel::Off;
-                self.tunnel_note = None;
+                self.refresh_status(true);
             }
         }
+    }
+
+    /// Set the tunnel state from the engine's own `shaip status`. This is the only
+    /// thing allowed to show "Connected": a live tunnel with an assigned address,
+    /// reported by the engine — never a mere process check.
+    fn refresh_status(&mut self, force: bool) {
+        if !force {
+            if let Some(t) = self.last_status {
+                if t.elapsed() < Duration::from_secs(2) {
+                    return;
+                }
+            }
+        }
+        self.last_status = Some(Instant::now());
+        let (t, note) = shaip_status();
+        // Keep a transient "Connecting…" note while a just-launched engine has not
+        // yet written a status; don't override it with a bare "disconnected".
+        if self.tunnel == Tunnel::Connecting && t == Tunnel::Off && note.is_none() {
+            return;
+        }
+        self.tunnel = t;
+        if note.is_some() || t != Tunnel::Connecting {
+            self.tunnel_note = note;
+        }
+    }
+}
+
+/// Where a saved client config lives. `shaip run` needs one; without it the app
+/// cannot (and must not) claim to be connected.
+fn config_path() -> std::path::PathBuf {
+    if let Some(h) = std::env::var_os("HOME") {
+        std::path::PathBuf::from(h).join(".config/shaip/client.toml")
+    } else {
+        std::path::PathBuf::from("client.toml")
+    }
+}
+
+/// Read the engine's real state via `shaip status`. Returns On only when the
+/// status file reports a running tunnel with an assigned address.
+fn shaip_status() -> (Tunnel, Option<String>) {
+    let out = match std::process::Command::new("shaip").arg("status").output() {
+        Ok(o) => o,
+        Err(_) => return (Tunnel::Off, Some("Tunnel engine (shaip) is not installed on this machine.".into())),
+    };
+    let text = String::from_utf8_lossy(&out.stdout);
+    if text.contains("state=NotRunning") || text.trim().is_empty() {
+        return (Tunnel::Off, None);
+    }
+    let addr = text.lines()
+        .find_map(|l| l.strip_prefix("tunnel_address="))
+        .map(str::trim)
+        .unwrap_or("");
+    if addr.is_empty() || addr == "-" {
+        (Tunnel::Connecting, Some("Establishing the tunnel…".into()))
+    } else {
+        (Tunnel::On, Some(format!("Protected — tunnel address {addr}")))
     }
 }
 
