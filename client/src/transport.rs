@@ -8,12 +8,26 @@
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
 
 use crate::wire::{Envelope, MsgType};
+
+// SHAIP-SHAPE/1 (traffic-analysis defence) is built on the real Maybenot
+// framework. Maybenot targets rand 0.9, pulled in here as `rand09` alongside the
+// crate's rand 0.8; `enum-map` matches Maybenot's version so machine States can
+// be constructed programmatically against its Event enum.
+use enum_map::enum_map;
+use maybenot::action::{Action as MbAction, Timer as MbTimer};
+use maybenot::dist::{Dist, DistType};
+use maybenot::event::Event as MbEvent;
+use maybenot::state::{State as MbState, Trans};
+use maybenot::{Framework, Machine, MachineId, TriggerAction, TriggerEvent};
+use rand09::rngs::StdRng;
+use rand09::SeedableRng;
 
 /// Anti-replay / ordering window (§8.2) — a 64-packet sliding bitmap.
 ///
@@ -360,6 +374,449 @@ impl Transport {
     }
 }
 
+// ===========================================================================
+// SHAIP-SHAPE/1 — client-side traffic-analysis defence (Maybenot integration)
+// ===========================================================================
+//
+// Even though every datagram is sealed and OBF/2 length-shaped, the *timing* of
+// outgoing packets still leaks a pattern (a web page load, a voice call, a file
+// transfer each have a recognizable shape). SHAIP-SHAPE/1 hides that pattern by
+// running the real Maybenot framework: probabilistic state machines that decide
+// when to inject padding (cover) packets and when to briefly hold real packets,
+// reshaping the client's send timing.
+//
+// Maybenot returns *actions* and leaves the integrator to run the timers and
+// feed back the resulting *events* (see the framework docs). [`TrafficShaper`]
+// below is that integrator: it owns one Maybenot [`Framework`] plus the
+// per-machine action/internal timers and the framework-scoped blocking window.
+// It is pure and synchronous — every method takes `now` explicitly — so it is
+// fully deterministic and unit-tested here. The async I/O (actually writing a
+// cover packet, holding a real packet while blocked) lives in
+// [`crate::client::Tunnel`], which drives this with the reporters below and
+// [`poll`](TrafficShaper::poll).
+//
+// This defends the client→server (upstream) timing only. Downstream shaping is
+// the server's job and is not yet wired; this is stated honestly in the docs so
+// the defence is never overclaimed.
+
+/// Which built-in traffic-shaping defence to run.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShapePreset {
+    /// No shaping: packets are sent exactly when the application sends them.
+    Off,
+    /// Low-overhead gap-filling padding (≤ ~50% padding), no blocking.
+    Light,
+    /// More padding plus occasional brief blocking to break up bursts (adds a
+    /// few ms of latency at times).
+    Medium,
+}
+
+impl ShapePreset {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "off" | "none" | "" => Some(Self::Off),
+            "light" => Some(Self::Light),
+            "medium" => Some(Self::Medium),
+            _ => None,
+        }
+    }
+}
+
+/// A reusable description of a shaping defence: the Maybenot machines plus the
+/// framework-wide overhead caps. Cloneable, so one spec can drive every session
+/// a link opens — each new session builds its own fresh [`TrafficShaper`]
+/// runtime from it.
+#[derive(Clone)]
+pub struct ShapeSpec {
+    pub machines: Vec<Machine>,
+    /// Cap on total padding as a fraction of normal packets (framework-wide),
+    /// in `[0.0, 1.0]`.
+    pub max_padding_frac: f64,
+    /// Cap on total blocking time as a fraction of elapsed time (framework-wide),
+    /// in `[0.0, 1.0]`.
+    pub max_blocking_frac: f64,
+}
+
+impl ShapeSpec {
+    /// Build the machines and caps for a built-in preset. `Off` yields `None`.
+    pub fn preset(p: ShapePreset) -> Option<Self> {
+        match p {
+            ShapePreset::Off => None,
+            ShapePreset::Light => Some(Self {
+                machines: vec![padding_machine(5_000.0, 50_000.0, 100)],
+                max_padding_frac: 0.5,
+                max_blocking_frac: 0.0,
+            }),
+            ShapePreset::Medium => Some(Self {
+                machines: vec![
+                    padding_machine(2_000.0, 20_000.0, 200),
+                    jitter_block_machine(),
+                ],
+                max_padding_frac: 1.0,
+                max_blocking_frac: 0.5,
+            }),
+        }
+    }
+
+    /// Build a spec from operator-supplied serialized Maybenot machines (the
+    /// base64 strings `Machine::serialize` / the maybenot tooling produce) and
+    /// explicit caps. This is how a tuned, classifier-specific defence is
+    /// deployed without code changes.
+    pub fn from_serialized(
+        machines: &[String],
+        max_padding_frac: f64,
+        max_blocking_frac: f64,
+    ) -> anyhow::Result<Self> {
+        let mut ms = Vec::with_capacity(machines.len());
+        for s in machines {
+            ms.push(
+                Machine::from_str(s)
+                    .map_err(|e| anyhow::anyhow!("invalid shaping machine: {e}"))?,
+            );
+        }
+        Ok(Self {
+            machines: ms,
+            max_padding_frac,
+            max_blocking_frac,
+        })
+    }
+}
+
+/// A gap-filling padding machine. When a normal packet is sent it enters a
+/// padding state that keeps one padding packet scheduled (timeout sampled
+/// uniformly in `[low_us, high_us]`) and reschedules on every normal or padding
+/// packet — so quiet gaps inside an active flow are filled, and padding tapers
+/// off once the flow goes idle. `allowed` is the free padding budget before the
+/// framework's `max_padding_frac` cap takes over.
+fn padding_machine(low_us: f64, high_us: f64, allowed: u64) -> Machine {
+    let boot = MbState::new(enum_map! {
+        MbEvent::NormalSent => vec![Trans(1, 1.0)],
+        _ => vec![],
+    });
+    let mut pad = MbState::new(enum_map! {
+        MbEvent::NormalSent => vec![Trans(1, 1.0)],
+        MbEvent::PaddingSent => vec![Trans(1, 1.0)],
+        _ => vec![],
+    });
+    pad.action = Some(MbAction::SendPadding {
+        bypass: false,
+        replace: false,
+        timeout: Dist::new(DistType::Uniform { low: low_us, high: high_us }, 0.0, 0.0),
+        limit: None,
+    });
+    // Per-machine max_padding_frac 1.0: let the framework-wide cap govern.
+    Machine::new(allowed, 1.0, 0, 0.0, vec![boot, pad]).expect("valid padding machine")
+}
+
+/// An occasional blocking machine. A short while after a normal packet is sent
+/// it blocks outgoing traffic for a few milliseconds, so real packets are held
+/// and then released in a small burst — breaking up fine-grained inter-packet
+/// timing. It re-arms after each blocking window. `allowed_blocked_microsec`
+/// gives a free budget before the framework's `max_blocking_frac` cap applies.
+fn jitter_block_machine() -> Machine {
+    let boot = MbState::new(enum_map! {
+        MbEvent::NormalSent => vec![Trans(1, 1.0)],
+        _ => vec![],
+    });
+    let mut block = MbState::new(enum_map! {
+        MbEvent::BlockingEnd => vec![Trans(1, 1.0)],
+        MbEvent::NormalSent => vec![Trans(1, 1.0)],
+        _ => vec![],
+    });
+    block.action = Some(MbAction::BlockOutgoing {
+        bypass: false,
+        replace: false,
+        timeout: Dist::new(DistType::Uniform { low: 10_000.0, high: 60_000.0 }, 0.0, 0.0),
+        duration: Dist::new(DistType::Uniform { low: 2_000.0, high: 8_000.0 }, 0.0, 0.0),
+        limit: None,
+    });
+    Machine::new(0, 0.0, 200_000, 1.0, vec![boot, block]).expect("valid block machine")
+}
+
+/// What one machine's action timer, once it fires, tells the shaper to do.
+#[derive(Clone, Copy)]
+enum ScheduledAction {
+    None,
+    Padding { bypass: bool },
+    Block { duration: Duration, bypass: bool, replace: bool },
+}
+
+/// The result of advancing the shaper — what the I/O layer must do now.
+pub struct ShaperPoll {
+    /// Emit this many padding (cover) packets now.
+    pub send_padding: u32,
+    /// A blocking window ended during this poll: flush any packets queued while
+    /// blocked.
+    pub blocking_ended: bool,
+    /// When to poll again (the soonest pending timer), if any.
+    pub wakeup: Option<Instant>,
+}
+
+/// SHAIP-SHAPE/1 — the client-side traffic-analysis defence. See the module
+/// section header above.
+pub struct TrafficShaper {
+    fw: Framework<Vec<Machine>, StdRng, Instant>,
+    n: usize,
+    /// Per-machine action timer (padding / begin-blocking), and what it does.
+    action_at: Vec<Option<Instant>>,
+    action_kind: Vec<ScheduledAction>,
+    /// Per-machine internal timer (fires `TimerEnd`).
+    internal_at: Vec<Option<Instant>>,
+    /// Framework-scoped blocking window.
+    block_until: Option<Instant>,
+    block_bypassable: bool,
+    /// Honest counters for metrics (no customer data — just totals).
+    padding_emitted: u64,
+    blocking_windows: u64,
+}
+
+enum Due {
+    Action(usize),
+    Internal(usize),
+}
+
+impl TrafficShaper {
+    /// Build a shaper for a defence spec, starting its clock at `now`.
+    pub fn new(spec: &ShapeSpec, now: Instant) -> anyhow::Result<Self> {
+        let machines = spec.machines.clone();
+        let n = machines.len();
+        // A seedable, Send RNG (ChaCha-based) so the shaper can live behind a
+        // mutex shared across the send/recv/driver tasks.
+        let rng = StdRng::from_os_rng();
+        let fw = Framework::new(machines, spec.max_padding_frac, spec.max_blocking_frac, now, rng)
+            .map_err(|e| anyhow::anyhow!("maybenot framework: {e}"))?;
+        Ok(Self {
+            fw,
+            n,
+            action_at: vec![None; n],
+            action_kind: vec![ScheduledAction::None; n],
+            internal_at: vec![None; n],
+            block_until: None,
+            block_bypassable: false,
+            padding_emitted: 0,
+            blocking_windows: 0,
+        })
+    }
+
+    /// Total padding packets this shaper has told the I/O layer to emit.
+    pub fn padding_emitted(&self) -> u64 {
+        self.padding_emitted
+    }
+
+    /// Total blocking windows opened.
+    pub fn blocking_windows(&self) -> u64 {
+        self.blocking_windows
+    }
+
+    // --- event reporters, called by the I/O layer ---
+
+    /// A real (non-padding) packet was queued to send.
+    pub fn on_normal_sent(&mut self, now: Instant) {
+        self.trigger(vec![TriggerEvent::NormalSent], now);
+    }
+
+    /// A packet (any kind) was actually written to the network.
+    pub fn on_tunnel_sent(&mut self, now: Instant) {
+        self.trigger(vec![TriggerEvent::TunnelSent], now);
+    }
+
+    /// A real (non-padding) packet was received.
+    pub fn on_normal_recv(&mut self, now: Instant) {
+        self.trigger(vec![TriggerEvent::TunnelRecv, TriggerEvent::NormalRecv], now);
+    }
+
+    /// A padding packet was received.
+    pub fn on_padding_recv(&mut self, now: Instant) {
+        self.trigger(vec![TriggerEvent::TunnelRecv, TriggerEvent::PaddingRecv], now);
+    }
+
+    /// Is outgoing real traffic currently blocked (so the caller must queue it)?
+    pub fn blocking(&self, now: Instant) -> bool {
+        self.block_until.map(|u| now < u).unwrap_or(false)
+    }
+
+    /// Feed events into the framework and apply the resulting actions to the
+    /// timers. Any immediate feedback events (a `TimerBegin` from `UpdateTimer`)
+    /// are fed back in a bounded loop so machines settle within one call.
+    fn trigger(&mut self, events: Vec<TriggerEvent>, now: Instant) {
+        let mut pending = events;
+        let mut guard = 0;
+        while !pending.is_empty() && guard < 256 {
+            guard += 1;
+            // Collect the borrowed actions before mutating self's timers.
+            let mut actions: Vec<TriggerAction<Instant>> = Vec::new();
+            for a in self.fw.trigger_events(&pending, now) {
+                actions.push(a.clone());
+            }
+            pending.clear();
+            for a in actions {
+                if let Some(ev) = self.apply(a, now) {
+                    pending.push(ev);
+                }
+            }
+        }
+    }
+
+    /// Apply one action to the timers. Returns a feedback event to re-feed
+    /// immediately (only `UpdateTimer` has one: `TimerBegin`); padding/blocking
+    /// feedback (`PaddingSent`/`BlockingBegin`) fires later, from [`poll`], when
+    /// the action timer actually expires.
+    fn apply(&mut self, a: TriggerAction<Instant>, now: Instant) -> Option<TriggerEvent> {
+        match a {
+            TriggerAction::Cancel { machine, timer } => {
+                let i = machine.into_raw();
+                match timer {
+                    MbTimer::Action => {
+                        self.action_at[i] = None;
+                        self.action_kind[i] = ScheduledAction::None;
+                    }
+                    MbTimer::Internal => self.internal_at[i] = None,
+                    MbTimer::All => {
+                        self.action_at[i] = None;
+                        self.action_kind[i] = ScheduledAction::None;
+                        self.internal_at[i] = None;
+                    }
+                }
+                None
+            }
+            TriggerAction::SendPadding { timeout, bypass, replace: _, machine } => {
+                let i = machine.into_raw();
+                self.action_at[i] = Some(now + timeout);
+                self.action_kind[i] = ScheduledAction::Padding { bypass };
+                None
+            }
+            TriggerAction::BlockOutgoing { timeout, duration, bypass, replace, machine } => {
+                let i = machine.into_raw();
+                self.action_at[i] = Some(now + timeout);
+                self.action_kind[i] = ScheduledAction::Block { duration, bypass, replace };
+                None
+            }
+            TriggerAction::UpdateTimer { duration, replace, machine } => {
+                let i = machine.into_raw();
+                let target = now + duration;
+                // replace=false keeps the longest of remaining/specified.
+                self.internal_at[i] = Some(match (self.internal_at[i], replace) {
+                    (Some(cur), false) => cur.max(target),
+                    _ => target,
+                });
+                Some(TriggerEvent::TimerBegin { machine })
+            }
+        }
+    }
+
+    /// Advance all timers that are due at `now`, performing their effects
+    /// (counting padding to emit, opening/closing blocking windows) and feeding
+    /// the resulting events back into the framework. Returns what the I/O layer
+    /// must do now and when to poll next.
+    pub fn poll(&mut self, now: Instant) -> ShaperPoll {
+        let mut send_padding = 0u32;
+        let mut blocking_ended = false;
+        let mut guard = 0;
+        loop {
+            guard += 1;
+            if guard > 4096 {
+                break; // safety net against a pathological machine
+            }
+
+            // 1. Framework-scoped blocking window expiry.
+            if let Some(until) = self.block_until {
+                if now >= until {
+                    self.block_until = None;
+                    self.block_bypassable = false;
+                    blocking_ended = true;
+                    self.trigger(vec![TriggerEvent::BlockingEnd], now);
+                    continue;
+                }
+            }
+
+            // 2. Earliest due action/internal timer across machines.
+            let mut best: Option<(Instant, Due)> = None;
+            for i in 0..self.n {
+                if let Some(at) = self.action_at[i] {
+                    if at <= now && best.as_ref().map(|(t, _)| at < *t).unwrap_or(true) {
+                        best = Some((at, Due::Action(i)));
+                    }
+                }
+                if let Some(at) = self.internal_at[i] {
+                    if at <= now && best.as_ref().map(|(t, _)| at < *t).unwrap_or(true) {
+                        best = Some((at, Due::Internal(i)));
+                    }
+                }
+            }
+            let Some((_, due)) = best else { break };
+
+            match due {
+                Due::Action(i) => {
+                    let kind = self.action_kind[i];
+                    self.action_at[i] = None;
+                    self.action_kind[i] = ScheduledAction::None;
+                    match kind {
+                        ScheduledAction::Padding { bypass } => {
+                            if self.can_emit_padding(bypass, now) {
+                                send_padding += 1;
+                                self.padding_emitted += 1;
+                            }
+                            // PaddingSent is reported regardless (spec), so the
+                            // machine advances and accounting stays correct.
+                            self.trigger(
+                                vec![TriggerEvent::PaddingSent { machine: MachineId::from_raw(i) }],
+                                now,
+                            );
+                        }
+                        ScheduledAction::Block { duration, bypass, replace } => {
+                            let target = now + duration;
+                            let was_blocking =
+                                self.block_until.map(|u| now < u).unwrap_or(false);
+                            self.block_until = Some(match (self.block_until, replace) {
+                                (Some(cur), false) => cur.max(target), // longest
+                                _ => target,                           // replace / fresh
+                            });
+                            self.block_bypassable = bypass;
+                            if !was_blocking {
+                                self.blocking_windows += 1;
+                            }
+                            self.trigger(
+                                vec![TriggerEvent::BlockingBegin { machine: MachineId::from_raw(i) }],
+                                now,
+                            );
+                        }
+                        ScheduledAction::None => {}
+                    }
+                }
+                Due::Internal(i) => {
+                    self.internal_at[i] = None;
+                    self.trigger(
+                        vec![TriggerEvent::TimerEnd { machine: MachineId::from_raw(i) }],
+                        now,
+                    );
+                }
+            }
+        }
+
+        // Next wakeup: the soonest remaining timer or the blocking expiry.
+        let mut wakeup: Option<Instant> = self.block_until;
+        for i in 0..self.n {
+            for t in [self.action_at[i], self.internal_at[i]] {
+                if let Some(at) = t {
+                    wakeup = Some(wakeup.map(|w| w.min(at)).unwrap_or(at));
+                }
+            }
+        }
+        ShaperPoll { send_padding, blocking_ended, wakeup }
+    }
+
+    /// Whether a padding packet may physically go out now. During a blocking
+    /// window it may only if the blocking is bypassable and the padding has the
+    /// bypass flag; otherwise it is dropped (conservatively: less padding, never
+    /// a leak), while `PaddingSent` is still reported so accounting is correct.
+    fn can_emit_padding(&self, bypass: bool, now: Instant) -> bool {
+        match self.block_until {
+            Some(until) if now < until => self.block_bypassable && bypass,
+            _ => true,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -484,5 +941,115 @@ mod tests {
         assert!(err.to_string().contains("new handshake"), "{err}");
         assert_eq!(client.next_seq, REJECT_AFTER_SEQ, "state unchanged by the refused seal");
         const { assert!(REKEY_AFTER_SEQ < REJECT_AFTER_SEQ) };
+    }
+
+    // --- SHAIP-SHAPE/1 traffic-analysis defence -----------------------------
+
+    #[test]
+    fn shape_preset_parsing() {
+        assert_eq!(ShapePreset::parse("off"), Some(ShapePreset::Off));
+        assert_eq!(ShapePreset::parse("none"), Some(ShapePreset::Off));
+        assert_eq!(ShapePreset::parse(""), Some(ShapePreset::Off));
+        assert_eq!(ShapePreset::parse("Light"), Some(ShapePreset::Light));
+        assert_eq!(ShapePreset::parse(" MEDIUM "), Some(ShapePreset::Medium));
+        assert_eq!(ShapePreset::parse("bogus"), None);
+        assert!(ShapeSpec::preset(ShapePreset::Off).is_none());
+        assert!(ShapeSpec::preset(ShapePreset::Light).is_some());
+        assert!(ShapeSpec::preset(ShapePreset::Medium).is_some());
+    }
+
+    #[test]
+    fn shape_light_emits_bounded_padding() {
+        let spec = ShapeSpec::preset(ShapePreset::Light).unwrap();
+        let t0 = Instant::now();
+        let mut sh = TrafficShaper::new(&spec, t0).unwrap();
+        // One real packet starts the flow; then it goes idle.
+        sh.on_normal_sent(t0);
+        let mut total = 0u32;
+        let mut t = t0;
+        for _ in 0..2_000 {
+            t += Duration::from_millis(5); // 10 s of simulated time
+            total += sh.poll(t).send_padding;
+        }
+        assert!(total >= 1, "light shaping must emit some padding after a send");
+        // Bounded by the free budget (100) plus the fraction cap; never runaway.
+        assert!(total <= 130, "padding must stay bounded, got {total}");
+        assert_eq!(u64::from(total), sh.padding_emitted());
+    }
+
+    #[test]
+    fn shape_padding_fraction_is_capped_under_load() {
+        // Drive a steady stream of normal packets and confirm padding does not
+        // exceed roughly budget + max_padding_frac * normals (+ slack).
+        let spec = ShapeSpec::preset(ShapePreset::Light).unwrap(); // frac 0.5, budget 100
+        let t0 = Instant::now();
+        let mut sh = TrafficShaper::new(&spec, t0).unwrap();
+        let mut t = t0;
+        let mut normals = 0u64;
+        for _ in 0..4_000 {
+            t += Duration::from_millis(5); // 20 s
+                                           // ~20 normal packets/second.
+            if normals < 400 {
+                sh.on_normal_sent(t);
+                normals += 1;
+            }
+            sh.poll(t);
+        }
+        // Maybenot caps padding as a fraction of *total* packets:
+        // padding / (padding + normal) < max_padding_frac. With the light
+        // preset's 0.5 cap (and the small free budget long since spent at this
+        // volume), the realized fraction must sit at or just under 0.5.
+        let padding = sh.padding_emitted();
+        let frac = padding as f64 / (padding + normals) as f64;
+        assert!(
+            frac <= 0.5 + 0.05,
+            "padding fraction {frac:.3} exceeded the 0.5 cap (padding {padding}, normals {normals})"
+        );
+        assert!(padding > 0, "shaping should have emitted padding under load");
+    }
+
+    #[test]
+    fn shape_medium_blocks_and_releases() {
+        let spec = ShapeSpec::preset(ShapePreset::Medium).unwrap();
+        let t0 = Instant::now();
+        let mut sh = TrafficShaper::new(&spec, t0).unwrap();
+        sh.on_normal_sent(t0);
+        let mut saw_end = false;
+        let mut t = t0;
+        for _ in 0..4_000 {
+            t += Duration::from_millis(5); // 20 s
+            if sh.poll(t).blocking_ended {
+                saw_end = true;
+            }
+        }
+        assert!(sh.blocking_windows() >= 1, "medium shaping must open a blocking window");
+        assert!(saw_end, "and must report the window ending so the queue is flushed");
+    }
+
+    #[test]
+    fn shape_from_serialized_roundtrips_and_rejects_garbage() {
+        let m = padding_machine(5_000.0, 5_000.0, 10);
+        let serialized = m.serialize();
+        let spec = ShapeSpec::from_serialized(&[serialized], 0.3, 0.0).unwrap();
+        assert_eq!(spec.machines.len(), 1);
+        TrafficShaper::new(&spec, Instant::now()).unwrap();
+        assert!(ShapeSpec::from_serialized(&["not-a-machine".to_string()], 0.1, 0.0).is_err());
+    }
+
+    #[test]
+    fn shape_off_equivalent_empty_spec_is_inert() {
+        // A spec with no machines produces no actions at all.
+        let spec = ShapeSpec { machines: vec![], max_padding_frac: 0.0, max_blocking_frac: 0.0 };
+        let t0 = Instant::now();
+        let mut sh = TrafficShaper::new(&spec, t0).unwrap();
+        sh.on_normal_sent(t0);
+        let mut t = t0;
+        for _ in 0..200 {
+            t += Duration::from_millis(5);
+            let p = sh.poll(t);
+            assert_eq!(p.send_padding, 0);
+            assert!(!sh.blocking(t));
+        }
+        assert_eq!(sh.padding_emitted(), 0);
     }
 }

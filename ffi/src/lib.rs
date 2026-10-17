@@ -149,6 +149,7 @@ impl ConnectArgs {
             identity,
             device_cert,
             handshake_timeout: Duration::from_millis(u64::from(self.timeout_ms.max(1))),
+            shaping: None,
         })
     }
 }

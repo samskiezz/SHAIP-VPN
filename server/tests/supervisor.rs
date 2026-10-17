@@ -141,6 +141,7 @@ async fn scenario(dir: PathBuf) {
         identity: Identity::generate(),
         device_cert: None,
         handshake_timeout: Duration::from_secs(2),
+        shaping: None,
     });
     cfg.keepalive = Duration::from_millis(300);
     cfg.dead_after = Duration::from_millis(1500);

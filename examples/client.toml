@@ -17,6 +17,22 @@ tun_device  = "shaip-c0"
 # Used only if the server assigns no address (an echo-mode test server).
 tun_address = "10.77.0.2/24"
 
+# Traffic-analysis defence (SHAIP-SHAPE/1). Even though every datagram is
+# encrypted and length-shaped, the *timing* of your upstream packets still forms
+# a recognizable pattern. This runs the Maybenot framework to inject padding
+# (cover) packets — and, on "medium", to briefly hold real packets — so that
+# pattern is hidden. It defends upstream (client→server) traffic only; it adds
+# cover traffic and, on "medium", a little latency.
+#   off     — none (default): packets leave exactly when you send them.
+#   light   — low-overhead gap-filling padding (≤ ~50% padding), no blocking.
+#   medium  — more padding plus occasional brief blocking (a few ms of latency).
+traffic_shaping = "off"
+# Advanced: supply your own tuned, serialized Maybenot machines instead of a
+# preset (overrides traffic_shaping when non-empty), with explicit overhead caps.
+# shaping_machines = ["02eNp..."]
+# max_padding_frac  = 0.5   # cap on padding as a fraction of total packets
+# max_blocking_frac = 0.0   # cap on blocking time as a fraction of elapsed time
+
 [server]
 address           = "vpn.example.com:443"
 # Pins: paste the output of `shaipd --identity <file> --print-public` on the

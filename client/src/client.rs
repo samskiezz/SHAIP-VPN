@@ -25,11 +25,13 @@ use crate::ctl::{self, Keepalive};
 use crate::dataplane::DataPlane;
 use crate::handshake::{ClientHandshake, Identity, PeerPublic};
 use crate::obf::{BootKey, Obfuscator, Reassembly, AMPLIFICATION_LIMIT, BOOT_DATAGRAM};
-use crate::transport::{Session, REKEY_AFTER_SEQ};
+use crate::transport::{Session, ShapeSpec, TrafficShaper, REKEY_AFTER_SEQ};
 use crate::wire::{Envelope, MsgType};
 use anyhow::{anyhow, bail, Context, Result};
+use std::collections::VecDeque;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::net::UdpSocket;
 
@@ -67,6 +69,11 @@ pub struct ClientConfig {
     pub device_cert: Option<String>,
     /// How long to wait for the handshake and the server's confirmation.
     pub handshake_timeout: Duration,
+    /// SHAIP-SHAPE/1 traffic-analysis defence to run on the send path, if any.
+    /// `None` means no shaping (packets leave exactly when the app sends them).
+    /// Shared (Arc) so one spec drives every session a link opens; each session
+    /// builds its own fresh shaper runtime from it.
+    pub shaping: Option<Arc<ShapeSpec>>,
 }
 
 /// What the server tells the client when it confirms the session.
@@ -203,6 +210,13 @@ pub struct Tunnel {
     sock: UdpSocket,
     dp: std::sync::Mutex<DataPlane>,
     recv_buf: tokio::sync::Mutex<Vec<u8>>,
+    /// SHAIP-SHAPE/1 traffic-analysis defence, when enabled. Sync-locked and
+    /// held only for short, await-free critical sections across the send, recv,
+    /// and driver tasks.
+    shaper: Option<std::sync::Mutex<TrafficShaper>>,
+    /// Real packets held back while a shaping blocking window is open, flushed
+    /// in order by the shaping driver when the window ends.
+    blocked: tokio::sync::Mutex<VecDeque<Vec<u8>>>,
     conn_id: u64,
     server_id: [u8; 16],
     server_addr: SocketAddr,
@@ -313,10 +327,20 @@ impl Tunnel {
             )
         })??;
 
+        // Build this session's traffic-shaping runtime from the shared spec, if
+        // shaping is enabled. A failure to build is fatal to shaping only — we
+        // never silently fall back to an unshaped session when one was asked for.
+        let shaper = match &cfg.shaping {
+            Some(spec) => Some(std::sync::Mutex::new(TrafficShaper::new(spec, Instant::now())?)),
+            None => None,
+        };
+
         Ok(Tunnel {
             sock,
             dp: std::sync::Mutex::new(dp),
             recv_buf: tokio::sync::Mutex::new(buf),
+            shaper,
+            blocked: tokio::sync::Mutex::new(VecDeque::new()),
             conn_id: est.conn_id,
             server_id: est.peer_id,
             server_addr: server,
@@ -331,12 +355,116 @@ impl Tunnel {
     }
 
     /// Seal, morph, and send one IP packet.
+    ///
+    /// With SHAIP-SHAPE/1 enabled, the packet is first reported to the shaper as
+    /// a normal send; if a shaping blocking window is open (or packets are
+    /// already queued behind one), it is held in order and the shaping driver
+    /// releases it when the window ends. Otherwise it goes out immediately.
     pub async fn send(&self, ip_packet: &[u8]) -> Result<()> {
+        if let Some(shaper) = &self.shaper {
+            let now = Instant::now();
+            let hold = {
+                let mut s = shaper.lock().expect("shaper lock");
+                s.on_normal_sent(now);
+                s.blocking(now)
+            };
+            // Preserve ordering: once anything is queued behind a blocking
+            // window, keep queuing until the driver drains it.
+            let mut q = self.blocked.lock().await;
+            if hold || !q.is_empty() {
+                q.push_back(ip_packet.to_vec());
+                return Ok(());
+            }
+        }
+        self.transmit_data(ip_packet).await
+    }
+
+    /// Seal + morph + write one real IP packet now, updating the data counters
+    /// and reporting the on-the-wire send to the shaper.
+    async fn transmit_data(&self, ip_packet: &[u8]) -> Result<()> {
         let wire = self.dp.lock().expect("dataplane lock").outbound(ip_packet)?;
         self.sock.send(&wire).await?;
         self.counters.packets_sent.fetch_add(1, Ordering::Relaxed);
         self.counters.bytes_sent.fetch_add(ip_packet.len() as u64, Ordering::Relaxed);
+        if let Some(shaper) = &self.shaper {
+            shaper.lock().expect("shaper lock").on_tunnel_sent(Instant::now());
+        }
         Ok(())
+    }
+
+    /// Emit one padding (cover) packet for the traffic-analysis defence. Its
+    /// payload is random-length within the tunnel MTU; sealed and OBF/2
+    /// length-shaped it lands in the same size buckets as a DATA packet, so it
+    /// is indistinguishable from real traffic on the wire. It is counted as
+    /// cover (not in the data byte counters), and the receiver ignores it.
+    async fn send_padding(&self) -> Result<()> {
+        use rand::Rng;
+        let len = rand::thread_rng().gen_range(0..=TUNNEL_MTU as usize);
+        let payload = vec![0u8; len]; // sealed → ciphertext, so content is irrelevant
+        let wire = self.dp.lock().expect("dataplane lock").seal(MsgType::Cover, payload)?;
+        self.sock.send(&wire).await?;
+        if let Some(shaper) = &self.shaper {
+            shaper.lock().expect("shaper lock").on_tunnel_sent(Instant::now());
+        }
+        Ok(())
+    }
+
+    /// Release every packet queued behind a (now-ended) blocking window, in
+    /// order. New sends that arrive mid-flush see a non-empty queue and append,
+    /// so ordering holds.
+    async fn flush_blocked(&self) -> Result<()> {
+        loop {
+            let pkt = self.blocked.lock().await.pop_front();
+            match pkt {
+                Some(p) => self.transmit_data(&p).await?,
+                None => return Ok(()),
+            }
+        }
+    }
+
+    /// Whether shaping is holding outgoing traffic right now.
+    fn shaping_blocking(&self) -> bool {
+        self.shaper
+            .as_ref()
+            .map(|s| s.lock().expect("shaper lock").blocking(Instant::now()))
+            .unwrap_or(false)
+    }
+
+    /// The traffic-shaping driver: performs the shaper's scheduled actions
+    /// (emit padding, release blocked packets) and sleeps until the next one is
+    /// due. Runs for the life of a session; the supervisor spawns one per
+    /// session and drops it when the session is superseded. A no-op (returns
+    /// immediately) when shaping is disabled.
+    pub async fn drive_shaping(&self) {
+        if self.shaper.is_none() {
+            return;
+        }
+        loop {
+            let (emit, wakeup) = {
+                let shaper = self.shaper.as_ref().unwrap();
+                let mut s = shaper.lock().expect("shaper lock");
+                let poll = s.poll(Instant::now());
+                (poll.send_padding, poll.wakeup)
+            };
+            for _ in 0..emit {
+                if let Err(e) = self.send_padding().await {
+                    tracing::debug!(error = %format!("{e:#}"), "padding send failed");
+                    return; // socket is gone; the session will be replaced
+                }
+            }
+            if !self.shaping_blocking() {
+                if let Err(e) = self.flush_blocked().await {
+                    tracing::debug!(error = %format!("{e:#}"), "blocked-queue flush failed");
+                    return;
+                }
+            }
+            let now = Instant::now();
+            let dur = wakeup
+                .map(|w| w.saturating_duration_since(now))
+                .unwrap_or(Duration::from_millis(100))
+                .clamp(Duration::from_millis(2), Duration::from_millis(250));
+            tokio::time::sleep(dur).await;
+        }
     }
 
     /// Receive the next IP packet. Keepalive and cover traffic are handled here
@@ -363,15 +491,25 @@ impl Tunnel {
                 MsgType::Data => {
                     self.counters.packets_received.fetch_add(1, Ordering::Relaxed);
                     self.counters.bytes_received.fetch_add(env.payload.len() as u64, Ordering::Relaxed);
+                    if let Some(shaper) = &self.shaper {
+                        shaper.lock().expect("shaper lock").on_normal_recv(Instant::now());
+                    }
                     return Ok(env.payload);
                 }
-                MsgType::Cover => match ctl::parse(&env.payload) {
-                    Some(Keepalive::Pong(nonce)) => self.on_pong(nonce),
-                    Some(Keepalive::Ping(nonce)) => {
-                        let _ = self.send_control(MsgType::Cover, ctl::pong(nonce)).await;
+                MsgType::Cover => {
+                    // On the wire a cover datagram is indistinguishable from data;
+                    // for the shaper's recv-driven machines it counts as padding.
+                    if let Some(shaper) = &self.shaper {
+                        shaper.lock().expect("shaper lock").on_padding_recv(Instant::now());
                     }
-                    None => {} // cover traffic
-                },
+                    match ctl::parse(&env.payload) {
+                        Some(Keepalive::Pong(nonce)) => self.on_pong(nonce),
+                        Some(Keepalive::Ping(nonce)) => {
+                            let _ = self.send_control(MsgType::Cover, ctl::pong(nonce)).await;
+                        }
+                        None => {} // cover traffic
+                    }
+                }
                 MsgType::Close => return Err(SessionClosed.into()),
                 _ => {} // e.g. a duplicate ACK
             }
@@ -458,6 +596,16 @@ impl Tunnel {
     /// The server's UDP address (the one the handshake resolved and used).
     pub fn server_addr(&self) -> SocketAddr {
         self.server_addr
+    }
+
+    /// Padding (cover) packets the traffic-analysis defence has emitted on this
+    /// session (0 when shaping is disabled). An honest aggregate — no per-packet
+    /// or customer data, just a count.
+    pub fn shaper_padding_emitted(&self) -> u64 {
+        self.shaper
+            .as_ref()
+            .map(|s| s.lock().expect("shaper lock").padding_emitted())
+            .unwrap_or(0)
     }
 
     pub fn stats(&self) -> TunnelStats {

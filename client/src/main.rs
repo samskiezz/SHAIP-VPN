@@ -656,6 +656,9 @@ fn load_client_toml(path: &str, timeout: std::time::Duration) -> Result<ClientTo
         None => None,
     };
 
+    // SHAIP-SHAPE/1 traffic-analysis defence (optional). See `parse_shaping`.
+    let shaping = parse_shaping(&cfg)?;
+
     Ok(ClientToml {
         tunnel: shaip::client::ClientConfig {
             server,
@@ -663,10 +666,61 @@ fn load_client_toml(path: &str, timeout: std::time::Duration) -> Result<ClientTo
             identity,
             device_cert,
             handshake_timeout: timeout,
+            shaping,
         },
         tun_device: gstr("client", "tun_device").unwrap_or_else(|| "shaip-c0".into()),
         tun_address: gstr("client", "tun_address"),
     })
+}
+
+/// Parse the optional traffic-shaping configuration from `[client]`:
+///
+/// - `traffic_shaping = "off" | "light" | "medium"` selects a built-in preset
+///   (default `off`).
+/// - `shaping_machines = ["02eNp…", …]` with `max_padding_frac` /
+///   `max_blocking_frac` (floats in `[0,1]`) supplies operator-tuned, serialized
+///   Maybenot machines directly; when present it overrides the preset.
+fn parse_shaping(
+    cfg: &toml::Value,
+) -> Result<Option<std::sync::Arc<shaip::transport::ShapeSpec>>> {
+    use shaip::transport::{ShapePreset, ShapeSpec};
+    let client = cfg.get("client");
+    let getf = |k: &str, d: f64| {
+        client
+            .and_then(|c| c.get(k))
+            .and_then(|v| v.as_float())
+            .unwrap_or(d)
+    };
+
+    // Explicit serialized machines take precedence over the preset.
+    if let Some(arr) = client
+        .and_then(|c| c.get("shaping_machines"))
+        .and_then(|v| v.as_array())
+    {
+        let machines: Vec<String> = arr
+            .iter()
+            .filter_map(|v| v.as_str().map(str::to_string))
+            .collect();
+        if !machines.is_empty() {
+            let spec = ShapeSpec::from_serialized(
+                &machines,
+                getf("max_padding_frac", 0.5),
+                getf("max_blocking_frac", 0.0),
+            )?;
+            return Ok(Some(std::sync::Arc::new(spec)));
+        }
+    }
+
+    let preset_str = client
+        .and_then(|c| c.get("traffic_shaping"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("off");
+    let preset = ShapePreset::parse(preset_str).ok_or_else(|| {
+        anyhow::anyhow!(
+            "[client].traffic_shaping must be \"off\", \"light\", or \"medium\"; got {preset_str:?}"
+        )
+    })?;
+    Ok(ShapeSpec::preset(preset).map(std::sync::Arc::new))
 }
 
 /// `shaip run` options.
@@ -719,6 +773,8 @@ fn run(o: RunOpts) -> Result<()> {
             .ok_or_else(|| anyhow::anyhow!("{} did not resolve", cfg.tunnel.server))?;
 
         let net: Arc<OnceLock<FullTunnel>> = Arc::new(OnceLock::new());
+        // Captured before `cfg.tunnel` is moved into the supervisor config below.
+        let shaping_on = cfg.tunnel.shaping.is_some();
         let mut sup = SupervisorConfig::new(shaip::client::ClientConfig {
             server: server_addr.to_string(),
             ..cfg.tunnel
@@ -786,6 +842,17 @@ fn run(o: RunOpts) -> Result<()> {
             if full && !o.allow_ipv6_leak { "blocked" } else { "NOT blocked" },
             if o.kill_switch { "on" } else { "off" },
         );
+        if shaping_on {
+            println!(
+                "traffic-analysis defence: ON (SHAIP-SHAPE/1, upstream; padding + timing). \
+                 This adds cover traffic and some latency to hide the shape of your activity."
+            );
+        } else {
+            println!(
+                "traffic-analysis defence: off (set [client].traffic_shaping = \"light\" or \
+                 \"medium\" to hide the timing pattern of your traffic)."
+            );
+        }
 
         let up = tokio::spawn(pump_up(tun.clone(), link.clone()));
         let down = tokio::spawn(pump_down(tun.clone(), link.clone()));
@@ -881,7 +948,7 @@ async fn write_status(
         let text = format!(
             "pid={}\nstate={:?}\nserver={server}\nserver_identity={}\ndevice={device}\ntunnel_address={}\ndns={}\nmtu={}\n\
              rtt_ms={}\nup_since_unix={since}\npackets_sent={}\nbytes_sent={}\npackets_received={}\nbytes_received={}\n\
-             dropped_offline={}\nreconnects={}\nrekeys={}\nlast_error={}\n",
+             dropped_offline={}\nreconnects={}\nrekeys={}\npadding_sent={}\nlast_error={}\n",
             std::process::id(),
             st.state,
             hex::encode(st.server_identity),
@@ -896,6 +963,7 @@ async fn write_status(
             st.dropped_offline,
             st.reconnects,
             st.rekeys,
+            st.padding_sent,
             st.last_error.as_deref().unwrap_or("-"),
         );
         let _ = shaip::secure_write::write_private(&status_path(), text.as_bytes());

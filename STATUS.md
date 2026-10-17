@@ -33,6 +33,7 @@ Everything else below is real.
 |---|---|---|
 | PQ crypto + handshake (ML-KEM-768 + X25519, ML-DSA-65 + Ed25519, ChaCha20-Poly1305) | **Real** | `cargo test` (148 lib tests), `selftest` |
 | Wire obfuscation (OBF/2: per-packet header masking, boot-layer handshake) | **Real** | unit tests + the netns lab captures the wire: 0 fragments, 0 magic, no fixed bytes across a flow |
+| Traffic-analysis defence (SHAIP-SHAPE/1: upstream padding + timing, via the real Maybenot framework) | **Real — opt-in** | `cargo test` (6 shaper unit tests) + a loopback test proving padding on the wire with data intact + the netns lab (shaped client emits real cover packets). Client→server (upstream) only; off by default (`[client].traffic_shaping`) |
 | Anti-DoS retry cookie (address validation under load) | **Real** | `client/src/retry.rs` unit tests + server core test |
 | The IPv4 VPN tunnel end to end (TUN device, egress NAT, DNS forwarder, kill switch, reconnect) | **Real** | `scripts/e2e/vpn_lab.sh` — 47 checks, incl. a 16 MiB download byte-identical through the tunnel |
 | Go control plane: anonymous accounts, devices, API keys, node directory, staking/slashing, unlinkable payments, enrollment, signed CRL | **Real** | `go test` + live curl (register → login → API key → auth → delete; times day-coarsened) |
@@ -86,7 +87,14 @@ on the roadmap; none will be faked.
 ## Protocol limitations (accurate today)
 
 - **One hop, no mixnet in the data path.** The mix daemon exists and is tested
-  standalone; the tunnel does not route through it. No traffic-analysis defence.
+  standalone; the tunnel does not route through it.
+- **Traffic-analysis defence is upstream-only and opt-in.** SHAIP-SHAPE/1 runs
+  the real Maybenot framework to pad (and optionally briefly block) the
+  client→server direction, hiding its timing pattern. It is off by default and
+  defends upstream only — the server does not yet shape the download direction,
+  and the built-in `light`/`medium` presets are sensible baselines, not machines
+  tuned and evaluated against a specific website-fingerprinting classifier
+  (operators can drop in tuned machines via `[client].shaping_machines`).
 - **Recognizable to key-holders.** Without the server's keys every packet is
   random bytes; anyone holding a client config for that server can recognize its
   handshakes.

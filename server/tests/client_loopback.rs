@@ -108,6 +108,7 @@ fn config(d: &Daemon, pins: PeerPublic, timeout: Duration) -> ClientConfig {
         identity: Identity::generate(),
         device_cert: None,
         handshake_timeout: timeout,
+        shaping: None,
     }
 }
 
@@ -129,6 +130,52 @@ async fn confirmed_session_carries_packets_both_ways() {
     let s = t.stats();
     assert_eq!((s.packets_sent, s.packets_received, s.packets_dropped), (5, 5, 0));
     assert_eq!(s.bytes_sent, s.bytes_received);
+}
+
+/// SHAIP-SHAPE/1 on the live send path: with the real Maybenot framework driving
+/// the "light" preset, the client must emit real padding (cover) packets on the
+/// wire while real data still round-trips byte-identically, and the data
+/// counters must stay honest (they count data only, never padding).
+#[tokio::test]
+async fn traffic_shaping_emits_padding_and_still_carries_data() {
+    use shaip::transport::{ShapePreset, ShapeSpec};
+    let d = start(&[]);
+    let mut cfg = config(&d, d.pins.clone(), Duration::from_secs(5));
+    cfg.shaping = Some(Arc::new(ShapeSpec::preset(ShapePreset::Light).unwrap()));
+    let t = Arc::new(Tunnel::connect(cfg).await.expect("connect"));
+
+    // Drive the shaper in the background, exactly as the supervisor does per
+    // session (emit padding, flush any blocked packets).
+    let driver = {
+        let t = t.clone();
+        tokio::spawn(async move { t.drive_shaping().await })
+    };
+
+    // Real packets still echo back byte-identical through the tunnel; the pauses
+    // between them are the idle gaps the padding fills.
+    for i in 0..10u8 {
+        let pkt: Vec<u8> = (0..200).map(|b| (b as u8) ^ i).collect();
+        t.send(&pkt).await.unwrap();
+        let back = tokio::time::timeout(Duration::from_secs(2), t.recv())
+            .await
+            .expect("echo")
+            .unwrap();
+        assert_eq!(back, pkt, "data must still round-trip under shaping (packet {i})");
+        tokio::time::sleep(Duration::from_millis(30)).await;
+    }
+    // Let the driver emit padding into the trailing idle gap.
+    tokio::time::sleep(Duration::from_millis(400)).await;
+
+    assert!(
+        t.shaper_padding_emitted() > 0,
+        "the shaper must have emitted real padding packets on the wire"
+    );
+    // Data counters count real packets only — padding never inflates them.
+    let s = t.stats();
+    assert_eq!(s.packets_sent, 10, "data counter must exclude padding");
+    assert_eq!(s.packets_received, 10, "every real packet echoed back");
+
+    driver.abort();
 }
 
 #[tokio::test]

@@ -215,5 +215,37 @@ check "the server's logs never name the client's identity" bash -c \
 check "the server's logs have no line per session" bash -c \
   "! grep -hiE 'session (established|ended)|handshake (refused|ok)|CLIENT_HELLO' '$W'/server.*.log"
 
+echo "  -- traffic-analysis defence (SHAIP-SHAPE/1)"
+# A fresh client with the "light" shaping preset: the real Maybenot framework
+# injects padding (cover) packets into the gaps of the client's upstream traffic.
+# Server #3 is still listening from the resilience section above.
+cat > "$W/client-shaped.toml" <<EOF
+[client]
+identity        = "$W/cli.id"
+tun_device      = "pqc0"
+traffic_shaping = "light"
+
+[server]
+address           = "198.51.100.2:443"
+server_ml_dsa_pub = "$PQ"
+server_ed_pub     = "$ED"
+EOF
+SHAIP_STATE_DIR="$W/state" SHAIP_STATUS_FILE="$W/status-shaped" \
+  ip netns exec $C "$CLI" run --config "$W/client-shaped.toml" --keepalive-secs 1 --dead-secs 4 \
+  > "$W/client.shaped.log" 2>&1 &
+SCLI_PID=$!; PIDS+=($SCLI_PID)
+check "the shaped client connects" waitfor "$W/client.shaped.log" "^connected:" 150
+check "it announces the defence is on" grep -q "traffic-analysis defence: ON" "$W/client.shaped.log"
+# Real traffic through the tunnel, so there are idle gaps for padding to fill.
+ip netns exec $C curl -s --max-time 30 -o /dev/null http://vpn-2.test:8080/blob
+check "traffic still flows with shaping on" [ "$(get http://vpn-2.test:8080/)" = "caller=198.51.100.2" ]
+# Let the shaper emit padding into the trailing idle gap; the status file is
+# rewritten every 2 s.
+sleep 3
+check "the client emitted real padding (cover) packets on the wire" bash -c \
+  "[ \"\$(sed -n 's/^padding_sent=//p' '$W/status-shaped')\" -gt 0 ]"
+echo "     padding_sent=$(sed -n 's/^padding_sent=//p' "$W/status-shaped") (cover packets added to hide the upstream timing pattern)"
+kill -TERM $SCLI_PID; wait $SCLI_PID 2>/dev/null
+
 echo "  VPN lab: $ok checks passed, $bad failed"
 [ "$bad" -eq 0 ]

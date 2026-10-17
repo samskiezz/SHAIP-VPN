@@ -96,6 +96,9 @@ pub struct Status {
     pub reconnects: u32,
     /// Sessions replaced by a scheduled rekey.
     pub rekeys: u32,
+    /// Padding (cover) packets the traffic-analysis defence has emitted across
+    /// every session of this link (0 when shaping is off).
+    pub padding_sent: u64,
     /// Why the last session ended, or why the last attempt failed.
     pub last_error: Option<String>,
 }
@@ -112,6 +115,9 @@ struct Meta {
     server_addr: std::net::SocketAddr,
     up_since: Option<SystemTime>,
     finished: TunnelStats,
+    /// Padding packets emitted by sessions that have already ended (the live
+    /// session's are added in [`ManagedTunnel::status`]).
+    finished_padding: u64,
     reconnects: u32,
     rekeys: u32,
     last_error: Option<String>,
@@ -152,6 +158,7 @@ impl Shared {
             if let Some((_, old)) = cur.replace((gen, t.clone())) {
                 let mut m = self.meta.lock().expect("meta lock");
                 m.finished = m.finished + old.stats();
+                m.finished_padding += old.shaper_padding_emitted();
             }
             gen
         };
@@ -171,6 +178,7 @@ impl Shared {
                 Installed::Rekey => m.rekeys += 1,
             }
         }
+        self.spawn_shaper(gen, t.clone());
         self.spawn_reader(gen, t);
         self.bump_changes();
     }
@@ -179,6 +187,7 @@ impl Shared {
         if let Some((_, old)) = self.current.write().expect("current lock").take() {
             let mut m = self.meta.lock().expect("meta lock");
             m.finished = m.finished + old.stats();
+            m.finished_padding += old.shaper_padding_emitted();
         }
         self.generation.send_modify(|g| *g += 1);
         {
@@ -202,6 +211,18 @@ impl Shared {
         if self.reported.swap(gen, Ordering::AcqRel) != gen {
             let _ = self.fail_tx.send((gen, f));
         }
+    }
+
+    /// Run this session's traffic-shaping driver until the session is
+    /// superseded (a no-op when shaping is disabled, so it costs nothing then).
+    fn spawn_shaper(self: &Arc<Self>, gen: u64, t: Arc<Tunnel>) {
+        let mut generation = self.generation.subscribe();
+        tokio::spawn(async move {
+            tokio::select! {
+                _ = t.drive_shaping() => {}
+                _ = superseded(&mut generation, gen) => {}
+            }
+        });
     }
 
     /// Forward the session's packets to the consumer until it fails or is
@@ -260,6 +281,7 @@ impl ManagedTunnel {
                 server_addr: first.server_addr(),
                 up_since: None,
                 finished: TunnelStats::default(),
+                finished_padding: 0,
                 reconnects: 0,
                 rekeys: 0,
                 last_error: None,
@@ -328,6 +350,8 @@ impl ManagedTunnel {
             dropped_offline: self.shared.dropped_offline.load(Ordering::Relaxed),
             reconnects: m.reconnects,
             rekeys: m.rekeys,
+            padding_sent: m.finished_padding
+                + current.as_ref().map(|(_, t)| t.shaper_padding_emitted()).unwrap_or(0),
             last_error: m.last_error.clone(),
         }
     }
