@@ -1,0 +1,19 @@
+[package]
+name = "pqanon-desktop"
+version = "0.1.0"
+edition = "2021"
+description = "SHAIP / PQ·ANON desktop client (Linux + Windows), glass UI over the real control plane"
+
+[[bin]]
+name = "pqanon-desktop"
+path = "src/main.rs"
+
+[dependencies]
+eframe = { version = "0.28", default-features = false, features = ["glow", "default_fonts"] }
+egui = "0.28"
+ehttp = "0.5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Keep this crate out of the parent workspace.
+[workspace]

@@ -45,6 +45,8 @@ Everything else below is real.
 | iOS ↔ Rust boundary (the app's FFI Swift against a live `pqanond`) | **Real** | `clients/ios/FFIInterop` runs in the battery on Linux |
 | **Android app** (Kotlin + Jetpack Compose, same glass design; login, dashboard, Servers directory, devices, buy-access + code redeem; wired to the real control plane) | **Real — builds to an APK on Linux** | `cd clients/android && ./gradlew assembleDebug` → `app-debug.apk` (no macOS needed) |
 | Android VpnService (owns the TUN + connection lifecycle) | **Real skeleton** | `clients/android/.../vpn/PqanonVpnService.kt`; PQ data plane bridges the Rust core over JNI next (does not black-hole traffic until then) |
+| **Desktop app** (Rust + egui, same glass design; login, dashboard, Servers, Buy access + code redeem; wired to the real control plane) | **Real — cross-builds to Linux + Windows from Linux** | `cd clients/desktop && cargo build --release` (Linux ELF) and `--target x86_64-pc-windows-gnu` (Windows PE32+ GUI .exe); screens rendered headless under Xvfb |
+| Desktop tunnel control | **Real control surface** | drives the local `pqanon` engine (shared Rust core); honest when the engine isn't installed |
 | Full battery | **16 stages, 0 failed** | `scripts/test-all.sh` |
 
 ## What is written but UNVERIFIED (needs a Mac to compile)
