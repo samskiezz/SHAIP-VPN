@@ -70,6 +70,7 @@ pub mod hex_util;
 pub mod identity_check;
 pub mod mix_cover;
 pub mod mix_delay;
+pub mod mix_pq;
 pub mod mix_reputation;
 pub mod multipath;
 pub mod perm_check;
